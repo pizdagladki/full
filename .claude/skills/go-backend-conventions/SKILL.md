@@ -4,47 +4,52 @@ description: Canonical structure and layered architecture of this monorepo's Go 
 user-invocable: false
 ---
 
-## Adaptation for this monorepo
+# Go backend — canon for this monorepo
 
-This canon is written for a standalone service whose module is `backend`. In THIS repo it applies per
-service inside the single module `github.com/pizdagladki/full`:
+A reusable HTTP / WebSocket / worker backend skeleton in Go. Clean (layered) architecture:
+`delivery → service → repository → domain`, plus an application-assembly layer (`app`), a configuration
+layer (`config`), and background workers. Dependencies point strictly inward — `delivery` knows `service`,
+`service` knows `repository` + `domain`, `repository` knows `domain`. There are no reverse dependencies.
 
-- Each service lives at `services/<name>/` and has its OWN `internal/` (private to that service — Go
-  visibility enforces this). The tree below (`cmd/`, `internal/...`) is rooted at `services/<name>/`.
-- Internal imports are `github.com/pizdagladki/full/services/<name>/internal/...`.
-- Shared infrastructure (logger, DB) lives in the ROOT `internal/platform/...` and is imported as
-  `github.com/pizdagladki/full/internal/platform/...` — do NOT duplicate it inside a service.
-- There is no per-service `go.mod`/`go.sum`/`.gitignore`/`README.md` — those are at the repo root. Each
-  service keeps only `cmd/`, `internal/`, `Makefile`, `Dockerfile`, `CLAUDE.md`.
-- `docker-compose.yml` and `.env.example` live in the repo's `deploy/`.
+## Module & layout (this repo)
 
-Everything else below is the source of truth.
+- ONE module for the whole repo: `github.com/pizdagladki/full` (never `backend`).
+- A service lives at `services/<name>/` with its OWN `internal/` (private to that service — Go visibility
+  enforces this). Service-private imports: `github.com/pizdagladki/full/services/<name>/internal/...`.
+- Shared infrastructure lives in the ROOT `internal/platform/...` and is imported as
+  `github.com/pizdagladki/full/internal/platform/...` — services use it, never duplicate it.
+- `go.mod` / `go.sum` / `.gitignore` / the root `README.md` are at the repo root; `docker-compose.yml` and
+  `.env.example` live in `deploy/`. A service directory contains ONLY: `cmd/`, `internal/`, `migrations/`
+  (if it owns tables), `Makefile`, `Dockerfile`, `CLAUDE.md`.
 
----
+## Stack
 
-# Go Backend — project structure (template)
+- **HTTP**: `net/http` standard library — `http.ServeMux` with Go 1.22+ method+pattern routing
+  (`mux.HandleFunc("POST /v1/...", h)`). No third-party web framework.
+- **Realtime**: `github.com/gorilla/websocket` — signaling (SDP/ICE exchange), matchmaking, and
+  server-side time arbitration.
+- **Database**: PostgreSQL via `github.com/jackc/pgx/v5` + `pgxpool`. The repository layer writes SQL by
+  hand and maps rows → domain models. Wrap any multi-step, money-touching flow in an explicit transaction.
+  Use JSONB columns for flexible fields (e.g. distractor metadata).
+- **Migrations**: `golang-migrate` — paired SQL `NNNN_<name>.up.sql` / `.down.sql` in the service's
+  `migrations/`; a `make migrate` target applies them. (This is a real concern with Postgres — schema is
+  explicit, unlike a schemaless store.)
+- **Cache / coordination**: Redis via `github.com/redis/go-redis/v9` — matchmaking queue, hot-data cache
+  (e.g. ratings), cooldowns, and sessions.
+- **Object storage**: `github.com/minio/minio-go/v7` (MinIO now; the same API targets S3 later).
+- **Auth**: Google OAuth via `golang.org/x/oauth2` + `.../oauth2/google`. The session is stored in Redis;
+  `auth_middleware.RequireAuth` validates the session; `auth_repository` persists the user in Postgres.
+- **Payments**: Stripe via `github.com/stripe/stripe-go` behind a `PaymentProvider` interface in the service
+  layer, so an alternative (e.g. an RF) provider drops in without touching purchase logic.
+- **Media**: WebM → MP4 conversion shells out to `ffmpeg` via `os/exec` (NOT pure Go).
+- **Logging**: `go.uber.org/zap`. **Validation**: `github.com/go-playground/validator/v10` (config + DTOs).
+- **Shared `internal/platform/`**: `logger` (zap), `postgres` (pgxpool), `redis` (go-redis),
+  `storage` (minio-go). Services import these; never duplicate them.
 
-A reusable HTTP backend skeleton in Go. Clean (layered) architecture:
-`delivery → service → repository → domain`, plus a separate application-assembly
-layer (`app`) and a configuration layer (`config`).
-
-**Base stack of the skeleton:**
-
-- [Fiber v2](https://gofiber.io/) — HTTP server
-- [mongo-driver](https://go.mongodb.org/mongo-driver) — MongoDB access
-- [zap](https://github.com/uber-go/zap) — structured logging
-- [validator/v10](https://github.com/go-playground/validator) — config/DTO validation
-- Docker + docker-compose, Makefile, golangci-lint
-
-The module is declared in `go.mod` as `backend` — all internal imports derive from it
-(`backend/internal/...`).
-
----
-
-## Directory tree
+## Directory tree (rooted at services/<name>/)
 
 ```
-.
+services/<name>/
 ├── cmd/
 │   ├── main.go                 # entry point: builds App, runs it with a graceful-shutdown context
 │   ├── config.yaml             # local config (gitignored)
@@ -53,174 +58,158 @@ The module is declared in `go.mod` as `backend` — all internal imports derive 
 ├── internal/
 │   ├── app/                    # app assembly and lifecycle
 │   │   ├── app.go              # struct App: dependency fields + New/Run + init methods
-│   │   ├── init_database.go    # DB connection (connect + ping)
-│   │   ├── register_http_routes.go  # route and group registration
+│   │   ├── init_postgres.go    # pgxpool connect + ping
+│   │   ├── init_redis.go       # go-redis client + ping
+│   │   ├── init_storage.go     # minio client
+│   │   ├── register_http_routes.go  # ServeMux route registration (HTTP services)
 │   │   ├── run_workers.go      # starts background workers (WaitGroup)
-│   │   └── worker_http.go      # HTTP server worker + graceful shutdown
+│   │   ├── worker_http.go      # net/http server worker + graceful shutdown
+│   │   └── worker_ws.go        # gorilla/websocket server worker (realtime services)
 │   │
 │   ├── api/
-│   │   ├── delivery/           # transport layer (HTTP handlers)
+│   │   ├── delivery/           # transport layer (HTTP / WS handlers)
 │   │   │   ├── delivery.go         # handler interfaces
 │   │   │   ├── <entity>_handler.go # resource handler implementations
 │   │   │   └── auth_handler.go     # auth handlers (one per provider)
-│   │   │
 │   │   ├── service/            # business logic
-│   │   │   ├── service.go          # service interfaces
-│   │   │   └── <entity>_service.go # resource service implementation
-│   │   │
-│   │   ├── repository/        # data access
+│   │   │   ├── service.go          # service interfaces (incl. PaymentProvider, where used)
+│   │   │   └── <entity>_service.go
+│   │   ├── repository/         # data access (hand-written SQL via pgx)
 │   │   │   ├── repository.go       # repository interfaces
 │   │   │   ├── <entity>_repository.go
 │   │   │   └── auth_repository.go
-│   │   │
-│   │   ├── domain/            # domain models + DTOs (request/response)
+│   │   ├── domain/             # domain models + DTOs (request/response) + enums
 │   │   │   ├── <entity>.go
 │   │   │   └── user.go
-│   │   │
-│   │   └── middleware/        # cross-cutting request logic
-│   │       └── auth_middleware.go  # session/token check (RequireAuth)
+│   │   └── middleware/         # cross-cutting request logic
+│   │       └── auth_middleware.go  # RequireAuth: validates the Redis session
 │   │
-│   └── config/               # configuration
-│       ├── config.go             # config structs + loading (env / yaml)
-│       └── validate.go           # config validation via validator
+│   └── config/                 # configuration
+│       ├── config.go               # config structs + loading (env / yaml)
+│       └── validate.go             # config validation via validator/v10
 │
-├── Dockerfile                 # binary build (multi-stage)
-├── docker-compose.yml         # service + dependencies (DB, etc.)
-├── Makefile                   # run / build / lint / test / docker-* targets
-├── .golangci.yml              # linter config
-├── .dockerignore
-├── .env.example               # environment variables template
-├── .gitignore
-├── go.mod
-└── README.md
+├── migrations/                 # golang-migrate: NNNN_name.up.sql / .down.sql (if the service owns tables)
+├── Dockerfile                  # multi-stage (distroless-static by default; ffmpeg base if it shells out)
+├── Makefile                    # run / build / test / lint / vet / migrate / docker-* targets
+└── CLAUDE.md                   # service role + which platform deps it uses
 ```
 
----
+(No per-service `go.mod`, `.gitignore`, `README.md`, `docker-compose.yml`, or `.env.example` — those live at
+the repo root or in `deploy/`.)
 
 ## Layers and responsibilities
 
-Dependencies point strictly inward: `delivery` knows about `service`, `service` knows about
-`repository` and `domain`, `repository` knows about `domain`. There are no reverse dependencies.
-
 | Layer | Directory | Responsible for | Does not do |
 |------|---------|-------------|-----------|
-| **delivery** | `internal/api/delivery` | request parsing, input validation, response codes, serialization | business rules, DB access |
-| **service** | `internal/api/service` | business logic, orchestrating repositories, external integrations | HTTP parsing, direct calls to the DB driver |
-| **repository** | `internal/api/repository` | CRUD and DB queries, mapping into domain models | business rules |
-| **domain** | `internal/api/domain` | entity models, DTOs, domain types/enums | any I/O logic |
-| **middleware** | `internal/api/middleware` | cross-cutting handling (authentication, request context) | — |
+| **delivery** | `internal/api/delivery` | request parse/validate, status codes, serialization (HTTP responses and WS frames) | business rules, DB access |
+| **service** | `internal/api/service` | business logic, orchestrating repositories, external integrations (Stripe via `PaymentProvider`, OAuth, storage) | HTTP parsing, direct pgx calls |
+| **repository** | `internal/api/repository` | hand-written SQL via pgx, transactions, mapping rows → domain | business rules |
+| **domain** | `internal/api/domain` | entity models, DTOs, domain types/enums | any I/O |
+| **middleware** | `internal/api/middleware` | cross-cutting (auth/session, request context) | — |
 
-**The "interfaces separate from implementations" principle.** In each layer the contracts are
-pulled into a single file (`delivery.go`, `service.go`, `repository.go`) and grouped in a
-`type ( ... )` block. Implementations sit in neighboring files, one per entity. This simplifies
-mocks/tests and makes dependencies explicit.
-
----
+**Interfaces separate from implementations.** Per layer, contracts go in one file (`delivery.go` /
+`service.go` / `repository.go`) inside a `type ( ... )` block; implementations sit in neighbouring
+`<entity>_<layer>.go` files. Constructors `New<Type>(deps...)` return the layer's interface; implementation
+structs stay lowercase (`type <entity>Service struct`). This keeps dependencies explicit and makes the
+repository (and provider) interfaces mockable for unit tests.
 
 ## Application lifecycle (`internal/app`)
 
-`App` is the central struct: it holds all dependencies (logger, validator, config, DB connection,
-repositories, services, handlers, middleware) as fields and assembles them in order.
+`App` is the central struct: it holds all dependencies (logger, validator, config, pgxpool, redis client,
+minio client, repositories, services, handlers, middleware) as fields and assembles them in order. A service
+wires ONLY the dependencies its role needs.
 
 ```
 main()                       // cmd/main.go
  └─ app.New(serviceName)     // constructor for an empty App
  └─ app.Run(ctx)             // ctx with graceful shutdown on SIGTERM/SIGINT/SIGHUP
       ├─ initLogger()        // zap
-      ├─ initValidator()     // validator
+      ├─ initValidator()     // validator/v10
       ├─ populateConfig()    // load + validate config
-      ├─ initDatabase()      // DB connection + ping
-      ├─ initRepositories()  // repository constructors(db)
-      ├─ initServices()      // service constructors(repos, cfg, logger)
-      ├─ initHandlers()      // handler constructors(services/repos)
+      ├─ initPostgres()      // pgxpool + ping
+      ├─ initRedis()         // go-redis client + ping
+      ├─ initStorage()       // minio client
+      ├─ initRepositories()  // New<Entity>Repository(pool)
+      ├─ initServices()      // New<Entity>Service(repo, cfg, logger, ...)
+      ├─ initHandlers()      // New<Entity>Handler(service, logger)
       └─ runWorkers(ctx)     // start workers, blocks until they finish
 ```
 
-Each init step is a separate `App` method (ideally in its own file), which keeps `app.go`
-readable: it contains only the struct definition, `New`, `Run`, and the call order.
+Each init step is a separate `App` method (own file) so `app.go` holds only the struct, `New`, `Run`, and
+the call order. A service that needs no Redis (or no storage) simply omits that init step and field.
 
 ### Workers (`run_workers.go` + `worker_*.go`)
 
-Background tasks are described by the type `worker func(ctx, *App)`. `runWorkers` launches them as
-goroutines under a shared `sync.WaitGroup` and waits for them to finish. The base worker is the
-HTTP server (`worker_http.go`): it creates the Fiber app, registers routes, and listens on
-`ctx.Done()` for a clean `Shutdown()`. New background processes (cron jobs, queue consumers, etc.)
-are added as another `worker` in the slice.
+A service exposes HTTP, WebSocket, or runs purely as a background worker depending on its role. Background
+tasks are described by `worker func(ctx, *App)`; `runWorkers` launches them as goroutines under a shared
+`sync.WaitGroup` and waits for them to finish. Base workers:
+
+- `worker_http.go` — builds the `http.ServeMux`, serves via `http.Server`, and calls `Shutdown()` on
+  `ctx.Done()`.
+- `worker_ws.go` — the gorilla/websocket realtime server (signaling, matchmaking, server-side time
+  arbitration).
+- Additional loops (matchmaking, WebM→MP4 conversion via ffmpeg, cron) are added as more `worker`s in the
+  slice.
 
 ### Route registration (`register_http_routes.go`)
 
-Routes are grouped by version and resource. Protected groups attach the auth middleware to the
-whole group:
+`net/http` ServeMux with method routing; protected routes wrap the handler with the auth middleware:
 
 ```go
-v1 := app.Group("/v1")
+mux := http.NewServeMux()
 
-auth := v1.Group("/auth")
-auth.Post("/<provider>", a.authHandler.Verify)
-auth.Get("/me", a.authMiddleware.RequireAuth(), a.authHandler.GetMe)
+mux.HandleFunc("POST /v1/auth/{provider}", a.authHandler.Verify)
+mux.Handle("GET /v1/auth/me", a.authMiddleware.RequireAuth(http.HandlerFunc(a.authHandler.GetMe)))
 
-entities := v1.Group("/<entities>")
-entities.Use(a.authMiddleware.RequireAuth())
-entities.Get("/", a.<entity>Handler.List)
-entities.Post("/", a.<entity>Handler.Create)
-entities.Get("/:id", a.<entity>Handler.Get)
-entities.Delete("/:id", a.<entity>Handler.Delete)
+mux.Handle("GET /v1/<entities>", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.List)))
+mux.Handle("POST /v1/<entities>", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.Create)))
+mux.Handle("GET /v1/<entities>/{id}", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.Get)))
+mux.Handle("DELETE /v1/<entities>/{id}", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.Delete)))
 ```
-
----
 
 ## Configuration (`internal/config`)
 
-The config source is selected at runtime via an environment variable (e.g. `IS_DOCKER`):
+The config source is selected at runtime via `IS_DOCKER`:
 
 - in a container — values are read from environment variables (`loadFromEnv`);
 - locally — from the YAML file `cmd/config.yaml` (`loadFromFile`), for which the repo carries
   `config-example.yaml`.
 
-The config is described by nested structs with `yaml:"..."` and `validate:"..."` tags; after
-loading, `ValidateConfig` (validator/v10) is called, which fails at startup if required fields are
-unset. A getter with a default (`getEnv(key, def)`) sets safe default values.
+The config is nested structs with `yaml:"..."` and `validate:"..."` tags; after loading, `ValidateConfig`
+(validator/v10) runs and fails at startup if required fields are unset. The config carries (a service
+populates only the sections it uses):
 
----
+- Postgres DSN
+- Redis address + password
+- MinIO endpoint + access/secret keys + bucket
+- Stripe secret key + webhook signing secret
+- Google OAuth client id + secret + redirect URL
 
 ## How to add a new resource (vertical slice)
 
-A single resource touches all layers — order top to bottom:
+Top to bottom — see the `new-resource` skill for the full procedure:
 
-1. **domain** — `internal/api/domain/<entity>.go`: model + DTOs (request/response) +
-   domain types.
-2. **repository** — add the interface to `repository.go`, the implementation to
-   `<entity>_repository.go`; constructor `New<Entity>Repository(db)`.
-3. **service** — interface in `service.go`, implementation in `<entity>_service.go`;
-   constructor `New<Entity>Service(repo, cfg, logger)`.
-4. **delivery** — interface in `delivery.go`, implementation in `<entity>_handler.go`;
-   constructor `New<Entity>Handler(service, logger)`.
-5. **app** — add fields to `struct App`, call the constructors in
-   `initRepositories/initServices/initHandlers`.
-6. **routes** — register the group in `register_http_routes.go`.
-
----
+1. **domain** — `domain/<entity>.go`: model + DTOs + enums.
+2. **repository** — interface in `repository.go`; impl `<entity>_repository.go` with hand-written SQL
+   (transactions where atomicity matters); add a golang-migrate migration for its tables.
+   `New<Entity>Repository(pool)`.
+3. **service** — interface in `service.go`; impl `<entity>_service.go`; `New<Entity>Service(repo, cfg, logger)`.
+4. **delivery** — interface in `delivery.go`; impl `<entity>_handler.go`; `New<Entity>Handler(service, logger)`.
+5. **app** — add fields to `struct App`; call constructors in `initRepositories/initServices/initHandlers`.
+6. **routes** — register on the ServeMux in `register_http_routes.go`.
 
 ## Naming conventions
 
-- Files — `snake_case.go`; a layer's interface file is named after the layer
-  (`service.go`, `repository.go`, `delivery.go`).
+- Files — `snake_case.go`; a layer's interface file is named after the layer (`service.go`, `repository.go`,
+  `delivery.go`).
 - Implementations — `<entity>_<layer>.go` (`<entity>_service.go`, `<entity>_handler.go`).
 - Constructors — `New<Type>(deps...)`, return the layer's interface.
-- Private implementation structs — lowercase (`type <entity>Service struct`);
-  only the interface is exposed.
+- Private implementation structs — lowercase (`type <entity>Service struct`); only the interface is exposed.
 - All application code — under `internal/`, so packages can't be imported from outside the module.
 
----
+## Testing
 
-## Root / infrastructure files
-
-| File | Purpose |
-|------|------------|
-| `Dockerfile` | multi-stage build of a static binary |
-| `docker-compose.yml` | bring up the service together with its dependencies (DB, etc.) |
-| `Makefile` | targets `run`, `build`, `test`, `lint`, `docker-up/down/logs` |
-| `.golangci.yml` | golangci-lint configuration |
-| `.env.example` | environment variables template for container mode |
-| `.dockerignore` / `.gitignore` | exclusions for the build and VCS |
-| `cmd/config-example.yaml` | YAML config template for local mode |
+- Repository (and provider, e.g. `PaymentProvider`) interfaces enable mocking → fast unit tests for
+  service/handler logic.
+- Integration tests that need a real Postgres / Redis / MinIO run them via `testcontainers-go` or
+  `dockertest` (optional, guarded so the unit suite stays offline).

@@ -12,11 +12,11 @@ Priority — take the FIRST matching one, in this order (finishing beats startin
    - Claim: assign yourself as reviewer → wait a random 1–3 s → re-read the PR. If a reviewer claimed it before you → yield, return to the start of selection.
    - Otherwise → work type = review, PR = #N.
 
-3. NEW ISSUE. An open issue labeled `task`, with no assignee, whose blockers are ALL closed.
+3. NEW ISSUE. An open issue labeled BOTH `task` AND `owner-agreed`, with no assignee, whose blockers are ALL closed. An issue WITHOUT `owner-agreed` is ignored entirely — the owner has not signed off on it yet.
    - Blockers: parse `Depends on #X` / `Blocked by #X` from the body. For each, `gh issue view X --json state`. If any is open → skip this issue.
    - Claim: assign yourself → wait 1–3 s → re-read. If the assignee isn't you → yield, return to the start of selection.
    - Otherwise → work type = implement, issue = #N.
 
-DEADLOCK CIRCUIT BREAKER: if open `task` issues exist but none qualify (all with open blockers / a suspected A↔B cycle), and there's no changes/review work → apply `needs-human` to the oldest blocked issue, print `WORK_QUEUE_EMPTY`, exit.
+DEADLOCK CIRCUIT BREAKER: if open `task`+`owner-agreed` issues exist but none qualify (all with open blockers / a suspected A↔B cycle), and there's no changes/review work → apply `needs-human` to the oldest blocked issue, print `WORK_QUEUE_EMPTY`, exit.
 
 If nothing was found → print `WORK_QUEUE_EMPTY`, exit.

@@ -4,9 +4,9 @@ Helper scripts for the hooks declared in `../settings.json`. Cross-platform (Nod
 The hooks use exec form (`command: "node"`, `args: ["${CLAUDE_PROJECT_DIR}/.claude/hooks/<file>"]`) — the
 Windows-recommended way to invoke a script per the Claude Code hooks docs.
 
-- **`gofmt.mjs`** — PostToolUse (`Edit|Write|MultiEdit`). Runs `gofmt -w` on the edited file when it ends
+- **`gofmt.mjs`** — PostToolUse (`Edit|Write`). Runs `gofmt -w` on the edited file when it ends
   with `.go`. Non-blocking (always exits 0) — keeps diffs clean without ever failing a tool call.
-- **`block-github.mjs`** — PreToolUse (`Edit|Write|MultiEdit`). Denies (exit 2 + stderr) any write whose
+- **`block-github.mjs`** — PreToolUse (`Edit|Write`). Denies (exit 2 + stderr) any write whose
   path is under `.github/`. Defense-in-depth on top of CODEOWNERS so the autonomous flow can't weaken its
   own gates.
 
