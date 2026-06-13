@@ -1,0 +1,4 @@
+# golangci-lint config. The final linter set and config-format version are fixed in Phase C,
+# when lint is actually wired into CI with a pinned golangci-lint version.
+run:
+  timeout: 5m

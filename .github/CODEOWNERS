@@ -1,0 +1,5 @@
+# All code — reviewed by anyone on the team (including agents)
+*                 @andrey-morgun @GitOleksandrBokov @pizdaglyadelki-startup-agent
+
+# CI and repo settings — human only. Agents must not weaken their own gates.
+/.github/         @GitOleksandrBokov
