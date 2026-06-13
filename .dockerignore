@@ -1,0 +1,8 @@
+.git
+.gitignore
+.github
+.claude
+docs
+README.md
+**/*_test.go
+**/bin/

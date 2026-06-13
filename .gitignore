@@ -1,0 +1,24 @@
+# Local Claude overrides
+CLAUDE.local.md
+
+# Per-service local config (secrets) — template is config-example.yaml
+cmd/config.yaml
+**/cmd/config.yaml
+
+# Env files
+.env
+**/.env
+
+# Build output
+bin/
+**/bin/
+
+# Planning / spec inputs (not part of the deliverable)
+claude-code-build-plan.md
+backend-structure-template.md
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
