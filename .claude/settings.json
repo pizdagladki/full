@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "__PLACEHOLDER__ — to be filled by the human (e.g. Bash(make test), Bash(gh pr create:*), etc.)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/gofmt.mjs"],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/block-github.mjs"],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
