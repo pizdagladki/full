@@ -47,6 +47,7 @@
     "nolint",
     "pgx",
     "pgxpool",
+    "pipefail",
     "pizdagladki",
     "pizdaglyadelki",
     "platformredis",
