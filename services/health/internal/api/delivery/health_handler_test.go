@@ -61,8 +61,8 @@ func TestHealthHandler_Get(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
 			}
-			if ct := rec.Header().Get(echo.HeaderContentType); ct != echo.MIMEApplicationJSONCharsetUTF8 {
-				t.Errorf("Content-Type = %q, want %q", ct, echo.MIMEApplicationJSONCharsetUTF8)
+			if ct := rec.Header().Get(echo.HeaderContentType); ct != echo.MIMEApplicationJSON {
+				t.Errorf("Content-Type = %q, want %q", ct, echo.MIMEApplicationJSON)
 			}
 
 			var got domain.HealthStatus
