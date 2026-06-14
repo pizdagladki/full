@@ -1,0 +1,24 @@
+name: project-in-progress
+
+# Moves an issue's card to "In Progress" on the org project board when a fleet
+# worker claims the task (assigns itself — the claim step in select.md).
+on:
+  issues:
+    types: [assigned]
+
+jobs:
+  in-progress:
+    runs-on: ubuntu-latest
+    # optional: only move owner-approved fleet tasks
+    if: contains(github.event.issue.labels.*.name, 'owner-agreed')
+    steps:
+      # Pinned to the latest release (v2.2.1, 2023-09-25). Requires a PAT:
+      # classic token with `write:org`, OR a fine-grained/App token with
+      # Organization -> Projects: Read and write. The default GITHUB_TOKEN will NOT work.
+      - uses: leonsteinhaeuser/project-beta-automations@v2.2.1
+        with:
+          gh_token: ${{ secrets.PROJECTS_TOKEN }}
+          organization: pizdagladki
+          project_id: 1                                 # the project NUMBER, not a node id
+          resource_node_id: ${{ github.event.issue.node_id }}
+          status_value: "In Progress"                   # operation_mode defaults to "status"
