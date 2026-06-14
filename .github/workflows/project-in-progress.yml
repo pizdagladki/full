@@ -1,65 +1,24 @@
 name: project-in-progress
 
-# Двигает карточку issue в "In Progress" на org-проекте, когда воркер
-# берёт задачу (назначает себя ассайни — это claim из select.md).
+# Moves an issue's card to "In Progress" on the org project board when a fleet
+# worker claims the task (assigns itself — the claim step in select.md).
 on:
   issues:
     types: [assigned]
 
-permissions: {}            # дефолтный GITHUB_TOKEN не используем — пишем через PAT
-
 jobs:
   in-progress:
     runs-on: ubuntu-latest
-    # необязательный фильтр: двигаем только одобренные задачи флота
+    # optional: only move owner-approved fleet tasks
     if: contains(github.event.issue.labels.*.name, 'owner-agreed')
     steps:
-      - name: Move card to In Progress
-        env:
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}   # PAT с org Projects R/W
-          OWNER: pizdagladki
-          PROJECT_NUMBER: "1"
-          STATUS_FIELD: Status
-          TARGET_STATUS: In Progress
-          CONTENT_ID: ${{ github.event.issue.node_id }}
-        run: |
-          set -euo pipefail
-
-          # 1) project id + поле Status (id + опции)
-          proj=$(gh api graphql -f owner="$OWNER" -F number="$PROJECT_NUMBER" -f field="$STATUS_FIELD" -f query='
-            query($owner:String!, $number:Int!, $field:String!) {
-              organization(login:$owner) {
-                projectV2(number:$number) {
-                  id
-                  field(name:$field) {
-                    ... on ProjectV2SingleSelectField { id options { id name } }
-                  }
-                }
-              }
-            }')
-          project_id=$(echo "$proj" | jq -r '.data.organization.projectV2.id')
-          field_id=$(echo "$proj"   | jq -r '.data.organization.projectV2.field.id')
-          option_id=$(echo "$proj"  | jq -r --arg s "$TARGET_STATUS" \
-            '.data.organization.projectV2.field.options[] | select(.name==$s) | .id')
-
-          if [ -z "$project_id" ] || [ "$project_id" = null ] || [ -z "$option_id" ]; then
-            echo "::error::Не нашёл проект/поле Status/опцию '$TARGET_STATUS' — проверь PROJECT_NUMBER и имена."
-            exit 1
-          fi
-
-          # 2) гарантируем, что issue на борде, берём item id (идемпотентно)
-          item_id=$(gh api graphql -f project="$project_id" -f content="$CONTENT_ID" -f query='
-            mutation($project:ID!, $content:ID!) {
-              addProjectV2ItemById(input:{projectId:$project, contentId:$content}) { item { id } }
-            }' --jq '.data.addProjectV2ItemById.item.id')
-
-          # 3) ставим Status = In Progress
-          gh api graphql -f project="$project_id" -f item="$item_id" -f field="$field_id" -f option="$option_id" -f query='
-            mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
-              updateProjectV2ItemFieldValue(input:{
-                projectId:$project, itemId:$item, fieldId:$field,
-                value:{ singleSelectOptionId:$option }
-              }) { projectV2Item { id } }
-            }'
-
-          echo "issue #${{ github.event.issue.number }} -> '$TARGET_STATUS'"
+      # Pinned to the latest release (v2.2.1, 2023-09-25). Requires a PAT:
+      # classic token with `write:org`, OR a fine-grained/App token with
+      # Organization -> Projects: Read and write. The default GITHUB_TOKEN will NOT work.
+      - uses: leonsteinhaeuser/project-beta-automations@v2.2.1
+        with:
+          gh_token: ${{ secrets.PROJECTS_TOKEN }}
+          organization: pizdagladki
+          project_id: 1                                 # the project NUMBER, not a node id
+          resource_node_id: ${{ github.event.issue.node_id }}
+          status_value: "In Progress"                   # operation_mode defaults to "status"
