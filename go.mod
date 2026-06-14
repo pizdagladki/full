@@ -3,6 +3,7 @@ module github.com/pizdagladki/full
 go 1.26
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/labstack/echo/v4 v4.15.2
