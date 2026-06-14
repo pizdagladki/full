@@ -22,3 +22,10 @@ backend-structure-template.md
 *.test
 *.out
 vendor/
+coverage.out
+
+# Node / frontend
+node_modules/
+**/node_modules/
+frontend/dist/
+frontend/coverage/
