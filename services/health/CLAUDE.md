@@ -11,4 +11,4 @@ Role: HTTP API. Stack — the `go-backend-conventions` skill. Uses: none (no Pos
 - Config: `cmd/config.yaml` locally / env (`HTTP_ADDR`, `IS_DOCKER`) in Docker; template — `config-example.yaml`.
 
 ## Gotchas
-- Pure stdlib `net/http` + zap; no datastore. Add a resource via the `new-resource` skill if this grows.
+- `Echo` (`labstack/echo/v4`) + zap; no datastore. Add a resource via the `new-resource` skill if this grows.

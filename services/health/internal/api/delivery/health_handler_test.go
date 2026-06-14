@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/pizdagladki/full/services/health/internal/api/domain"
 	"github.com/pizdagladki/full/services/health/internal/api/service"
 	"github.com/pizdagladki/full/services/health/internal/api/service/mocks"
@@ -46,17 +47,22 @@ func TestHealthHandler_Get(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			h := NewHealthHandler(tt.newService(t), zap.NewNop())
-			rec := httptest.NewRecorder()
+			e := echo.New()
 			req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
 
-			h.Get(rec, req)
+			h := NewHealthHandler(tt.newService(t), zap.NewNop())
+
+			if err := h.Get(c); err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
 			}
-			if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
-				t.Errorf("Content-Type = %q, want application/json", ct)
+			if ct := rec.Header().Get(echo.HeaderContentType); ct != echo.MIMEApplicationJSONCharsetUTF8 {
+				t.Errorf("Content-Type = %q, want %q", ct, echo.MIMEApplicationJSONCharsetUTF8)
 			}
 
 			var got domain.HealthStatus
@@ -73,7 +79,6 @@ func TestHealthHandler_Get(t *testing.T) {
 // failingResponseWriter fails on Write to exercise the encode-error branch.
 type failingResponseWriter struct {
 	header http.Header
-	code   int
 }
 
 func (f *failingResponseWriter) Header() http.Header {
@@ -88,21 +93,18 @@ func (f *failingResponseWriter) Write([]byte) (int, error) {
 	return 0, errors.New("write failed")
 }
 
-func (f *failingResponseWriter) WriteHeader(code int) {
-	f.code = code
-}
+func (f *failingResponseWriter) WriteHeader(int) {}
 
 func TestHealthHandler_Get_EncodeError(t *testing.T) {
 	t.Parallel()
 
-	h := NewHealthHandler(service.NewHealthService(), zap.NewNop())
-	w := &failingResponseWriter{}
+	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	c := e.NewContext(req, &failingResponseWriter{})
 
-	// Must not panic even when writing the response fails.
-	h.Get(w, req)
+	h := NewHealthHandler(service.NewHealthService(), zap.NewNop())
 
-	if w.code != http.StatusOK {
-		t.Errorf("WriteHeader code = %d, want %d", w.code, http.StatusOK)
+	if err := h.Get(c); err == nil {
+		t.Fatal("expected an error when the response write fails, got nil")
 	}
 }

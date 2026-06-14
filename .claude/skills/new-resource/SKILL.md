@@ -25,7 +25,7 @@ every layer — implement top to bottom. Interfaces live in the per-layer file (
    constructor `New<Entity>Handler(service, logger)`. Request parse/validate, status codes, serialization only.
 5. **app** — add fields to `struct App`; call the constructors in `initRepositories` / `initServices` /
    `initHandlers`.
-6. **routes** — register on the `http.ServeMux` in `register_http_routes.go`; wrap protected routes with
+6. **routes** — register on the `*echo.Echo` in `register_http_routes.go`; wrap protected routes with
    `authMiddleware.RequireAuth`.
 
 ## Tests & checks

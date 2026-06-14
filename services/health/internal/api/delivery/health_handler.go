@@ -1,9 +1,9 @@
 package delivery
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"github.com/labstack/echo/v4"
 	"github.com/pizdagladki/full/services/health/internal/api/service"
 	"go.uber.org/zap"
 )
@@ -19,12 +19,13 @@ func NewHealthHandler(svc service.HealthService, logger *zap.Logger) HealthHandl
 }
 
 // Get handles GET /v1/health.
-func (h *healthHandler) Get(w http.ResponseWriter, _ *http.Request) {
+func (h *healthHandler) Get(c echo.Context) error {
 	status := h.service.Check()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	err := json.NewEncoder(w).Encode(status)
+
+	err := c.JSON(http.StatusOK, status)
 	if err != nil {
 		h.logger.Error("encode health response", zap.Error(err))
 	}
+
+	return err
 }

@@ -14,7 +14,7 @@
 
 ## Бэкенд
 
-- **Go + gorilla/websocket** — signaling (SDP/ICE) + серверный арбитраж времени + матчмейкинг.
+- **Go + Echo (`labstack/echo/v4`) + coder/websocket** — REST (Echo); signaling SDP/ICE, серверный арбитраж времени, матчмейкинг (coder/websocket).
 - **Конвертация WebM→MP4** (серверная, для соцсетей).
 
 ## Данные
@@ -57,7 +57,7 @@
 | Запись | canvas + MediaRecorder (WebM) |
 | Эдиты | HTML/Canvas/WebGL (Claude Design) |
 | Видео-связь | WebRTC P2P + STUN (TURN — бэклог) |
-| Бэкенд | Go + gorilla/websocket |
+| Бэкенд | Go + Echo + coder/websocket |
 | Конвертация видео | WebM→MP4 (серверная) |
 | Основная БД | PostgreSQL |
 | Кэш / очередь | Redis |

@@ -3,17 +3,18 @@
 > Дистиллированный, конкретный тех-стек проекта. Основан на продуктовой спеке (`10-tech-stack.md`) и
 > **совпадает с каноном репозитория** (`CLAUDE.md` + скилл `go-backend-conventions`). Спека и репо НЕ
 > конфликтуют: репо уже использует PostgreSQL + Redis из спеки. Этот файл фиксирует и те детали, что в
-> прозе спеки опущены (HTTP — stdlib `net/http`; логгер — zap), чтобы не было «близких коллов».
+> прозе спеки опущены (HTTP-фреймворк — `Echo`; логгер — zap), чтобы не было «близких коллов».
 >
 > Источник истины для бэкенда — скилл `go-backend-conventions`. При любом расхождении правит он.
 
 ## Бэкенд (Go)
 - **Язык:** Go 1.26. Один модуль на всё репо: `github.com/pizdagladki/full`.
-- **HTTP:** стандартная библиотека `net/http` — `http.ServeMux` с маршрутизацией по методу+паттерну
-  (Go 1.22+, `mux.HandleFunc("POST /v1/...", h)`). **Сторонний веб-фреймворк НЕ используется** (нет
-  Fiber/Echo/Gin).
-- **Realtime / signaling:** `github.com/gorilla/websocket` — обмен SDP/ICE, матчмейкинг, серверный
-  арбитраж времени.
+- **HTTP:** `github.com/labstack/echo/v4` (Echo) — роутер, middleware, биндинг и валидация запросов.
+  Хендлеры `func(c echo.Context) error`; роуты `e.POST("/v1/...", h)`; `validator/v10` подключается как
+  `e.Validator`. Других веб-фреймворков нет.
+- **Realtime / signaling:** `github.com/coder/websocket` — обмен SDP/ICE, матчмейкинг, серверный
+  арбитраж времени. Контекст-нативный API (`Accept`/`Read`/`Write` берут `context.Context`); конкурентные
+  записи безопасны.
 - **Основная БД:** PostgreSQL через `github.com/jackc/pgx/v5` + `pgxpool`. SQL пишется руками в слое
   repository, строки маппятся в доменные модели. Денежные/многошаговые операции — в явной транзакции.
   JSONB для гибких полей (напр. мета отвлекалок).
@@ -60,8 +61,8 @@
 | Слой | Технология |
 |---|---|
 | Язык бэка | Go 1.26 (`github.com/pizdagladki/full`) |
-| HTTP | stdlib `net/http` (ServeMux, method routing) — без фреймворка |
-| Signaling / realtime | `gorilla/websocket` |
+| HTTP | `Echo` (`labstack/echo/v4`) |
+| Signaling / realtime | `coder/websocket` |
 | Основная БД | PostgreSQL — `pgx v5` + `pgxpool` |
 | Миграции | `golang-migrate` |
 | Кэш / очередь / кулдауны / сессии | Redis — `go-redis v9` |

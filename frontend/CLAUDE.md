@@ -10,4 +10,4 @@ React frontend, its own ecosystem (outside the Go module). Stack:
 - `npm ci` (install from the committed lockfile), then `make lint` / `make typecheck` / `make test`
   (eslint + `tsc --noEmit` + vitest), `make format` (prettier). `make help` lists targets.
 
-Backend contract — the Go services under `services/` (HTTP `net/http` + WebSocket `gorilla/websocket`).
+Backend contract — the Go services under `services/` (HTTP `Echo` + WebSocket `coder/websocket`).

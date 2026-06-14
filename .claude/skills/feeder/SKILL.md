@@ -10,7 +10,7 @@ Turn the product spec into a dependency-ordered backlog of small GitHub issues f
 ## Phase 0 — Read everything, build no side effects yet
 1. Read the spec: the global `README`, the product overview, the user-flows doc, and EVERY individual flow doc (they live under `docs/specs/`). Read `docs/specs/tech-stack.md` (or `10-tech-stack.md`) and `docs/architecture.md` so areas map to real services.
 2. Read `.github/ISSUE_TEMPLATE/task.md` — your issue bodies MUST match its sections exactly.
-3. Read the skills `go-backend-conventions`, `new-service`, `new-resource` so each task points at the right zone and implementation path. The stack is the canon there — stdlib `net/http` (ServeMux, no web framework), `pgx`/PostgreSQL, `go-redis`, `minio-go`, `gorilla/websocket`, `golang-migrate`, `zap`, `validator/v10`, shared `internal/platform/{logger,postgres,redis,storage}`. Do NOT invent alternatives (no Fiber/Echo/Gin, no Mongo).
+3. Read the skills `go-backend-conventions`, `new-service`, `new-resource` so each task points at the right zone and implementation path. The stack is the canon there — `Echo` (`labstack/echo/v4`), `pgx`/PostgreSQL, `go-redis`, `minio-go`, `coder/websocket`, `golang-migrate`, `zap`, `validator/v10`, shared `internal/platform/{logger,postgres,redis,storage}`. Do NOT invent alternatives (no other web framework, no Mongo).
 4. Inventory existing services: `ls services/*`. If the repo isn't built yet, derive the service set from the flows + tech stack (e.g. `auth`, `matchmaking`, `signaling`, `store`/payments, `profile`, `ratings`/match-history, `media`/WebM→MP4, `reports`). This service map is the source of zones (`Service / area`).
 
 ## Phase 1 — Plan the task graph (in memory, no `gh` writes)

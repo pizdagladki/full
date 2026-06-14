@@ -13,8 +13,8 @@ lowercase; all app code lives under `internal/`.
    - `cmd/config-example.yaml` (committed) + `cmd/config.yaml` (gitignored).
    - `internal/app/` — `app.go` (struct App + New + Run + call order) and ONE init file per dependency the
      service actually uses: `init_postgres.go`, `init_redis.go`, `init_storage.go`; plus
-     `register_http_routes.go` + `worker_http.go` for an HTTP service, and/or `worker_ws.go` for a realtime
-     (gorilla/websocket) service; `run_workers.go` launches the workers and any background loops.
+     `register_http_routes.go` + `worker_http.go` for an HTTP (Echo) service, and/or `worker_ws.go` for a realtime
+     (coder/websocket) service; `run_workers.go` launches the workers and any background loops.
    - `internal/api/{delivery,service,repository,domain,middleware}/` — per-layer interface files
      (`delivery.go` / `service.go` / `repository.go`); add `middleware/auth_middleware.go` (RequireAuth →
      validates the Redis session) if the service is authenticated.

@@ -9,20 +9,17 @@ import (
 	"go.uber.org/zap"
 )
 
-// workerHTTP runs the HTTP server and shuts it down gracefully on ctx.Done().
+// workerHTTP runs the Echo HTTP server and shuts it down gracefully on ctx.Done().
 func workerHTTP(ctx context.Context, a *App) error {
-	srv := &http.Server{
-		Addr:              a.cfg.HTTP.Addr,
-		Handler:           a.registerHTTPRoutes(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	e := a.registerHTTPRoutes()
+	e.Server.ReadHeaderTimeout = 10 * time.Second
 
 	errCh := make(chan error, 1)
 
 	go func() {
-		a.logger.Info("http server listening", zap.String("addr", srv.Addr))
+		a.logger.Info("http server listening", zap.String("addr", a.cfg.HTTP.Addr))
 
-		err := srv.ListenAndServe()
+		err := e.Start(a.cfg.HTTP.Addr)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 
@@ -37,7 +34,7 @@ func workerHTTP(ctx context.Context, a *App) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		return srv.Shutdown(shutdownCtx) //nolint:contextcheck // intentional: fresh shutdown ctx
+		return e.Shutdown(shutdownCtx) //nolint:contextcheck // intentional: fresh shutdown ctx
 	case err := <-errCh:
 		return err
 	}
