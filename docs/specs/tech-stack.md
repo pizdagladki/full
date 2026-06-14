@@ -11,7 +11,7 @@
 - **Язык:** Go 1.26. Один модуль на всё репо: `github.com/pizdagladki/full`.
 - **HTTP:** `github.com/labstack/echo/v4` (Echo) — роутер, middleware, биндинг и валидация запросов.
   Хендлеры `func(c echo.Context) error`; роуты `e.POST("/v1/...", h)`; `validator/v10` подключается как
-  `e.Validator`. Других веб-фреймворков нет.
+  `e.Validitor`. Других веб-фреймворков нет.
 - **Realtime / signaling:** `github.com/coder/websocket` — обмен SDP/ICE, матчмейкинг, серверный
   арбитраж времени. Контекст-нативный API (`Accept`/`Read`/`Write` берут `context.Context`); конкурентные
   записи безопасны.
