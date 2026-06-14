@@ -3,7 +3,8 @@
 Role: HTTP API. Stack — the `go-backend-conventions` skill. Uses: none (no Postgres/Redis/MinIO).
 
 ## Commands (from this folder)
-- `make run` / `make test` / `make vet` / `make build` / `make lint`
+- `make help` — list all targets. `make run` / `make test` / `make build` / `make vet`.
+- `make cover` (≥80%) / `make lint` / `make fmt` / `make mocks` — quality gates + codegen.
 
 ## Responsibility
 - Liveness endpoint: `GET /v1/health` → `200 {"status":"ok"}`.

@@ -4,7 +4,7 @@ Go microservices (`services/`), a React frontend (`frontend/`), shared Go code (
 
 ## Where things live
 - `services/<name>/` — a Go microservice (HTTP / WebSocket / worker), layered architecture. Details — its CLAUDE.md.
-- `internal/platform/` — shared infra for all services: `logger` (zap), `postgres` (pgxpool), `redis` (go-redis), `storage` (minio-go). Do NOT duplicate it inside services.
+- `internal/platform/` — shared infra for all services: `logger` (zap) today; `postgres` (pgxpool), `redis` (go-redis), `storage` (minio-go) arrive with the first service that needs them (per the `go-backend-conventions` canon). Do NOT duplicate it inside services.
 - `frontend/` — frontend, its own ecosystem.
 - `deploy/` — docker-compose + env templates. `docs/` — architecture, ADRs, specs.
 - The backend architecture canon — the `go-backend-conventions` skill (apply it when working on services).
@@ -17,7 +17,7 @@ Go microservices (`services/`), a React frontend (`frontend/`), shared Go code (
 
 ## Commands (from the root)
 - `make help` — list targets. `make -C services/<name> test` — tests for one service (prefer over `make test`).
-- `make lint` / `make cover` (≥80%) / `make build` — across the whole repo. `make tools` installs dev tools.
+- `make lint` / `make typecheck` / `make cover` (≥80%) / `make build` / `make fmt` / `make mocks` — across the whole repo. `make tools` installs dev tools.
 - Local test / run / deploy runbook: `docs/local-dev.md`.
 
 ## Workflow — MANDATORY

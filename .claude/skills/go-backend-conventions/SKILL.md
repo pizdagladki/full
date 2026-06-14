@@ -18,9 +18,9 @@ layer (`config`), and background workers. Dependencies point strictly inward —
   enforces this). Service-private imports: `github.com/pizdagladki/full/services/<name>/internal/...`.
 - Shared infrastructure lives in the ROOT `internal/platform/...` and is imported as
   `github.com/pizdagladki/full/internal/platform/...` — services use it, never duplicate it.
-- `go.mod` / `go.sum` / `.gitignore` / the root `README.md` are at the repo root; `docker-compose.yml` and
-  `.env.example` live in `deploy/`. A service directory contains ONLY: `cmd/`, `internal/`, `migrations/`
-  (if it owns tables), `Makefile`, `Dockerfile`, `CLAUDE.md`.
+- `go.mod` / `go.sum` / `.gitignore` / the root `README.md` are at the repo root; `docker-compose.yml` lives
+  in `deploy/` and `.env.example` in `deploy/env/`. A service directory contains ONLY: `cmd/`, `internal/`,
+  `migrations/` (if it owns tables), `Makefile`, `Dockerfile`, `CLAUDE.md`.
 
 ## Stack
 
@@ -95,7 +95,7 @@ services/<name>/
 ```
 
 (No per-service `go.mod`, `.gitignore`, `README.md`, `docker-compose.yml`, or `.env.example` — those live at
-the repo root or in `deploy/`.)
+the repo root or under `deploy/`, with `.env.example` in `deploy/env/`.)
 
 ## Layers and responsibilities
 

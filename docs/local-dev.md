@@ -2,8 +2,8 @@
 
 Step-by-step sequences for testing and running the backend and frontend locally, and for deploying.
 
-**Prerequisites:** Go 1.26, Node 20+, Docker, Make, golangci-lint v2. Run `make tools` once to install the
-Go dev tools (golangci-lint, mockgen, golang-migrate).
+**Prerequisites:** Go 1.26, Node 22+ (24 in CI), Docker, Make, golangci-lint v2. Run `make tools` once to
+install the Go dev tools (golangci-lint, mockgen, golang-migrate).
 
 ## 1. Backend — local test & run
 

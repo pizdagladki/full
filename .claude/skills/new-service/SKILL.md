@@ -40,7 +40,7 @@ Role: <HTTP API | WebSocket realtime | background worker>. Stack — the `go-bac
 Uses: <Postgres | Redis | MinIO> (only what it needs).
 
 ## Commands (from this folder)
-- `make run` / `make test` / `make lint`
+- `make help` — list targets. `make run` / `make test` / `make cover` (≥80%) / `make lint` / `make fmt` / `make mocks`.
 - `make migrate` — apply golang-migrate migrations (if this service owns Postgres tables)
 - `make docker-up` — bring up the service + Postgres + Redis + MinIO locally
 

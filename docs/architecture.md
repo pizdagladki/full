@@ -8,7 +8,9 @@ structure lives in the `go-backend-conventions` skill.
   Service boundaries are enforced by the double `internal/`: `services/<name>/internal/` is private to
   that service (Go visibility), while the root `internal/` is shared across services but unreachable
   from outside the repo.
-- `internal/platform/` — shared infrastructure code (logger, database) reused by all services.
+- `internal/platform/` — shared infrastructure reused by all services: `logger` (zap) exists today;
+  `postgres` (pgxpool), `redis` (go-redis), `storage` (minio-go) arrive with the first service that needs
+  them (the `go-backend-conventions` skill defines the target set).
 - `frontend/` — frontend application, its own ecosystem.
 - `deploy/` — docker-compose and env templates for local bring-up.
 

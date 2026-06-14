@@ -6,4 +6,8 @@ React frontend, its own ecosystem (outside the Go module). Stack:
 - canvas + MediaRecorder → WebM capture; Canvas/WebGL edit templates.
 - Keep canvas / CV / WebRTC in isolated components behind refs.
 
+## Commands (from this folder)
+- `npm ci` (install from the committed lockfile), then `make lint` / `make typecheck` / `make test`
+  (eslint + `tsc --noEmit` + vitest), `make format` (prettier). `make help` lists targets.
+
 Backend contract — the Go services under `services/` (HTTP `net/http` + WebSocket `gorilla/websocket`).
