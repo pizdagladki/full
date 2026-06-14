@@ -7,8 +7,7 @@ import (
 )
 
 // registerHTTPRoutes builds the service's Echo router. Resource routes are added
-// by downstream slices behind downstream resource slices; the scaffold exposes only
-// the liveness probe.
+// by downstream resource slices; the scaffold exposes only the liveness probe.
 func (a *App) registerHTTPRoutes() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
