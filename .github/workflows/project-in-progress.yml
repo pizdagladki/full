@@ -18,7 +18,7 @@ jobs:
       - name: Move card to In Progress
         env:
           # classic PAT with scope `project`, OR a fine-grained/App token with
-          # Organization -> Projects: Read and write. The default GITHUB_TOKEN canNOT write org projects.
+          # Organization -> Projects: Read and write. The default GITHUB_TOKEN cannot write org projects.
           GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
           OWNER: pizdagladki
           PROJECT_NUMBER: "1"
