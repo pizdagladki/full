@@ -12,6 +12,7 @@ Turn the product spec into a dependency-ordered backlog of small GitHub issues f
 2. Read `.github/ISSUE_TEMPLATE/task.md` — your issue bodies MUST match its sections exactly.
 3. Read the skills `go-backend-conventions`, `new-service`, `new-resource` (backend) and `frontend-conventions` (frontend) so each task points at the right zone and implementation path. The stack is the canon there — `Echo` (`labstack/echo/v4`), `pgx`/PostgreSQL, `go-redis`, `minio-go`, `coder/websocket`, `golang-migrate`, `zap`, `validator/v10`, shared `internal/platform/{logger,postgres,redis,storage}`. Do NOT invent alternatives (no other web framework, no Mongo).
 4. Inventory existing services: `ls services/*`. If the repo isn't built yet, derive the service set from the flows + tech stack (e.g. `auth`, `matchmaking`, `signaling`, `store`/payments, `profile`, `ratings`/match-history, `media`/WebM→MP4, `reports`). This service map is the source of zones (`Service / area`).
+5. **Load the EXISTING backlog as FULL context — not just titles.** List ALL issues, open AND closed (`mcp__github__list_issues` / `mcp__github__search_issues`, repo `pizdagladki/full`), then read the COMPLETE body of EACH via `mcp__github__get_issue`: Goal, Acceptance criteria, Blocked by, Service/area, Out of scope, Context, and the hidden `<!-- fdr-* -->` fingerprint. This is the authoritative record of what already exists. Read full bodies (NOT titles) because tasks overlap — even more so here: you need each existing task's exact scope, acceptance criteria, zone and Out-of-scope to (a) never duplicate or re-cover already-issued work, (b) never contradict or collide with an existing task's zone/scope/boundaries, and (c) attach `Depends on #<real-number>` to the right existing issues. Carry this backlog into Phase 1 as the immovable baseline, and seed the Phase 2 `slug → issue#` map from these fingerprints.
 
 ## Phase 1 — Plan the task graph (in memory, no `gh` writes)
 Decompose the spec into the SMALLEST implementable units. One issue = one PR-sized change = ONE zone (`services/<name>` or `frontend`). Typical unit kinds:
@@ -29,14 +30,16 @@ Dependencies (build a DAG with internal slug IDs; reference by `Depends on #<slu
 
 MANUAL prerequisites are NOT fleet issues. Things like creating the Google OAuth client, the Stripe account/keys, provisioning Postgres/Redis/MinIO, DNS/TURN — do NOT create issues for these. Instead, in the Context of any task that needs them, add a line `Manual prerequisite (human): <what>` so the human knows to satisfy it before approving that task.
 
+**Build on the existing backlog (from Phase 0 step 5) — do not restart it.** Treat every already-existing issue as a fixed node in the graph. Plan ONLY genuinely new units beyond it: if a unit you would emit is already covered by an existing issue — judged from its FULL body (matching fingerprint, OR overlapping scope / acceptance criteria / zone), NOT its title alone — drop it and reuse that issue's number. New units must respect existing tasks' zones and Out-of-scope so they don't overlap. Wire `Depends on` from new units onto the real numbers of the existing issues they build on, exactly as for new-to-new dependencies. When a run is capped to N issues, N counts NEW issues created — skipped/existing ones do not count.
+
 Topologically sort the units (dependencies first).
 
 ## Phase 2 — Emit issues, idempotently, in topological order
-Keep a map `slug → issue#`. For each unit in order:
+Keep a map `slug → issue#`, pre-seeded from the existing issues loaded in Phase 0 step 5 (their `fdr-*` fingerprints → their real numbers) so `Depends on` onto existing work resolves and nothing already-issued is recreated. For each unit in order:
 1. Compute a stable fingerprint `fdr-<area>-<short-slug>` (kebab-case, unique).
 2. Check existence ACROSS ALL ISSUES regardless of state or label (an approved issue has lost `proposed`; a rejected one is closed — do NOT re-create either):
    `mcp__github__search_issues` with query `repo:pizdagladki/full type:issue fdr-<area>-<short-slug> in:body` (no state filter → searches open AND closed).
-   - If found → record its number in the map, SKIP creation.
+   - If found (by fingerprint) OR already covered by an existing issue from the Phase 0 backlog (by scope/meaning, from its full body) → record its number in the map, SKIP creation.
    - If not found → create it.
 3. Create with the template body, resolving every `Depends on #<slug>` to the real `#number` from the map (topological order guarantees deps already exist in the map). Always include the hidden fingerprint as the LAST body line: `<!-- fdr-<area>-<short-slug> -->`. Labels: `task,proposed`. Capture the new number into the map.
    `mcp__github__create_issue` (owner `pizdagladki`, repo `full`, title, body, labels=["task","proposed"]).
