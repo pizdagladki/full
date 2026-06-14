@@ -2,9 +2,7 @@ Make PR #N mergeable again so GitHub's auto-merge can land it — it is approved
 
 1. Read fresh state: `gh pr view <N> --json mergeStateStatus,mergeable,reviewDecision,autoMergeRequest,headRefName,baseRefName,isDraft` (Bash) + `mcp__github__get_pull_request` (#N). If it is now a draft, closed/merged, or already `CLEAN`/`UNSTABLE` AND `autoMergeRequest` is set (it is progressing on its own) → nothing to do: release your claim (remove yourself from assignees, `mcp__github__update_issue` #N), print `[RECOVER] #<N> already-progressing`, exit. `UNKNOWN` mergeStateStatus → GitHub is still computing it; re-read once after a short pause, and if still `UNKNOWN` release the claim and exit `[RECOVER] #<N> state-unknown` (a later cycle retries).
 
-2. **Branch BEHIND `main`, no conflict** (`mergeStateStatus == BEHIND` AND `mergeable != CONFLICTING`):
-   - `gh pr update-branch <N>` (Bash) — this MERGES the latest `main` into the PR branch with a merge commit; NO force-push. Do NOT pass `--rebase` (it rewrites history and force-pushes, which `settings.json` denies and branch protection blocks), and do NOT rebase locally.
-   - The update is a new reviewable push by YOU. If the repo dismisses stale approvals / requires approval of the most recent push, `reviewDecision` flips back to `REVIEW_REQUIRED` — that is intended: a DIFFERENT account re-reviews the now-up-to-date head via the normal REVIEW path. (If it does NOT dismiss, the PR stays `APPROVED` and auto-merge fires directly once green.) Auto-merge stays armed across the update.
+   - `gh pr update-branch <N>` (Bash) — this MERGES the latest `main` into the PR branch with a merge commit; NO force-push. Do NOT pass `--rebase` (it rewrites history and requires a force-push, which branch protection/rulesets should block), and do NOT rebase locally.
    - Print `[RECOVER] #<N> updated-branch`, go to step 4.
 
 3. **Real CONFLICT with `main`** (`mergeable == CONFLICTING` / `mergeStateStatus == DIRTY`):
