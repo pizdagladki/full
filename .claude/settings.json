@@ -7,6 +7,7 @@
       "Bash(go build:*)",
       "Bash(go mod:*)",
       "Bash(gofmt:*)",
+      "Bash(typos:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
@@ -17,10 +18,22 @@
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(gh issue:*)",
       "Bash(gh pr:*)",
-      "Bash(gh label:*)",
-      "Bash(gh project:*)"
+      "Bash(gh project:*)",
+      "Bash(gh api graphql:*)",
+      "mcp__github__get_issue",
+      "mcp__github__list_issues",
+      "mcp__github__search_issues",
+      "mcp__github__create_issue",
+      "mcp__github__update_issue",
+      "mcp__github__add_issue_comment",
+      "mcp__github__get_pull_request",
+      "mcp__github__list_pull_requests",
+      "mcp__github__get_pull_request_files",
+      "mcp__github__get_pull_request_comments",
+      "mcp__github__get_pull_request_status",
+      "mcp__github__create_pull_request",
+      "mcp__github__create_pull_request_review"
     ],
     "deny": [
       "Bash(rm -rf:*)",
@@ -42,6 +55,28 @@
             "command": "node",
             "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/gofmt.mjs"],
             "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/trace.mjs"],
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/spellcheck.mjs"],
+            "timeout": 15
           }
         ]
       }

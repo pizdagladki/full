@@ -97,9 +97,10 @@ acceptance criteria already are in the spec, the less manual rejection downstrea
 3. **Triage is your gate.** After a run: `gh issue list --label proposed`, add `owner-agreed` to the good
    ones **in dependency order** (blockers first — scaffolds, migrations, auth — then dependents); close the
    bad ones (feeder won't recreate them). Approving a dependent before its blocker just makes the fleet wait.
-4. **(Optional) a Projects board** — pass `--project <N>` so issues land on the board and `implement.md`'s
-   "move card to In Progress" works. No board → that step is skipped.
-5. **`gh auth`** done and `gh issue:*` / `gh project:*` allowlisted (already in `.claude/settings.json`).
+4. **(Optional) a Projects board** — pass `--project <N>` so feeder places issues on the board; the
+   `project-in-progress` GitHub workflow then moves a card to In Progress when a worker claims (assigns) the
+   issue. No board → issues just aren't tracked there.
+5. **`gh auth`** done; the **GitHub MCP** server connected (issues/PRs) and `gh project:*` allowlisted for the board (already in `.claude/settings.json`).
 6. **Manual prerequisites are yours.** Before adding `owner-agreed` to a task whose Context lists a
    `Manual prerequisite (human): …` (OAuth client, Stripe keys, provisioned Postgres/Redis/MinIO, TURN),
    make sure it's satisfied — otherwise the worker builds a feature with nothing to connect to.
