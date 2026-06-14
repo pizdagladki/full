@@ -2,7 +2,7 @@ Implement issue #N (already claimed by you).
 
 1. `gh issue view N`. If the acceptance criteria are unverifiable/unclear → apply `needs-human`, exit. Do NOT guess.
 2. Move the Projects card to In Progress.
-3. Work in a separate git worktree. Branch `feat/N-<slug>` off a fresh main.
+3. **Sync first:** `git fetch origin`. Work in a separate git worktree, branching `feat/N-<slug>` off the freshly-fetched `origin/main` (NOT a stale local `main`): `git worktree add ../<slug> -b feat/N-<slug> origin/main`.
 4. Full autonomy: for a non-trivial task, enter plan mode yourself, draft a plan, and implement immediately (WITHOUT human approval). Trivial — straight to code.
 5. Code strictly within the zone from the "Service/area" section. Follow `go-backend-conventions` (it loads itself). New service/resource → the `new-service` / `new-resource` skills.
 6. Write **table-driven** tests for EVERY acceptance criterion; generate mocks for interfaces with mockgen (`make mocks`).
