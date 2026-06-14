@@ -1,5 +1,72 @@
 version: "2"
 run:
-  timeout: 5m
+  concurrency: 8
+  issues-exit-code: 1
+  tests: false
 linters:
-  default: standard
+  default: all
+  disable:
+    - copyloopvar
+    - exhaustive
+    - exhaustruct
+    - funlen
+    - gochecknoglobals
+    - godot
+    - intrange
+    - mnd
+    - nolintlint
+    - tagliatelle
+    - wrapcheck
+    - wsl
+    - wsl_v5
+    - cyclop
+    - ireturn
+    - predeclared
+    - varnamelen # too strict
+    - err113 # dynamic errors
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: github.com/sirupsen/logrus
+              desc: not allowed
+    revive:
+      rules:
+        - name: var-naming
+          disabled: true
+    nestif:
+      min-complexity: 8
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    misspell:
+      locale: US
+    tagalign:
+      align: false
+      sort: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - varnamelen
+        text: l
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports # formatting issues
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -207,9 +207,17 @@ Top to bottom — see the `new-resource` skill for the full procedure:
 - Private implementation structs — lowercase (`type <entity>Service struct`); only the interface is exposed.
 - All application code — under `internal/`, so packages can't be imported from outside the module.
 
-## Testing
+## Testing & quality gates
 
-- Repository (and provider, e.g. `PaymentProvider`) interfaces enable mocking → fast unit tests for
-  service/handler logic.
+- **Table-driven tests** (`t.Run` over a slice of cases) are the default style.
+- **Coverage ≥ 80%** per service, enforced by `make cover` (excludes `cmd/` and generated mocks); CI fails
+  below the threshold.
+- **Mocks** via mockgen (`go.uber.org/mock`): put `//go:generate mockgen -source=<layer>.go
+  -destination=mocks/<layer>_mock.go -package=mocks` on the interface file (`repository.go`, `service.go`),
+  run `make mocks`, and use the generated mock to unit-test the layer above (e.g. mock the repository when
+  testing a service). Generated files are excluded from the linter.
 - Integration tests that need a real Postgres / Redis / MinIO run them via `testcontainers-go` or
   `dockertest` (optional, guarded so the unit suite stays offline).
+- **Lint**: golangci-lint v2, `default: all` minus the project disable-list (`.golangci.yml`). `make lint`
+  (and `make fmt` for gofmt+goimports). `make help` lists targets; `make tools` installs the dev tools.
+- Local test / run / deploy sequences: see `docs/local-dev.md`.

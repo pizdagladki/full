@@ -23,7 +23,8 @@ func (h *healthHandler) Get(w http.ResponseWriter, _ *http.Request) {
 	status := h.service.Check()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(status); err != nil {
+	err := json.NewEncoder(w).Encode(status)
+	if err != nil {
 		h.logger.Error("encode health response", zap.Error(err))
 	}
 }

@@ -27,18 +27,22 @@ func New(name string) *App {
 	return &App{name: name}
 }
 
-// Run initialises dependencies in order and runs the workers until ctx is
-// cancelled (graceful shutdown).
+// Run initializes dependencies in order and runs the workers until ctx is
+// canceled (graceful shutdown).
 func (a *App) Run(ctx context.Context) error {
-	if err := a.initLogger(); err != nil {
+	err := a.initLogger()
+	if err != nil {
 		return err
 	}
 	defer func() { _ = a.logger.Sync() }()
+
 	a.logger.Info("starting service", zap.String("service", a.name))
 
-	if err := a.populateConfig(); err != nil {
+	err = a.populateConfig()
+	if err != nil {
 		return err
 	}
+
 	a.initServices()
 	a.initHandlers()
 
@@ -50,7 +54,9 @@ func (a *App) initLogger() error {
 	if err != nil {
 		return err
 	}
+
 	a.logger = l
+
 	return nil
 }
 
@@ -59,7 +65,9 @@ func (a *App) populateConfig() error {
 	if err != nil {
 		return err
 	}
+
 	a.cfg = cfg
+
 	return nil
 }
 

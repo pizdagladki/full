@@ -6,5 +6,6 @@ import "net/http"
 func (a *App) registerHTTPRoutes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", a.healthHandler.Get)
+
 	return mux
 }

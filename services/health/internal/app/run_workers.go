@@ -18,11 +18,15 @@ func (a *App) runWorkers(ctx context.Context) error {
 		mu       sync.Mutex
 		firstErr error
 	)
+
 	for _, w := range workers {
 		wg.Add(1)
+
 		go func(w worker) {
 			defer wg.Done()
-			if err := w(ctx, a); err != nil {
+
+			err := w(ctx, a)
+			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = err
@@ -31,6 +35,8 @@ func (a *App) runWorkers(ctx context.Context) error {
 			}
 		}(w)
 	}
+
 	wg.Wait()
+
 	return firstErr
 }

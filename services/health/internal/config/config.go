@@ -27,6 +27,7 @@ func Load(path string) (*Config, error) {
 		cfg *Config
 		err error
 	)
+
 	if os.Getenv("IS_DOCKER") != "" {
 		cfg = loadFromEnv()
 	} else {
@@ -35,9 +36,12 @@ func Load(path string) (*Config, error) {
 			return nil, err
 		}
 	}
-	if err := Validate(cfg); err != nil {
+
+	err = Validate(cfg)
+	if err != nil {
 		return nil, err
 	}
+
 	return cfg, nil
 }
 
@@ -46,23 +50,30 @@ func loadFromEnv() *Config {
 }
 
 func loadFromFile(path string) (*Config, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // path is app-controlled (cmd/config.yaml), not user input
 	if err != nil {
 		return nil, fmt.Errorf("read config %q: %w", path, err)
 	}
+
 	cfg := &Config{HTTP: HTTPConfig{Addr: defaultAddr}}
-	if err := yaml.Unmarshal(b, cfg); err != nil {
+
+	err = yaml.Unmarshal(b, cfg)
+	if err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
+
 	if cfg.HTTP.Addr == "" {
 		cfg.HTTP.Addr = defaultAddr
 	}
+
 	return cfg, nil
 }
 
 func getEnv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
+	v := os.Getenv(key)
+	if v != "" {
 		return v
 	}
+
 	return def
 }

@@ -16,6 +16,8 @@ every layer — implement top to bottom. Interfaces live in the per-layer file (
      atomicity matters — anything money-touching. Use JSONB columns for flexible fields.
    - Add a golang-migrate migration for the resource's tables: paired `migrations/NNNN_<name>.up.sql` and
      `migrations/NNNN_<name>.down.sql`.
+   - Add `//go:generate mockgen -source=repository.go -destination=mocks/repository_mock.go -package=mocks`
+     on `repository.go`; run `make mocks` and use the mock to unit-test the service layer.
 3. **service** — interface in `service.go`; implement in `<entity>_service.go`;
    constructor `New<Entity>Service(repo, cfg, logger)`. Business logic, orchestration, external integrations
    (Stripe via the `PaymentProvider` interface, OAuth, storage). No HTTP parsing, no raw pgx calls.
@@ -27,6 +29,8 @@ every layer — implement top to bottom. Interfaces live in the per-layer file (
    `authMiddleware.RequireAuth`.
 
 ## Tests & checks
-- Write tests for EVERY acceptance criterion of the issue (handler- and service-level; mock the repository
-  interface so the unit suite stays offline).
-- `make -C services/<svc> test` and `... lint` green; show the output before opening the PR.
+- Write **table-driven** tests (`t.Run` over a slice of cases) for EVERY acceptance criterion (handler- and
+  service-level). Generate a mock of the repository/service interface with mockgen (`//go:generate ...` on
+  the interface file + `make mocks`) and use it so the unit suite stays offline.
+- Keep coverage **≥ 80%**: `make -C services/<svc> cover` (excludes `cmd/` + mocks); `... lint` and `... test`
+  green too. Show the output before opening the PR.

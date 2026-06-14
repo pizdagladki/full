@@ -18,12 +18,17 @@ func workerHTTP(ctx context.Context, a *App) error {
 	}
 
 	errCh := make(chan error, 1)
+
 	go func() {
 		a.logger.Info("http server listening", zap.String("addr", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
+
 			return
 		}
+
 		errCh <- nil
 	}()
 
@@ -31,7 +36,8 @@ func workerHTTP(ctx context.Context, a *App) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+
+		return srv.Shutdown(shutdownCtx) //nolint:contextcheck // intentional: fresh shutdown ctx
 	case err := <-errCh:
 		return err
 	}

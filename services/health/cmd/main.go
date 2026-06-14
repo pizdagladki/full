@@ -12,12 +12,17 @@ import (
 )
 
 func main() {
+	err := run()
+	if err != nil {
+		log.Printf("health service exited with error: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(),
 		syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer stop()
 
-	if err := app.New("health").Run(ctx); err != nil {
-		log.Printf("health service exited with error: %v", err)
-		os.Exit(1)
-	}
+	return app.New("health").Run(ctx)
 }

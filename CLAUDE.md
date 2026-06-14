@@ -16,8 +16,9 @@ Go microservices (`services/`), a React frontend (`frontend/`), shared Go code (
 - **External:** Stripe (RF later), AdSense, AdMob/Unity, a Telegram bug-report bot, Google OAuth.
 
 ## Commands (from the root)
-- `make -C services/<name> test` — tests for a single service. Prefer this over `make test` for everything.
-- `make lint` / `make build` — across the whole repo.
+- `make help` — list targets. `make -C services/<name> test` — tests for one service (prefer over `make test`).
+- `make lint` / `make cover` (≥80%) / `make build` — across the whole repo. `make tools` installs dev tools.
+- Local test / run / deploy runbook: `docs/local-dev.md`.
 
 ## Workflow — MANDATORY
 - One task = one issue = one branch. Do NOT touch files of someone else's active issue.

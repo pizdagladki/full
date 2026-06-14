@@ -1,13 +1,21 @@
-.PHONY: lint test build typecheck
+.DEFAULT_GOAL := help
 
-lint:
-	@echo "frontend: not set up yet"
+.PHONY: help install lint format typecheck test
 
-test:
-	@echo "frontend: not set up yet"
+help: ## Show this help
+	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z0-9_-]+:.*## /{printf "  \033[36m%-10s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 
-build:
-	@echo "frontend: not set up yet"
+install: ## Install dependencies (npm ci)
+	npm ci
 
-typecheck:
-	@echo "frontend: not set up yet"
+lint: ## Lint (eslint)
+	npm run lint
+
+format: ## Format (prettier --write)
+	npm run format
+
+typecheck: ## Type-check (tsc --noEmit)
+	npm run typecheck
+
+test: ## Run tests (vitest)
+	npm run test
