@@ -2,23 +2,73 @@ name: project-in-progress
 
 # Moves an issue's card to "In Progress" on the org project board when a fleet
 # worker claims the task (assigns itself — the claim step in select.md).
+# MUST live on the default branch (main): `issues` events only run workflows from there.
 on:
   issues:
     types: [assigned]
 
+permissions: {}            # we authenticate to the org project with PROJECTS_TOKEN, not GITHUB_TOKEN
+
 jobs:
   in-progress:
     runs-on: ubuntu-latest
-    # optional: only move owner-approved fleet tasks
+    # only move owner-approved fleet tasks; comment this out to test on any issue
     if: contains(github.event.issue.labels.*.name, 'owner-agreed')
     steps:
-      # Pinned to the latest release (v2.2.1, 2023-09-25). Requires a PAT:
-      # classic token with `write:org`, OR a fine-grained/App token with
-      # Organization -> Projects: Read and write. The default GITHUB_TOKEN will NOT work.
-      - uses: leonsteinhaeuser/project-beta-automations@v2.2.1
-        with:
-          gh_token: ${{ secrets.PROJECTS_TOKEN }}
-          organization: pizdagladki
-          project_id: 1                                 # the project NUMBER, not a node id
-          resource_node_id: ${{ github.event.issue.node_id }}
-          status_value: "In Progress"                   # operation_mode defaults to "status"
+      - name: Move card to In Progress
+        env:
+          # classic PAT with scope `project`, OR a fine-grained/App token with
+          # Organization -> Projects: Read and write. The default GITHUB_TOKEN canNOT write org projects.
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          OWNER: pizdagladki
+          PROJECT_NUMBER: "1"
+          STATUS_FIELD: Status
+          TARGET_STATUS: In Progress
+          CONTENT_ID: ${{ github.event.issue.node_id }}
+        run: |
+          set -euo pipefail
+
+          # --- resolve project id + all single-select fields/options (and LOG them) ---
+          data=$(gh api graphql -f owner="$OWNER" -F number="$PROJECT_NUMBER" -f query='
+            query($owner:String!, $number:Int!) {
+              organization(login:$owner) {
+                projectV2(number:$number) {
+                  id
+                  fields(first:50) {
+                    nodes { ... on ProjectV2SingleSelectField { id name options { id name } } }
+                  }
+                }
+              }
+            }')
+
+          project_id=$(jq -r '.data.organization.projectV2.id // empty' <<<"$data")
+          if [ -z "$project_id" ]; then
+            echo "::error::Project #$PROJECT_NUMBER not found under org '$OWNER' — check PROJECT_NUMBER and that PROJECTS_TOKEN can read this org's projects."
+            exit 1
+          fi
+
+          echo "Single-select fields on the board:"
+          jq -r '.data.organization.projectV2.fields.nodes[] | select(.id) | "  - \(.name): [\(.options | map(.name) | join(", "))]"' <<<"$data"
+
+          field_id=$(jq -r --arg f "$STATUS_FIELD" '.data.organization.projectV2.fields.nodes[] | select(.name==$f) | .id' <<<"$data")
+          option_id=$(jq -r --arg f "$STATUS_FIELD" --arg s "$TARGET_STATUS" '.data.organization.projectV2.fields.nodes[] | select(.name==$f) | .options[] | select(.name==$s) | .id' <<<"$data")
+
+          if [ -z "$field_id" ] || [ -z "$option_id" ]; then
+            echo "::error::Field '$STATUS_FIELD' or option '$TARGET_STATUS' not found (names are case-sensitive). See the field/option list logged above and fix STATUS_FIELD / TARGET_STATUS."
+            exit 1
+          fi
+
+          # --- ensure the issue is an item on the board (idempotent), then set Status ---
+          item_id=$(gh api graphql -f project="$project_id" -f content="$CONTENT_ID" -f query='
+            mutation($project:ID!, $content:ID!) {
+              addProjectV2ItemById(input:{projectId:$project, contentId:$content}) { item { id } }
+            }' --jq '.data.addProjectV2ItemById.item.id')
+
+          gh api graphql -f project="$project_id" -f item="$item_id" -f field="$field_id" -f option="$option_id" -f query='
+            mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
+              updateProjectV2ItemFieldValue(input:{
+                projectId:$project, itemId:$item, fieldId:$field, value:{ singleSelectOptionId:$option }
+              }) { projectV2Item { id } }
+            }'
+
+          echo "OK: issue #${{ github.event.issue.number }} (item $item_id) -> '$TARGET_STATUS'"
