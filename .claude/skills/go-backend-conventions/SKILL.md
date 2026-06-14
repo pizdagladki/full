@@ -229,4 +229,6 @@ Top to bottom — see the `new-resource` skill for the full procedure:
   `dockertest` (optional, guarded so the unit suite stays offline).
 - **Lint**: golangci-lint v2, `default: all` minus the project disable-list (`.golangci.yml`). `make lint`
   (and `make fmt` for gofmt+goimports). `make help` lists targets; `make tools` installs the dev tools.
+- **Spelling**: `typos` runs in CI (required check) and locally as a reporting hook; allowlist real domain
+  terms in `_typos.toml` (repo root) rather than disabling the check.
 - Local test / run / deploy sequences: see `docs/local-dev.md`.
