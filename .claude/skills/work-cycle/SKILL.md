@@ -27,3 +27,10 @@ So the assignment + the PR/issue lifecycle move the card; the steps issue NO `gh
    - review a PR → `steps/review.md`
    - new issue → `steps/implement.md`
 3. Before exiting print `[CYCLE] done type=<address|review|implement>`, then a final recap `[CYCLE] end #<N>`. After finishing the unit — exit the process. Do NOT take a second unit in the same invocation (the next invocation starts with a clean context).
+
+## Failure vs empty — distinct exits (so the wrapper can tell a drained queue from a crash)
+- `WORK_QUEUE_EMPTY` means ONLY "nothing to do" (or the `fleet-stop` kill-switch). NEVER print it on an error.
+- If any required tool/MCP call fails unrecoverably (tool not found, GitHub API error after one retry, `git push` / PR-create failure), print a single line `CYCLE_ERROR <step> <short-reason>` and exit. NEVER swallow a failure and fall through to `WORK_QUEUE_EMPTY`. State lives in GitHub, so the next cycle re-reads and recovers; the marker just lets the operator see this cycle aborted (the wrapper stops loudly on it).
+
+## Run once per machine BEFORE the loop
+Run the `fleet-preflight` skill once per machine before starting the `/work-cycle` loop — it verifies this machine's GitHub identity (gh/git == MCP, and distinct from the other two machines), MCP reachability, and the merge-gate prerequisites. A `PREFLIGHT_FAIL …` means do NOT start the loop here until fixed.

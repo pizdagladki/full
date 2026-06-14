@@ -1,6 +1,6 @@
 Review PR #N (you claimed it by assigning yourself; you are NOT the author and NOT the most recent pusher). Print `[REVIEW] #<N> start`.
 
-1. **Sync first:** `git fetch origin`, then confirm you are reviewing the **latest pushed head** — `mcp__github__get_pull_request` (#N), compare `head.sha`; if it changed since you claimed, re-read. Fetch the diff via `mcp__github__get_pull_request_files` (#N). Check CI status via `mcp__github__get_pull_request_status` (#N) (fallback: `gh pr checks <N>` on Bash). Read the linked issue's acceptance criteria via `mcp__github__get_issue`.
+1. **Sync first:** `git fetch origin`, then confirm you are reviewing the **latest pushed head** — `mcp__github__get_pull_request` (#N), compare `head.sha`; if it changed since you claimed, re-read. Fetch the diff via `mcp__github__get_pull_request_files` (#N). Check CI via `mcp__github__get_pull_request_status` (#N) (fallback: `gh pr checks <N>` on Bash) — do NOT trust the aggregate "green": verify that EVERY expected job (`lint`, `typecheck`, `test`, `build`, `frontend`, `spell`, `spell-diff`) is present with conclusion `success` on the current `head.sha`. Any expected job that is missing, `skipped`, `cancelled`, `timed_out`, or stale (not from this `head.sha`) counts as a FAILED gate → BAD. Read the linked issue's acceptance criteria via `mcp__github__get_issue`.
 2. **Copilot comments (advisory — must be adjudicated AND resolved):** fetch existing review comments via `mcp__github__get_pull_request_comments` (#N), AND list the resolvable threads (you need their IDs) via GraphQL:
    `gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{author{login} body path line}}}}}}}' -F o=pizdagladki -F r=full -F n=<N>`
    SEPARATE OUT the threads authored by the **Copilot reviewer bot** — match on bot author (type `Bot`, login like `copilot-pull-request-reviewer`; confirm the exact login on a real PR). Collect each Copilot thread's `id` + body + file/line. If Copilot's review isn't present yet → print `[COPILOT] none yet` and proceed — NEVER block waiting for Copilot.
@@ -11,7 +11,7 @@ Review PR #N (you claimed it by assigning yourself; you are NOT the author and N
    - Resolve (no MCP/plain-gh equivalent): `gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=<threadId>`.
    Print `[COPILOT] adjudicated apply=<a> dismiss=<d> resolved=<r>`.
 5. Form the verdict from both reviews. Red CI = an automatic BAD regardless of the code.
-   - **GOOD** = your reviewers find no blocking issue AND there are NO `apply` Copilot findings AND CI is green/going green. Print `[REVIEW] #<N> verdict=GOOD`.
+   - **GOOD** = your reviewers find no blocking issue AND there are NO `apply` Copilot findings AND EVERY expected CI job (step 1) is `success` on the current `head.sha`. Print `[REVIEW] #<N> verdict=GOOD`.
      - Approve via `mcp__github__create_pull_request_review` (#N, event=APPROVE, body=summary).
      - Enable auto-merge: `gh pr merge <N> --auto --squash` (Bash). NEVER use the MCP merge tool.
      - Board stays `In Review` (the built-in `PR linked → In Review` Projects workflow handles it) — do NOT set Done. Print `[REVIEW] #<N> approved automerge`.
