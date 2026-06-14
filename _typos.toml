@@ -1,0 +1,21 @@
+# Shared allowlist for the `typos` spell-checker — used by the CI `spell` job and the local .claude hook.
+
+[default]
+locale = "en-us"
+
+[default.extend-words]
+pizdagladki = "pizdagladki"
+pizdaglyadelki = "pizdaglyadelki"
+coder = "coder"
+coturn = "coturn"
+pgx = "pgx"
+pgxpool = "pgxpool"
+minio = "minio"
+signaling = "signaling"
+matchmaking = "matchmaking"
+ratings = "ratings"
+zap = "zap"
+echo = "echo"
+
+[files]
+extend-exclude = ["go.sum", "package-lock.json", "*.svg", "vendor/", "node_modules/", "*.lock", "frontend/dist/"]
