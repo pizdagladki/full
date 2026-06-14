@@ -24,10 +24,12 @@ layer (`config`), and background workers. Dependencies point strictly inward —
 
 ## Stack
 
-- **HTTP**: `net/http` standard library — `http.ServeMux` with Go 1.22+ method+pattern routing
-  (`mux.HandleFunc("POST /v1/...", h)`). No third-party web framework.
-- **Realtime**: `github.com/gorilla/websocket` — signaling (SDP/ICE exchange), matchmaking, and
-  server-side time arbitration.
+- **HTTP**: `github.com/labstack/echo/v4` (Echo) — router, middleware, request binding and validation.
+  Handlers are `func(c echo.Context) error`; routes via `e.POST("/v1/...", h)`. Wire `validator/v10` as
+  Echo's `e.Validator`. No other web framework.
+- **Realtime**: `github.com/coder/websocket` — signaling (SDP/ICE exchange), matchmaking, and
+  server-side time arbitration. Context-native (`Accept`/`Read`/`Write` take a `context.Context`);
+  concurrent writes are safe, so no per-connection write mutex.
 - **Database**: PostgreSQL via `github.com/jackc/pgx/v5` + `pgxpool`. The repository layer writes SQL by
   hand and maps rows → domain models. Wrap any multi-step, money-touching flow in an explicit transaction.
   Use JSONB columns for flexible fields (e.g. distractor metadata).
@@ -61,10 +63,10 @@ services/<name>/
 │   │   ├── init_postgres.go    # pgxpool connect + ping
 │   │   ├── init_redis.go       # go-redis client + ping
 │   │   ├── init_storage.go     # minio client
-│   │   ├── register_http_routes.go  # ServeMux route registration (HTTP services)
+│   │   ├── register_http_routes.go  # Echo route registration (HTTP services)
 │   │   ├── run_workers.go      # starts background workers (WaitGroup)
-│   │   ├── worker_http.go      # net/http server worker + graceful shutdown
-│   │   └── worker_ws.go        # gorilla/websocket server worker (realtime services)
+│   │   ├── worker_http.go      # Echo server worker (e.Start) + graceful shutdown (e.Shutdown)
+│   │   └── worker_ws.go        # coder/websocket server worker (realtime services)
 │   │
 │   ├── api/
 │   │   ├── delivery/           # transport layer (HTTP / WS handlers)
@@ -144,28 +146,35 @@ A service exposes HTTP, WebSocket, or runs purely as a background worker dependi
 tasks are described by `worker func(ctx, *App)`; `runWorkers` launches them as goroutines under a shared
 `sync.WaitGroup` and waits for them to finish. Base workers:
 
-- `worker_http.go` — builds the `http.ServeMux`, serves via `http.Server`, and calls `Shutdown()` on
-  `ctx.Done()`.
-- `worker_ws.go` — the gorilla/websocket realtime server (signaling, matchmaking, server-side time
+- `worker_http.go` — builds the `*echo.Echo`, serves via `e.Start(addr)`, and calls `e.Shutdown(ctx)` on
+  `ctx.Done()` (treat the returned `http.ErrServerClosed` as a clean stop).
+- `worker_ws.go` — the coder/websocket realtime server (signaling, matchmaking, server-side time
   arbitration).
 - Additional loops (matchmaking, WebM→MP4 conversion via ffmpeg, cron) are added as more `worker`s in the
   slice.
 
 ### Route registration (`register_http_routes.go`)
 
-`net/http` ServeMux with method routing; protected routes wrap the handler with the auth middleware:
+Echo router; protected routes share the auth middleware via a group. Path params use `:name` (Echo), not `{name}`:
 
 ```go
-mux := http.NewServeMux()
+e := echo.New()
+e.Validator = a.validator // validator/v10 wrapper
 
-mux.HandleFunc("POST /v1/auth/{provider}", a.authHandler.Verify)
-mux.Handle("GET /v1/auth/me", a.authMiddleware.RequireAuth(http.HandlerFunc(a.authHandler.GetMe)))
+e.POST("/v1/auth/:provider", a.authHandler.Verify)
 
-mux.Handle("GET /v1/<entities>", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.List)))
-mux.Handle("POST /v1/<entities>", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.Create)))
-mux.Handle("GET /v1/<entities>/{id}", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.Get)))
-mux.Handle("DELETE /v1/<entities>/{id}", a.authMiddleware.RequireAuth(http.HandlerFunc(a.<entity>Handler.Delete)))
+// Protected routes share the auth middleware via a group.
+v1 := e.Group("/v1", a.authMiddleware.RequireAuth)
+v1.GET("/auth/me", a.authHandler.GetMe)
+
+v1.GET("/<entities>", a.<entity>Handler.List)
+v1.POST("/<entities>", a.<entity>Handler.Create)
+v1.GET("/<entities>/:id", a.<entity>Handler.Get)
+v1.DELETE("/<entities>/:id", a.<entity>Handler.Delete)
 ```
+
+Handlers implement `func(c echo.Context) error`; `RequireAuth` is an `echo.MiddlewareFunc`
+(`func(echo.HandlerFunc) echo.HandlerFunc`) that validates the Redis session.
 
 ## Configuration (`internal/config`)
 
@@ -196,7 +205,7 @@ Top to bottom — see the `new-resource` skill for the full procedure:
 3. **service** — interface in `service.go`; impl `<entity>_service.go`; `New<Entity>Service(repo, cfg, logger)`.
 4. **delivery** — interface in `delivery.go`; impl `<entity>_handler.go`; `New<Entity>Handler(service, logger)`.
 5. **app** — add fields to `struct App`; call constructors in `initRepositories/initServices/initHandlers`.
-6. **routes** — register on the ServeMux in `register_http_routes.go`.
+6. **routes** — register on the `*echo.Echo` in `register_http_routes.go`.
 
 ## Naming conventions
 

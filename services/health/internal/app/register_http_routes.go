@@ -1,11 +1,13 @@
 package app
 
-import "net/http"
+import "github.com/labstack/echo/v4"
 
-// registerHTTPRoutes builds the service's HTTP router (Go 1.22+ method routing).
-func (a *App) registerHTTPRoutes() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/health", a.healthHandler.Get)
+// registerHTTPRoutes builds the service's Echo router.
+func (a *App) registerHTTPRoutes() *echo.Echo {
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	e.GET("/v1/health", a.healthHandler.Get)
 
-	return mux
+	return e
 }
