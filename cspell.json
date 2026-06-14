@@ -21,6 +21,7 @@
     "/\\b[0-9a-fA-F]{7,}\\b/"
   ],
   "words": [
+    "ACMR",
     "BIPA",
     "Landmarker",
     "coder",
