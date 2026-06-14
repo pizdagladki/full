@@ -72,6 +72,9 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 // replies "pong". The loop exits cleanly when the client closes or the context
 // is canceled.
 func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	// nil options uses coder/websocket's secure default: same-origin check is enforced and
+	// InsecureSkipVerify is deliberately NOT set. Cross-origin support must be added later via
+	// an explicit AcceptOptions.OriginPatterns allow-list — never by setting InsecureSkipVerify.
 	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return

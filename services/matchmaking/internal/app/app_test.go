@@ -166,6 +166,67 @@ func TestWorkerWS_StartError(t *testing.T) {
 	}
 }
 
+// TestWS_CtxCancelClosesConn asserts that cancelling the context passed to
+// buildMux causes the server-side handler to return, which triggers CloseNow
+// and makes the client's next Read return an error.
+func TestWS_CtxCancelClosesConn(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mux := buildMux(ctx)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+
+	// Use a separate background context for the dial so it isn't tied to our
+	// cancellable ctx — we want only the server-side handler ctx to be cancelled.
+	dialCtx := context.Background()
+
+	c, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	defer c.CloseNow() //nolint:errcheck // best-effort close in test
+
+	// Confirm the connection is live with a ping→pong exchange.
+	if err := c.Write(dialCtx, websocket.MessageText, []byte("ping")); err != nil {
+		t.Fatalf("Write(ping): %v", err)
+	}
+
+	_, msg, err := c.Read(dialCtx)
+	if err != nil {
+		t.Fatalf("Read(pong): %v", err)
+	}
+
+	if string(msg) != "pong" {
+		t.Errorf("got %q, want %q", string(msg), "pong")
+	}
+
+	// Cancel the server-side context. The handler's Read loop will unblock with
+	// an error, return, and defer CloseNow() will close the connection.
+	cancel()
+
+	// The client's next Read must return an error within a short timeout.
+	readDone := make(chan error, 1)
+
+	go func() {
+		_, _, readErr := c.Read(dialCtx)
+		readDone <- readErr
+	}()
+
+	select {
+	case readErr := <-readDone:
+		if readErr == nil {
+			t.Fatal("Read returned nil after ctx cancel, want an error (connection closed by server)")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("client Read did not return an error within 5 s after server ctx cancel")
+	}
+}
+
 // newTestApp builds an App wired with the minimum needed to exercise the WS
 // worker: a no-op logger and an HTTP addr.
 func newTestApp(addr string) *App {
