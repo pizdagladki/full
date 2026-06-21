@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 Run EXACTLY ONE cycle and exit. Hold no state in memory — everything lives in GitHub. Print `[CYCLE] start` first.
 
-ALWAYS `git fetch origin` and work from the latest remote state before touching code — never a stale local branch. Each step below re-syncs the exact branch it needs (implement → fresh `origin/main`; address → the PR branch's latest remote head; recover → merges `main` into a behind/conflicting PR branch; review → the PR's current head).
+ALWAYS `git fetch origin` and work from the latest remote state before touching code — never a stale local branch. Each step below re-syncs the exact branch it needs (implement → fresh `origin/main`; address → the PR branch's latest remote head; unblock → merges `main` into a behind/conflicting PR branch; review → the PR's current head).
 
 ## Transport — which tool for what
 - **GitHub issues & PRs** (get/create/update issue, comment, set labels/assignee, get PR, PR files/diff, PR status, create PR, create PR review) → the **GitHub MCP** server tools (`mcp__github__*`). Owner `pizdagladki`, repo `full`. Confirm exact tool names against your available tools; do NOT invent.
@@ -25,10 +25,10 @@ So the assignment + the PR/issue lifecycle move the card; the steps issue NO `gh
    - If there's no work → print exactly `WORK_QUEUE_EMPTY` and exit. (The outer wrapper stops the loop on this word.)
 2. Depending on the type of the chosen work, run EXACTLY ONE step:
    - changes requested (needs-work) → `steps/address.md`
-   - merge-recovery (approved/conflicting PR GitHub won't merge — behind `main`, conflicting, or auto-merge not armed) → `steps/recover.md`
+   - unblock (approved/conflicting PR GitHub won't merge — behind `main`, conflicting, or auto-merge not armed) → `steps/unblock.md`
    - review a PR → `steps/review.md`
    - new issue → `steps/implement.md`
-3. Before exiting print `[CYCLE] done type=<address|recover|review|implement>`, then a final recap `[CYCLE] end #<N>`. After finishing the unit — exit the process. Do NOT take a second unit in the same invocation (the next invocation starts with a clean context).
+3. Before exiting print `[CYCLE] done type=<address|unblock|review|implement>`, then a final recap `[CYCLE] end #<N>`. After finishing the unit — exit the process. Do NOT take a second unit in the same invocation (the next invocation starts with a clean context).
 
 ## Failure vs empty — distinct exits (so the wrapper can tell a drained queue from a crash)
 - `WORK_QUEUE_EMPTY` means ONLY "nothing to do" (or the `fleet-stop` kill-switch). NEVER print it on an error.
