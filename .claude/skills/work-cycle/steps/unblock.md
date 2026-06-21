@@ -1,0 +1,17 @@
+Unblock stuck PR #N (you claimed it; auto-merge is enabled and the branch is BEHIND base or DIRTY). The job is to make the PR mergeable again, NOT to merge it: after a branch update the merge-base changes, "require approval of the most recent push" dismisses the existing approval, and a fresh approval from another account (via `review.md`) lands the merge. Print `[UNBLOCK] #<N> start state=<BEHIND|DIRTY>`.
+
+ALWAYS release your claim before exiting (remove yourself from the PR's assignees via `mcp__github__update_issue` on #N) — the work is recorded on GitHub by the push, and you are now the most-recent pusher so you may NOT review/approve this PR. Holding the claim would block the very re-review this fix depends on.
+
+1. **Sync + re-read the authoritative state:** `git fetch origin`, then `gh pr view <N> --json mergeStateStatus,mergeable,headRefName,headRefOid` (poll past `UNKNOWN`: wait ~2 s and re-read, up to 5 times).
+   - If it is now `CLEAN`/`BLOCKED`/`UNSTABLE` → no longer stuck (another worker handled it, or CI is just running): print `[UNBLOCK] #<N> not-stuck state=<S>`, release the claim, exit.
+   - If still `UNKNOWN` after polling → print `[UNBLOCK] #<N> state=unknown defer`, release the claim, exit (a later cycle retries).
+
+2a. **BEHIND** → `gh pr update-branch <N>` (default merges base INTO head — no force-push). Re-assert auto-merge: `gh pr merge <N> --auto --squash`. Release the claim. Print `[UNBLOCK] #<N> behind updated automerge-reasserted`. Exit.
+
+2b. **DIRTY** (real conflicts) →
+   - **Worktree on the PR head:** `git worktree add ../<headRefName> <headRefName>`, then `git -C ../<headRefName> reset --hard origin/<headRefName>`, then `git -C ../<headRefName> merge origin/main` (merge, NOT rebase — force-push is blocked; a merge commit is fine, the squash-merge flattens it).
+   - **Delegate ALL conflict resolution to the `coder` subagent** (Sonnet): pass it the absolute worktree path, the PR's zone (its `services/<svc>` or `frontend`, for context), and the conflicted hunks. It resolves the conflicts (any path, including shared code), keeps `make test`/`make lint` green and `make cover` ≥ 80, and commits in the worktree with a short ASCII message (e.g. `Merge main into <branch>, resolve conflicts`) — NO `Co-Authored-By` trailer. Do NOT hand-edit code yourself.
+   - **If the coder cannot reach green** (or the conflicts are unresolvable): bump the round counter on #N — read labels (`mcp__github__get_pull_request`); no `round-*` → add `round-1`; else `round-N` → `round-(N+1)` (`mcp__github__update_issue`). At `round-3` apply `needs-human` instead. Release the claim. Print `[UNBLOCK] #<N> dirty unresolved round=<n>` (or `[UNBLOCK] #<N> dirty give-up round=3 needs-human`). Exit. Leave the worktree's local changes unpushed — the next attempt re-syncs from scratch.
+   - **On green:** `git -C ../<headRefName> push` (a new commit on top of the remote head = fast-forward, NO force). Re-assert auto-merge: `gh pr merge <N> --auto --squash`. Post a brief ASCII note for the re-reviewer (`mcp__github__add_issue_comment` #N): `[unblock] merged main into <branch>; conflicts auto-resolved -- please scrutinize the resolution on re-review.` Release the claim. Print `[UNBLOCK] #<N> dirty resolved pushed automerge-reasserted`. Exit.
+
+3. Exit. Do NOT poll for the merge — the fresh re-review and auto-merge complete asynchronously across the fleet (this is one stateless unit of work). On any unrecoverable tool/MCP failure, print `CYCLE_ERROR unblock <short-reason>` and exit — NEVER `WORK_QUEUE_EMPTY`.
