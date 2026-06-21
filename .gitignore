@@ -1,6 +1,9 @@
 # Local Claude overrides
 CLAUDE.local.md
 
+# Local machine launch runbook (per-machine, not part of the deliverable)
+docs/fleet-launch-winbash.md
+
 # Per-service local config (secrets) — template is config-example.yaml
 cmd/config.yaml
 **/cmd/config.yaml
