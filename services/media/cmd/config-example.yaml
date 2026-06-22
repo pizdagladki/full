@@ -1,0 +1,10 @@
+http:
+  addr: ":8082"
+postgres:
+  dsn: "postgres://app:app@localhost:5432/app?sslmode=disable"
+storage:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  bucket: "media"
+  use_ssl: false
