@@ -5,3 +5,11 @@ postgres:
 redis:
   addr: "localhost:6379"
   password: ""
+google_oauth:
+  client_id: "your-google-client-id.apps.googleusercontent.com"
+  client_secret: "your-google-client-secret"
+  redirect_url: "http://localhost:8080/v1/auth/google/callback"
+session:
+  name: "session"
+  ttl: 24h
+  secure: false
