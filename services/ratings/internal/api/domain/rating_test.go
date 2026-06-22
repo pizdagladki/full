@@ -36,7 +36,7 @@ func TestCalcELODeltas(t *testing.T) {
 			wantLoser:  -26,
 		},
 		{
-			// Upset: underdog 1000 beats favourite 1400 — large winner gain, small loser loss.
+			// Upset: underdog 1000 beats favorite 1400 — large winner gain, small loser loss.
 			// raw_wd = 32*(1-0.0909) ≈ 29.09 → 29; raw_ld = 0.8*32*(0-0.9091) ≈ -23.27 → -23
 			name:       "upset: 1000 beats 1400 (K=32) winner=+29 loser=-23",
 			rw:         1000,
@@ -47,9 +47,9 @@ func TestCalcELODeltas(t *testing.T) {
 			wantLoser:  -23,
 		},
 		{
-			// Favourite: 1400 beats expected 1000 — small winner gain, tiny loser loss.
+			// Favorite: 1400 beats expected 1000 — small winner gain, tiny loser loss.
 			// raw_wd = 32*(1-0.9091) ≈ 2.91 → 3; raw_ld = 0.8*32*(0-0.0909) ≈ -2.33 → -2
-			name:       "favourite: 1400 beats 1000 (K=32) winner=+3 loser=-2",
+			name:       "favorite: 1400 beats 1000 (K=32) winner=+3 loser=-2",
 			rw:         1400,
 			rl:         1000,
 			gwPlayed:   20,
