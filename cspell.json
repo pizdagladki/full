@@ -64,6 +64,7 @@
     "pizdagladki",
     "pizdaglyadelki",
     "platformredis",
+    "platformstorage",
     "ratings",
     "repomocks",
     "sess",
