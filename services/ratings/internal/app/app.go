@@ -10,6 +10,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/internal/platform/logger"
+	"github.com/pizdagladki/full/services/ratings/internal/api/delivery"
+	"github.com/pizdagladki/full/services/ratings/internal/api/repository"
+	"github.com/pizdagladki/full/services/ratings/internal/api/service"
 	"github.com/pizdagladki/full/services/ratings/internal/config"
 )
 
@@ -23,6 +26,10 @@ type App struct {
 
 	pgxPool     *pgxpool.Pool
 	redisClient *redis.Client
+
+	ratingsRepo    repository.RatingsRepository
+	ratingsService service.RatingsService
+	ratingsHandler delivery.RatingsHandler
 }
 
 // New returns an empty App for the given service name.
@@ -60,6 +67,10 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	defer func() { _ = a.redisClient.Close() }()
 
+	a.initRepositories()
+	a.initServices()
+	a.initHandlers()
+
 	return a.runWorkers(ctx)
 }
 
@@ -83,4 +94,16 @@ func (a *App) populateConfig() error {
 	a.cfg = cfg
 
 	return nil
+}
+
+func (a *App) initRepositories() {
+	a.ratingsRepo = repository.NewRatingsRepository(a.pgxPool)
+}
+
+func (a *App) initServices() {
+	a.ratingsService = service.NewRatingsService(a.ratingsRepo, a.logger)
+}
+
+func (a *App) initHandlers() {
+	a.ratingsHandler = delivery.NewRatingsHandler(a.ratingsService, a.logger)
 }
