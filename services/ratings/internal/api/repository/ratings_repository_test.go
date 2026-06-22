@@ -90,6 +90,10 @@ func TestGetRating(t *testing.T) {
 					t.Fatal("GetRating() error = nil, want error")
 				}
 
+				if metErr := mock.ExpectationsWereMet(); metErr != nil {
+					t.Errorf("unmet expectations on error path: %v", metErr)
+				}
+
 				return
 			}
 
@@ -124,6 +128,7 @@ func TestApplyMatchResult(t *testing.T) {
 	}{
 		{
 			name: "happy path: two fresh players at default ELO",
+			// winner=1 < loser=2 → canonical order is 1,2 (matches winner/loser order).
 			input: domain.MatchInput{
 				WinnerID:   1,
 				LoserID:    2,
@@ -133,23 +138,21 @@ func TestApplyMatchResult(t *testing.T) {
 			setup: func(mock pgxmock.PgxPoolIface) {
 				mock.ExpectBegin()
 
-				// Upsert winner default
+				// Upsert in canonical (ascending-id) order: id=1 first, id=2 second.
 				mock.ExpectExec(`INSERT INTO ratings`).
 					WithArgs(int64(1), domain.DefaultELO, domain.DefaultLevel, domain.DefaultGamesPlayed).
 					WillReturnResult(pgxmock.NewResult("INSERT", 1))
-
-				// Upsert loser default
 				mock.ExpectExec(`INSERT INTO ratings`).
 					WithArgs(int64(2), domain.DefaultELO, domain.DefaultLevel, domain.DefaultGamesPlayed).
 					WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
-				// Lock winner: ELO=1000, level=4, games_played=0 (calibration → K=64)
+				// Lock in canonical (ascending-id) order: id=1 first, id=2 second.
+				// winner=1 ELO=1000, level=4, games_played=0 (calibration → K=64)
 				mock.ExpectQuery(`SELECT elo, level, games_played`).
 					WithArgs(int64(1)).
 					WillReturnRows(mock.NewRows([]string{"elo", "level", "games_played"}).
 						AddRow(1000, 4, 0))
-
-				// Lock loser: ELO=1000, level=4, games_played=0
+				// loser=2 ELO=1000, level=4, games_played=0
 				mock.ExpectQuery(`SELECT elo, level, games_played`).
 					WithArgs(int64(2)).
 					WillReturnRows(mock.NewRows([]string{"elo", "level", "games_played"}).
@@ -179,6 +182,63 @@ func TestApplyMatchResult(t *testing.T) {
 			want: domain.MatchResult{
 				Winner:      domain.Rating{UserID: 1, ELO: 1032, Level: 4, GamesPlayed: 1},
 				Loser:       domain.Rating{UserID: 2, ELO: 974, Level: 4, GamesPlayed: 1},
+				WinnerDelta: 32,
+				LoserDelta:  -26,
+			},
+		},
+		{
+			name: "canonical lock order: winner_id > loser_id locks lower id first",
+			// winner=5, loser=3 → canonical order must be 3 first, then 5 (ascending).
+			// This verifies the deadlock-prevention reordering: even though A is the
+			// loser, its row is locked first because 3 < 5.
+			input: domain.MatchInput{
+				WinnerID:   5,
+				LoserID:    3,
+				Mode:       "ranked",
+				DurationMS: &dur,
+			},
+			setup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectBegin()
+
+				// Canonical upsert order: lower id=3 first, then id=5.
+				mock.ExpectExec(`INSERT INTO ratings`).
+					WithArgs(int64(3), domain.DefaultELO, domain.DefaultLevel, domain.DefaultGamesPlayed).
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				mock.ExpectExec(`INSERT INTO ratings`).
+					WithArgs(int64(5), domain.DefaultELO, domain.DefaultLevel, domain.DefaultGamesPlayed).
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+				// Canonical lock order: lower id=3 first (this is the loser), then id=5 (winner).
+				mock.ExpectQuery(`SELECT elo, level, games_played`).
+					WithArgs(int64(3)).
+					WillReturnRows(mock.NewRows([]string{"elo", "level", "games_played"}).
+						AddRow(1000, 4, 0))
+				mock.ExpectQuery(`SELECT elo, level, games_played`).
+					WithArgs(int64(5)).
+					WillReturnRows(mock.NewRows([]string{"elo", "level", "games_played"}).
+						AddRow(1000, 4, 0))
+
+				// Equal new-player ELOs → K=64: winnerDelta=32, loserDelta=-26
+				newWinnerELO := 1000 + 32
+				newLoserELO := 1000 + (-26)
+
+				// Updates are applied in winner/loser order (id=5 winner, id=3 loser).
+				mock.ExpectExec(`UPDATE ratings`).
+					WithArgs(int64(5), newWinnerELO, domain.LevelForELO(newWinnerELO), 1).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+				mock.ExpectExec(`UPDATE ratings`).
+					WithArgs(int64(3), newLoserELO, domain.LevelForELO(newLoserELO), 1).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+				mock.ExpectExec(`INSERT INTO match_results`).
+					WithArgs(int64(5), int64(3), "ranked", 32, -26, &dur).
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+				mock.ExpectCommit()
+			},
+			want: domain.MatchResult{
+				Winner:      domain.Rating{UserID: 5, ELO: 1032, Level: 4, GamesPlayed: 1},
+				Loser:       domain.Rating{UserID: 3, ELO: 974, Level: 4, GamesPlayed: 1},
 				WinnerDelta: 32,
 				LoserDelta:  -26,
 			},
@@ -289,6 +349,10 @@ func TestApplyMatchResult(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("ApplyMatchResult() error = nil, want error")
+				}
+
+				if metErr := mock.ExpectationsWereMet(); metErr != nil {
+					t.Errorf("unmet expectations on error path: %v", metErr)
 				}
 
 				return

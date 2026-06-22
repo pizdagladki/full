@@ -3,6 +3,14 @@
 GOLANGCI_VERSION := v2.11.4
 MIN_COVERAGE := 80
 
+# On Windows, Application Control policies may block newly-compiled test
+# binaries when multiple packages are built in parallel (the policy cache is
+# not always warmed fast enough). Limit package-level parallelism to 1 and
+# redirect the build temp dir to a workspace-local path that is always
+# allowed by the policy.
+export GOTMPDIR := $(CURDIR)/../../.gotmp
+GO_TEST_FLAGS := -p 1
+
 .PHONY: help run build test cover vet lint fmt generate mocks migrate tools docker-up docker-down
 
 help: ## Show this help
@@ -15,11 +23,11 @@ build: ## Build the service binary
 	go build -o bin/app ./cmd
 
 test: ## Run tests
-	go test ./... -count=1
+	go test $(GO_TEST_FLAGS) ./... -count=1
 
 cover: ## Run tests and enforce >=80% coverage (excludes cmd + generated mocks)
 	@pkgs=$$(go list ./... | grep -v -e '/cmd$$' -e '/mocks$$'); \
-	go test $$pkgs -coverpkg=$$(echo $$pkgs | tr ' ' ,) -covermode=atomic -coverprofile=coverage.out -count=1; \
+	go test $(GO_TEST_FLAGS) $$pkgs -coverpkg=$$(echo $$pkgs | tr ' ' ,) -covermode=atomic -coverprofile=coverage.out -count=1; \
 	total=$$(go tool cover -func=coverage.out | awk '/^total:/{gsub(/%/,"",$$3); print $$3}'); \
 	rm -f coverage.out; \
 	echo "total coverage: $$total% (min $(MIN_COVERAGE)%)"; \

@@ -74,32 +74,47 @@ func (r *ratingsRepository) ApplyMatchResult(ctx context.Context, input domain.M
 		}
 	}()
 
-	// (a) Materialize default rows for both players if absent.
-	err = upsertDefault(ctx, tx, input.WinnerID)
-	if err != nil {
-		return domain.MatchResult{}, fmt.Errorf("upsert default for %d: %w", input.WinnerID, err)
+	// Determine canonical (ascending) lock order to prevent AB/BA deadlocks when
+	// two concurrent matches involve the same pair with winner/loser swapped.
+	firstID, secondID := input.WinnerID, input.LoserID
+	if firstID > secondID {
+		firstID, secondID = secondID, firstID
 	}
 
-	err = upsertDefault(ctx, tx, input.LoserID)
+	// (a) Materialize default rows for both players if absent — in canonical order.
+	err = upsertDefault(ctx, tx, firstID)
 	if err != nil {
-		return domain.MatchResult{}, fmt.Errorf("upsert default for %d: %w", input.LoserID, err)
+		return domain.MatchResult{}, fmt.Errorf("upsert default for %d: %w", firstID, err)
 	}
 
-	// (b) SELECT … FOR UPDATE both rows.
+	err = upsertDefault(ctx, tx, secondID)
+	if err != nil {
+		return domain.MatchResult{}, fmt.Errorf("upsert default for %d: %w", secondID, err)
+	}
+
+	// (b) SELECT … FOR UPDATE both rows in canonical order.
+	var firstRating, secondRating domain.Rating
+	firstRating.UserID = firstID
+	secondRating.UserID = secondID
+
+	err = tx.QueryRow(ctx, sqlLockRating, firstID).
+		Scan(&firstRating.ELO, &firstRating.Level, &firstRating.GamesPlayed)
+	if err != nil {
+		return domain.MatchResult{}, fmt.Errorf("lock user %d: %w", firstID, err)
+	}
+
+	err = tx.QueryRow(ctx, sqlLockRating, secondID).
+		Scan(&secondRating.ELO, &secondRating.Level, &secondRating.GamesPlayed)
+	if err != nil {
+		return domain.MatchResult{}, fmt.Errorf("lock user %d: %w", secondID, err)
+	}
+
+	// Map back to winner/loser regardless of lock order.
 	var winnerBefore, loserBefore domain.Rating
-	winnerBefore.UserID = input.WinnerID
-	loserBefore.UserID = input.LoserID
-
-	err = tx.QueryRow(ctx, sqlLockRating, input.WinnerID).
-		Scan(&winnerBefore.ELO, &winnerBefore.Level, &winnerBefore.GamesPlayed)
-	if err != nil {
-		return domain.MatchResult{}, fmt.Errorf("lock winner %d: %w", input.WinnerID, err)
-	}
-
-	err = tx.QueryRow(ctx, sqlLockRating, input.LoserID).
-		Scan(&loserBefore.ELO, &loserBefore.Level, &loserBefore.GamesPlayed)
-	if err != nil {
-		return domain.MatchResult{}, fmt.Errorf("lock loser %d: %w", input.LoserID, err)
+	if input.WinnerID == firstID {
+		winnerBefore, loserBefore = firstRating, secondRating
+	} else {
+		winnerBefore, loserBefore = secondRating, firstRating
 	}
 
 	// (c) Compute deltas via the pure domain functions.

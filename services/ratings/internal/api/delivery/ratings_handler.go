@@ -26,10 +26,10 @@ func NewRatingsHandler(svc service.RatingsService, logger *zap.Logger) RatingsHa
 
 // matchResultRequest is the POST /v1/matches/result body.
 type matchResultRequest struct {
-	WinnerID   int64  `json:"winner_id"  validate:"required"`
-	LoserID    int64  `json:"loser_id"   validate:"required"`
-	Mode       string `json:"mode"       validate:"required"`
-	DurationMS *int   `json:"duration_ms"`
+	WinnerID   int64  `json:"winner_id"  validate:"required,gt=0"`
+	LoserID    int64  `json:"loser_id"   validate:"required,gt=0"`
+	Mode       string `json:"mode"       validate:"required,max=64"`
+	DurationMS *int   `json:"duration_ms" validate:"omitempty,min=0"`
 }
 
 // playerRating is the per-player fragment in the response.
@@ -66,7 +66,7 @@ func (h *ratingsHandler) PostMatchResult(c echo.Context) error {
 
 	err = c.Validate(req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
 	}
 
 	result, err := h.service.ApplyMatchResult(c.Request().Context(), domain.MatchInput{

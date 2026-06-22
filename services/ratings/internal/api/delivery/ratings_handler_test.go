@@ -105,6 +105,42 @@ func TestPostMatchResult(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
+			name:       "400 winner_id is zero",
+			body:       `{"winner_id":0,"loser_id":2,"mode":"classic"}`,
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400 winner_id is negative",
+			body:       `{"winner_id":-1,"loser_id":2,"mode":"classic"}`,
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400 loser_id is zero",
+			body:       `{"winner_id":1,"loser_id":0,"mode":"classic"}`,
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400 loser_id is negative",
+			body:       `{"winner_id":1,"loser_id":-5,"mode":"classic"}`,
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400 mode too long",
+			body:       `{"winner_id":1,"loser_id":2,"mode":"` + strings.Repeat("x", 65) + `"}`,
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400 negative duration_ms",
+			body:       `{"winner_id":1,"loser_id":2,"mode":"classic","duration_ms":-1}`,
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
 			name: "400 same player from service",
 			body: `{"winner_id":5,"loser_id":5,"mode":"classic"}`,
 			setup: func(svc *svcmocks.MockRatingsService) {
