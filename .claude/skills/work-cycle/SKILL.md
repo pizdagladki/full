@@ -8,7 +8,10 @@ Run EXACTLY ONE cycle and exit. Hold no state in memory — everything lives in 
 ALWAYS `git fetch origin` and work from the latest remote state before touching code — never a stale local branch. Each step below re-syncs the exact branch it needs (implement → fresh `origin/main`; address → the PR branch's latest remote head; unblock → merges `main` into a behind/conflicting PR branch; review → the PR's current head).
 
 ## Transport — which tool for what
-- **GitHub issues & PRs** (get/create/update issue, comment, set labels/assignee, get PR, PR files/diff, PR status, create PR, create PR review) → the **GitHub MCP** server tools (`mcp__github__*`). Owner `pizdagladki`, repo `full`. Confirm exact tool names against your available tools; do NOT invent.
+- **GitHub issues & PRs** → the **GitHub MCP** server tools (`mcp__github__*`), owner `pizdagladki`, repo `full`. Current tool names in this build (confirm against your available tools; do NOT invent):
+  - `issue_read` (`method=get`/`get_comments`/`get_labels`/`get_sub_issues`), `issue_write` (`method=create`/`update` — sets `labels`/`assignees`/`state`/`body`), `add_issue_comment`, `list_issues`, `search_issues`.
+  - `pull_request_read` (`method=get`/`get_diff`/`get_files`/`get_status`/`get_check_runs`/`get_comments`/`get_review_comments`/`get_reviews`), `list_pull_requests`, `create_pull_request`.
+  - `pull_request_review_write` (`method=create` with `event=APPROVE`/`REQUEST_CHANGES`/`COMMENT`; or `method=resolve_thread`/`unresolve_thread` with `threadId`).
 - **Projects board** → automated by GitHub workflows; the skills do NOT move cards (see below).
 - **Enable auto-merge** → `gh pr merge <N> --auto --squash` (Bash). NEVER use the MCP merge tool anywhere — it merges immediately and bypasses the wait-for-green-CI model.
 - **Bring a behind branch up to date** → `gh pr update-branch <N>` (Bash; merges `main` into the PR branch — no force-push) or `git merge origin/main` in a worktree. NEVER rebase-and-force-push a pushed PR branch: force-push is denied (`settings.json`) and blocked by branch protection, so rebasing it is a dead end.
@@ -25,7 +28,7 @@ So the assignment + the PR/issue lifecycle move the card; the steps issue NO `gh
    - If there's no work → print exactly `WORK_QUEUE_EMPTY` and exit. (The outer wrapper stops the loop on this word.)
 2. Depending on the type of the chosen work, run EXACTLY ONE step:
    - changes requested (needs-work) → `steps/address.md`
-   - unblock (approved/conflicting PR GitHub won't merge — behind `main`, conflicting, or auto-merge not armed) → `steps/unblock.md`
+   - unblock (a PR GitHub won't merge on its own — behind `main` at any review state, conflicting with `main`, or approved-but-auto-merge-not-armed) → `steps/unblock.md`
    - review a PR → `steps/review.md`
    - new issue → `steps/implement.md`
 3. Before exiting print `[CYCLE] done type=<address|unblock|review|implement>`, then a final recap `[CYCLE] end #<N>`. After finishing the unit — exit the process. Do NOT take a second unit in the same invocation (the next invocation starts with a clean context).
