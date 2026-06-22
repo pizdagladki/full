@@ -25,7 +25,7 @@ CREATE INDEX purchases_user_id_created_at_idx ON purchases (user_id, created_at)
 CREATE TABLE inventory (
     user_id    BIGINT      NOT NULL,
     product_id BIGINT      NOT NULL REFERENCES products (id),
-    quantity   INTEGER     NOT NULL DEFAULT 0,
+    quantity   INTEGER     NOT NULL DEFAULT 0 CHECK (quantity >= 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
