@@ -7,9 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/labstack/echo/v4"
+	"github.com/redis/go-redis/v9"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 
+	"github.com/pizdagladki/full/services/auth/internal/api/delivery"
+	"github.com/pizdagladki/full/services/auth/internal/api/middleware"
+	svcmocks "github.com/pizdagladki/full/services/auth/internal/api/service/mocks"
 	"github.com/pizdagladki/full/services/auth/internal/config"
 )
 
@@ -62,7 +68,7 @@ func TestInitValidator(t *testing.T) {
 func TestRegisterHTTPRoutes_Healthz(t *testing.T) {
 	t.Parallel()
 
-	a := newTestApp("127.0.0.1:0")
+	a := newTestApp(t, "127.0.0.1:0")
 	e := a.registerHTTPRoutes()
 
 	if e.Validator == nil {
@@ -114,10 +120,104 @@ func TestInitRedis_Error(t *testing.T) {
 	}
 }
 
+// TestInitRepositories verifies that initRepositories wires userRepo using a
+// real (but fake-pooled) pgxpool so the field is non-nil after the call.
+// We use a nil pool here because initRepositories only stores the pool — it
+// doesn't ping or query during construction.
+func TestInitRepositories(t *testing.T) {
+	t.Parallel()
+
+	a := New("auth")
+	// pgxPool left nil; NewUserRepository accepts the rowQuerier interface and
+	// pgxpool.Pool only needs to exist when queries run, not during construction.
+	a.initRepositories()
+
+	if a.userRepo == nil {
+		t.Fatal("userRepo is nil after initRepositories")
+	}
+}
+
+// TestInitServices verifies that initServices wires oauth, sessionStore, and
+// authService using a miniredis-backed client so no live Redis is needed.
+func TestInitServices(t *testing.T) {
+	t.Parallel()
+
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	a := New("auth")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{
+		GoogleOAuth: config.GoogleOAuthConfig{
+			ClientID:     "cid",
+			ClientSecret: "csecret",
+			RedirectURL:  "http://localhost/cb",
+		},
+		Session: config.SessionConfig{Name: "session", TTL: time.Hour},
+	}
+	a.redisClient = client
+	a.initRepositories() // userRepo needed by initServices
+
+	a.initServices()
+
+	if a.oauth == nil {
+		t.Error("oauth is nil after initServices")
+	}
+	if a.sessionStore == nil {
+		t.Error("sessionStore is nil after initServices")
+	}
+	if a.authService == nil {
+		t.Error("authService is nil after initServices")
+	}
+}
+
+// TestInitHandlers verifies that initHandlers wires authHandler using an
+// already-initialized authService.
+func TestInitHandlers(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	svcMock := svcmocks.NewMockAuthService(ctrl)
+
+	a := New("auth")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{
+		Session: config.SessionConfig{Name: "session", TTL: time.Hour},
+	}
+	a.authService = svcMock
+
+	a.initHandlers()
+
+	if a.authHandler == nil {
+		t.Fatal("authHandler is nil after initHandlers")
+	}
+}
+
+// TestInitMiddleware verifies that initMiddleware wires authMiddleware.
+func TestInitMiddleware(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	svcMock := svcmocks.NewMockAuthService(ctrl)
+
+	a := New("auth")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{
+		Session: config.SessionConfig{Name: "session", TTL: time.Hour},
+	}
+	a.authService = svcMock
+
+	a.initMiddleware()
+
+	if a.authMiddleware == nil {
+		t.Fatal("authMiddleware is nil after initMiddleware")
+	}
+}
+
 func TestRunWorkers_GracefulShutdown(t *testing.T) {
 	t.Parallel()
 
-	a := newTestApp("127.0.0.1:0")
+	a := newTestApp(t, "127.0.0.1:0")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -142,7 +242,7 @@ func TestRunWorkers_WorkerError(t *testing.T) {
 	t.Parallel()
 
 	// A bind address with no port makes e.Start fail, surfacing a worker error.
-	a := newTestApp("not-a-valid-bind-addr")
+	a := newTestApp(t, "not-a-valid-bind-addr")
 
 	if err := a.runWorkers(context.Background()); err == nil {
 		t.Fatal("runWorkers() error = nil, want the worker's start error")
@@ -165,6 +265,9 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("POSTGRES_DSN", "postgres://localhost:not-a-port/db")
 	t.Setenv("REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("GOOGLE_OAUTH_CLIENT_ID", "cid")
+	t.Setenv("GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
+	t.Setenv("GOOGLE_OAUTH_REDIRECT_URL", "http://localhost/cb")
 
 	a := New("auth")
 	if err := a.Run(context.Background()); err == nil {
@@ -173,12 +276,29 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 }
 
 // newTestApp builds an App wired with the minimum needed to exercise the HTTP
-// worker and router: a no-op logger, the validator, and an HTTP addr.
-func newTestApp(addr string) *App {
+// worker and router: a no-op logger, the validator, an HTTP addr, and stub
+// auth handler + middleware so the route registration doesn't panic.
+func newTestApp(t *testing.T, addr string) *App {
+	t.Helper()
+
+	ctrl := gomock.NewController(t)
+	svcMock := svcmocks.NewMockAuthService(ctrl)
+
 	a := New("auth-test")
 	a.logger = zap.NewNop()
 	a.initValidator()
-	a.cfg = &config.Config{HTTP: config.HTTPConfig{Addr: addr}}
+	a.cfg = &config.Config{
+		HTTP:        config.HTTPConfig{Addr: addr},
+		Session:     config.SessionConfig{Name: "session", TTL: time.Hour},
+		GoogleOAuth: config.GoogleOAuthConfig{ClientID: "cid", ClientSecret: "csec", RedirectURL: "http://localhost/cb"},
+	}
+
+	// Wire stub handler and middleware so registerHTTPRoutes works.
+	a.authHandler = delivery.NewAuthHandler(svcMock, zap.NewNop(), delivery.HandlerConfig{
+		CookieName: "session",
+		CookieTTL:  time.Hour,
+	})
+	a.authMiddleware = middleware.NewAuthMiddleware(svcMock, "session", zap.NewNop())
 
 	return a
 }
