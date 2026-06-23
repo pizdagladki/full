@@ -28,15 +28,33 @@ type RedisConfig struct {
 	Password string `yaml:"password"`
 }
 
-// MatchmakingConfig holds the pairing algorithm settings.
+// matchmakingRaw is the YAML-decoded form; FallbackAfterStr is kept as a
+// plain string so gopkg.in/yaml.v3 can decode "10s" without error (yaml.v3
+// treats time.Duration as int64, not a duration string, so round-tripping
+// "10s" through a time.Duration field fails).
+type matchmakingRaw struct {
+	LevelDistance    int    `yaml:"level_distance"`
+	FallbackAfterStr string `yaml:"fallback_after"`
+	SessionCookie    string `yaml:"session_cookie"`
+}
+
+// MatchmakingConfig holds the pairing algorithm settings after any string
+// fields have been parsed to their native types.
 type MatchmakingConfig struct {
 	// LevelDistance is the maximum level difference D for an in-distance match.
-	LevelDistance int `yaml:"level_distance"`
+	LevelDistance int
 	// FallbackAfter is how long a player waits before the fallback (nearest-
 	// regardless) pairing is used.
-	FallbackAfter time.Duration `yaml:"fallback_after"`
+	FallbackAfter time.Duration
 	// SessionCookie is the name of the HTTP cookie that carries the session id.
-	SessionCookie string `yaml:"session_cookie"`
+	SessionCookie string
+}
+
+// rawConfig is the intermediate YAML-decoded config before post-processing.
+type rawConfig struct {
+	HTTP        HTTPConfig     `yaml:"http"        validate:"required"`
+	Redis       RedisConfig    `yaml:"redis"       validate:"required"`
+	Matchmaking matchmakingRaw `yaml:"matchmaking"`
 }
 
 const (
@@ -112,18 +130,35 @@ func loadFromFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config %q: %w", path, err)
 	}
 
-	cfg := &Config{HTTP: HTTPConfig{Addr: defaultAddr}}
+	raw := &rawConfig{HTTP: HTTPConfig{Addr: defaultAddr}}
 
-	err = yaml.Unmarshal(b, cfg)
+	err = yaml.Unmarshal(b, raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
 
-	if cfg.HTTP.Addr == "" {
-		cfg.HTTP.Addr = defaultAddr
+	if raw.HTTP.Addr == "" {
+		raw.HTTP.Addr = defaultAddr
 	}
 
-	return cfg, nil
+	// Parse the duration string from YAML (e.g. "10s").
+	var fallbackAfter time.Duration
+	if raw.Matchmaking.FallbackAfterStr != "" {
+		fallbackAfter, err = time.ParseDuration(raw.Matchmaking.FallbackAfterStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse matchmaking.fallback_after %q: %w", raw.Matchmaking.FallbackAfterStr, err)
+		}
+	}
+
+	return &Config{
+		HTTP:  raw.HTTP,
+		Redis: raw.Redis,
+		Matchmaking: MatchmakingConfig{
+			LevelDistance: raw.Matchmaking.LevelDistance,
+			FallbackAfter: fallbackAfter,
+			SessionCookie: raw.Matchmaking.SessionCookie,
+		},
+	}, nil
 }
 
 // applyMatchmakingDefaults fills zero values with sane defaults.

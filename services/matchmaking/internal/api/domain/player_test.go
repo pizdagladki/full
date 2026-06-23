@@ -43,10 +43,20 @@ func TestValidateMode(t *testing.T) {
 		mode    string
 		wantErr bool
 	}{
-		{"valid short", "ranked", false},
-		{"valid 64 chars", string(make([]byte, 64)), false},
+		// accepted
+		{"valid lowercase", "ranked", false},
+		{"valid with hyphen", "quick-play", false},
+		{"valid with underscore", "battle_royale", false},
+		{"valid digits", "mode1", false},
+		{"valid 32 chars", "a123456789012345678901234567890x", false},
+		// rejected — charset
 		{"empty invalid", "", true},
-		{"65 chars invalid", string(make([]byte, 65)), true},
+		{"uppercase rejected", "Ranked", true},
+		{"colon in mode rejected", "mode:1", true},
+		{"space rejected", "ranked mode", true},
+		{"control char rejected", "mode\x00", true},
+		// rejected — length
+		{"33 chars invalid", "a1234567890123456789012345678901x", true},
 	}
 
 	for _, tt := range tests {
@@ -73,7 +83,8 @@ func TestValidateJoin(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid", "ranked", 5, false},
-		{"bad mode", "", 5, true},
+		{"bad mode empty", "", 5, true},
+		{"bad mode charset", "Ranked", 5, true},
 		{"bad level", "ranked", 0, true},
 		{"both bad returns mode error first", "", 0, true},
 	}

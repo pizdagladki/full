@@ -218,7 +218,9 @@ func (s *matchmakingService) tryPair(
 			Opponent: b.UserID,
 		})
 		if sendErr != nil {
+			// Close the peer so it reconnects and can rejoin the queue.
 			s.logger.Error("send match to a", zap.Error(sendErr))
+			connA.Close("send error: reconnect and rejoin")
 		}
 	}
 
@@ -229,7 +231,9 @@ func (s *matchmakingService) tryPair(
 			Opponent: a.UserID,
 		})
 		if sendErr != nil {
+			// Close the peer so it reconnects and can rejoin the queue.
 			s.logger.Error("send match to b", zap.Error(sendErr))
+			connB.Close("send error: reconnect and rejoin")
 		}
 	}
 }

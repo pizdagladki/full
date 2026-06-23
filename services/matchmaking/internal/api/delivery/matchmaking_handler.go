@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -13,6 +14,19 @@ import (
 	"github.com/pizdagladki/full/services/matchmaking/internal/api/domain"
 	"github.com/pizdagladki/full/services/matchmaking/internal/api/repository"
 	"github.com/pizdagladki/full/services/matchmaking/internal/api/service"
+)
+
+const (
+	// wsReadLimit caps inbound WS frames to 4 KiB — join/leave envelopes are tiny.
+	wsReadLimit = 4096
+	// cleanupTimeout is the budget for the disconnect-path Leave / HDEL calls.
+	// A fresh context is used here — r.Context() is already canceled when the
+	// connection drops, so reusing it would make queueRepo.Remove (HDEL) fail
+	// with context.Canceled and leave a ghost entry in mm:queue:<mode>.
+	cleanupTimeout = 5 * time.Second
+	// sendTimeout caps how long a single Send to a matched player may block,
+	// preventing a wedged client from stalling the single matcher goroutine.
+	sendTimeout = 5 * time.Second
 )
 
 // matchmakingHandler is the WS handler implementation.
@@ -49,6 +63,9 @@ func (h *matchmakingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	defer conn.CloseNow() //nolint:errcheck // best-effort close
 
+	// Limit inbound frame size: join/leave envelopes are tiny.
+	conn.SetReadLimit(wsReadLimit)
+
 	ctx := r.Context()
 
 	// Authenticate via the session cookie.
@@ -80,7 +97,10 @@ func (h *matchmakingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		if readErr != nil {
 			// Any read error (EOF, context cancel, close frame) → leave.
 			if currentMode != "" {
-				h.svc.Leave(ctx, userID, currentMode)
+				// Use a fresh, independent context (not r.Context()) so the
+				// Redis HDEL still succeeds even after the request context is
+				// canceled by the connection drop.  See cleanupTimeout const.
+				leaveWithFreshCtx(ctx, h.svc, userID, currentMode)
 			}
 
 			return
@@ -89,8 +109,8 @@ func (h *matchmakingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "join":
 			if currentMode != "" {
-				// Already in a queue — remove from old queue first.
-				h.svc.Leave(ctx, userID, currentMode)
+				// Already queued — leave the old slot before joining a new one.
+				leaveWithFreshCtx(ctx, h.svc, userID, currentMode)
 			}
 
 			player := domain.Player{
@@ -102,7 +122,7 @@ func (h *matchmakingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 			joinErr := h.svc.Join(ctx, adapted, player)
 			if joinErr != nil {
-				sendErrMsg(ctx, conn, joinErr.Error())
+				sendErrMsg(ctx, conn, safeErrMsg(joinErr))
 
 				continue
 			}
@@ -111,7 +131,7 @@ func (h *matchmakingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 		case "leave":
 			if currentMode != "" {
-				h.svc.Leave(ctx, userID, currentMode)
+				leaveWithFreshCtx(ctx, h.svc, userID, currentMode)
 				currentMode = ""
 			}
 
@@ -119,6 +139,30 @@ func (h *matchmakingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 			sendErrMsg(ctx, conn, domain.ErrUnknownType.Error())
 		}
 	}
+}
+
+// leaveWithFreshCtx calls svc.Leave with a short-lived background context so
+// the Redis HDEL is not affected by a canceled request context (which would
+// leave a ghost entry in mm:queue:<mode>).
+// The _ parameter is accepted so callers satisfy contextcheck; it is
+// intentionally NOT used — the whole point is to detach from it.
+func leaveWithFreshCtx(_ context.Context, svc service.MatchmakingService, userID int64, mode string) {
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
+
+	svc.Leave(ctx, userID, mode) //nolint:contextcheck // intentional detach from caller ctx
+}
+
+// safeErrMsg returns a client-safe error string. Domain sentinel errors
+// (ErrInvalidLevel, ErrInvalidMode) are forwarded as-is; everything else
+// is redacted to "internal error" so Redis addresses and backend details
+// never reach the WS client.
+func safeErrMsg(err error) string {
+	if errors.Is(err, domain.ErrInvalidLevel) || errors.Is(err, domain.ErrInvalidMode) {
+		return err.Error()
+	}
+
+	return "internal error"
 }
 
 // sendErrMsg writes a JSON error envelope to the client. Best-effort.
@@ -144,8 +188,13 @@ type adaptedConn struct {
 
 func (c *adaptedConn) UserID() int64 { return c.userID }
 
+// Send writes a MatchedMessage to the peer with a bounded timeout so a wedged
+// client cannot stall the single matcher goroutine indefinitely.
 func (c *adaptedConn) Send(msg domain.MatchedMessage) error {
-	return wsjson.Write(context.Background(), c.conn, msg)
+	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+	defer cancel()
+
+	return wsjson.Write(ctx, c.conn, msg)
 }
 
 func (c *adaptedConn) Close(reason string) {

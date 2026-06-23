@@ -183,6 +183,82 @@ func TestMatchmakingHandler_Leave_Message(t *testing.T) {
 	_ = c.Close(websocket.StatusNormalClosure, "")
 }
 
+func TestMatchmakingHandler_Join_InternalErrorRedacted(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockMatchmakingService(ctrl)
+
+	sessionRepo.EXPECT().
+		UserIDBySession(gomock.Any(), "valid-token").
+		Return(int64(42), nil)
+
+	// Service returns a non-sentinel error (e.g. Redis down).
+	svc.EXPECT().
+		Join(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(errors.New("redis: connection refused"))
+
+	handler := NewMatchmakingHandler(zap.NewNop(), sessionRepo, svc, "session")
+
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: map[string][]string{"Cookie": {"session=valid-token"}},
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.CloseNow() //nolint:errcheck // best-effort
+
+	if writeErr := wsjson.Write(ctx, c, domain.InboundMessage{Type: "join", Mode: "ranked", Level: 5}); writeErr != nil {
+		t.Fatalf("Write: %v", writeErr)
+	}
+
+	var resp map[string]string
+	if readErr := wsjson.Read(ctx, c, &resp); readErr != nil {
+		t.Fatalf("Read error response: %v", readErr)
+	}
+	if resp["type"] != "error" {
+		t.Errorf("response type = %q, want error", resp["type"])
+	}
+	// Internal redis error must not be forwarded to the client.
+	if resp["error"] == "redis: connection refused" {
+		t.Errorf("internal error leaked to client: %q", resp["error"])
+	}
+	if resp["error"] != "internal error" {
+		t.Errorf("error = %q, want %q", resp["error"], "internal error")
+	}
+}
+
+func TestSafeErrMsg(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"ErrInvalidLevel forwarded", domain.ErrInvalidLevel, domain.ErrInvalidLevel.Error()},
+		{"ErrInvalidMode forwarded", domain.ErrInvalidMode, domain.ErrInvalidMode.Error()},
+		{"generic error redacted", errors.New("redis: dial tcp refused"), "internal error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := safeErrMsg(tt.err)
+			if got != tt.want {
+				t.Errorf("safeErrMsg(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchmakingHandler_UnknownType(t *testing.T) {
 	t.Parallel()
 

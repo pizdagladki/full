@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -99,6 +100,153 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.HTTP.Addr != tt.wantAddr {
 				t.Errorf("addr = %q, want %q", cfg.HTTP.Addr, tt.wantAddr)
+			}
+		})
+	}
+}
+
+func TestLoad_MatchmakingConfig_File(t *testing.T) {
+	const validAddr = "localhost:6379"
+
+	tests := []struct {
+		name              string
+		yaml              string
+		wantLevelDist     int
+		wantFallbackAfter time.Duration
+		wantSessionCookie string
+		wantErr           bool
+	}{
+		{
+			name: "full matchmaking section parses correctly",
+			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validAddr + "\"\n" +
+				"matchmaking:\n  level_distance: 5\n  fallback_after: \"10s\"\n  session_cookie: \"tok\"\n",
+			wantLevelDist:     5,
+			wantFallbackAfter: 10 * time.Second,
+			wantSessionCookie: "tok",
+		},
+		{
+			name:              "matchmaking section omitted uses defaults",
+			yaml:              "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validAddr + "\"\n",
+			wantLevelDist:     defaultLevelDist,
+			wantFallbackAfter: defaultFallbackAfter,
+			wantSessionCookie: defaultSessionCookie,
+		},
+		{
+			name: "fallback_after string 30s",
+			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validAddr + "\"\n" +
+				"matchmaking:\n  fallback_after: \"30s\"\n",
+			wantLevelDist:     defaultLevelDist,
+			wantFallbackAfter: 30 * time.Second,
+			wantSessionCookie: defaultSessionCookie,
+		},
+		{
+			name: "invalid fallback_after string errors",
+			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validAddr + "\"\n" +
+				"matchmaking:\n  fallback_after: \"notaduration\"\n",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempConfig(t, tt.yaml)
+
+			cfg, err := Load(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error")
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Matchmaking.LevelDistance != tt.wantLevelDist {
+				t.Errorf("LevelDistance = %d, want %d", cfg.Matchmaking.LevelDistance, tt.wantLevelDist)
+			}
+			if cfg.Matchmaking.FallbackAfter != tt.wantFallbackAfter {
+				t.Errorf("FallbackAfter = %v, want %v", cfg.Matchmaking.FallbackAfter, tt.wantFallbackAfter)
+			}
+			if cfg.Matchmaking.SessionCookie != tt.wantSessionCookie {
+				t.Errorf("SessionCookie = %q, want %q", cfg.Matchmaking.SessionCookie, tt.wantSessionCookie)
+			}
+		})
+	}
+}
+
+func TestLoad_MatchmakingConfig_Env(t *testing.T) {
+	const validAddr = "localhost:6379"
+
+	tests := []struct {
+		name              string
+		env               map[string]string
+		wantLevelDist     int
+		wantFallbackAfter time.Duration
+		wantSessionCookie string
+	}{
+		{
+			name: "all matchmaking env vars set",
+			env: map[string]string{
+				"REDIS_ADDR":        validAddr,
+				"MM_LEVEL_DISTANCE": "7",
+				"MM_FALLBACK_AFTER": "20s",
+				"MM_SESSION_COOKIE": "auth",
+			},
+			wantLevelDist:     7,
+			wantFallbackAfter: 20 * time.Second,
+			wantSessionCookie: "auth",
+		},
+		{
+			name: "matchmaking env vars absent use defaults",
+			env: map[string]string{
+				"REDIS_ADDR": validAddr,
+			},
+			wantLevelDist:     defaultLevelDist,
+			wantFallbackAfter: defaultFallbackAfter,
+			wantSessionCookie: defaultSessionCookie,
+		},
+		{
+			name: "invalid MM_LEVEL_DISTANCE falls back to default",
+			env: map[string]string{
+				"REDIS_ADDR":        validAddr,
+				"MM_LEVEL_DISTANCE": "notanint",
+			},
+			wantLevelDist:     defaultLevelDist,
+			wantFallbackAfter: defaultFallbackAfter,
+			wantSessionCookie: defaultSessionCookie,
+		},
+		{
+			name: "invalid MM_FALLBACK_AFTER falls back to default",
+			env: map[string]string{
+				"REDIS_ADDR":        validAddr,
+				"MM_FALLBACK_AFTER": "notaduration",
+			},
+			wantLevelDist:     defaultLevelDist,
+			wantFallbackAfter: defaultFallbackAfter,
+			wantSessionCookie: defaultSessionCookie,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("IS_DOCKER", "1")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			cfg, err := Load("")
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Matchmaking.LevelDistance != tt.wantLevelDist {
+				t.Errorf("LevelDistance = %d, want %d", cfg.Matchmaking.LevelDistance, tt.wantLevelDist)
+			}
+			if cfg.Matchmaking.FallbackAfter != tt.wantFallbackAfter {
+				t.Errorf("FallbackAfter = %v, want %v", cfg.Matchmaking.FallbackAfter, tt.wantFallbackAfter)
+			}
+			if cfg.Matchmaking.SessionCookie != tt.wantSessionCookie {
+				t.Errorf("SessionCookie = %q, want %q", cfg.Matchmaking.SessionCookie, tt.wantSessionCookie)
 			}
 		})
 	}

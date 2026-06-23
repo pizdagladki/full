@@ -19,6 +19,14 @@ func newTestRedis(t *testing.T) *redis.Client {
 	return redis.NewClient(&redis.Options{Addr: mr.Addr()})
 }
 
+func newTestRedisWithMR(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	return redis.NewClient(&redis.Options{Addr: mr.Addr()}), mr
+}
+
 func TestQueueRepository_EnqueueAndList(t *testing.T) {
 	t.Parallel()
 
@@ -277,5 +285,57 @@ func TestQueueRepository_EnqueueLevel(t *testing.T) {
 	}
 	if players[0].Level != 7 {
 		t.Errorf("Level = %d, want 7", players[0].Level)
+	}
+}
+
+// TestQueueRepository_Enqueue_SetsTTL asserts that Enqueue sets a backstop
+// TTL on the queue hash so orphaned entries self-expire on crash.
+func TestQueueRepository_Enqueue_SetsTTL(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, mr := newTestRedisWithMR(t)
+	p := domain.Player{UserID: 99, Mode: "ranked", Level: 5, EnqueuedAt: time.Now()}
+
+	r := NewQueueRepository(client)
+	if err := r.Enqueue(ctx, p); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// miniredis exposes the TTL directly.
+	ttl := mr.TTL(queueKey("ranked"))
+	if ttl <= 0 {
+		t.Errorf("TTL after Enqueue = %v, want > 0 (backstop TTL must be set)", ttl)
+	}
+
+	// The TTL must not exceed queueTTL.
+	if ttl > queueTTL {
+		t.Errorf("TTL %v > queueTTL %v", ttl, queueTTL)
+	}
+}
+
+// TestQueueRepository_Enqueue_TTL_Orphan_Expires verifies the backstop: after
+// the TTL elapses the hash is gone and ListWaiting returns empty.
+func TestQueueRepository_Enqueue_TTL_Orphan_Expires(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, mr := newTestRedisWithMR(t)
+	p := domain.Player{UserID: 7, Mode: "ranked", Level: 5, EnqueuedAt: time.Now()}
+
+	r := NewQueueRepository(client)
+	if err := r.Enqueue(ctx, p); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Fast-forward past the TTL.
+	mr.FastForward(queueTTL + time.Second)
+
+	players, err := r.ListWaiting(ctx, "ranked")
+	if err != nil {
+		t.Fatalf("ListWaiting after expiry: %v", err)
+	}
+	if len(players) != 0 {
+		t.Errorf("expected empty queue after TTL expiry, got %d players", len(players))
 	}
 }

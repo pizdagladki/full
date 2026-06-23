@@ -4,21 +4,26 @@ package domain
 
 import (
 	"errors"
+	"regexp"
 	"time"
 )
 
 // Sentinel validation errors.
 var (
 	ErrInvalidLevel = errors.New("level must be between 1 and 10")
-	ErrInvalidMode  = errors.New("mode must be a non-empty string of at most 64 characters")
+	ErrInvalidMode  = errors.New("mode must match ^[a-z0-9_-]{1,32}$")
 	ErrUnknownType  = errors.New("unknown message type")
 )
 
 const (
-	maxModeLen = 64
-	minLevel   = 1
-	maxLevel   = 10
+	minLevel = 1
+	maxLevel = 10
 )
+
+// modeRe restricts mode to safe alphanumeric/underscore/hyphen strings of
+// 1–32 characters.  The mode value flows into a Redis key (mm:queue:<mode>)
+// so colons, control chars, and arbitrary Unicode are explicitly rejected.
+var modeRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 
 // Player represents a waiting queue entry.
 type Player struct {
@@ -51,9 +56,10 @@ func ValidateLevel(level int) error {
 	return nil
 }
 
-// ValidateMode returns ErrInvalidMode when mode is empty or exceeds maxModeLen.
+// ValidateMode returns ErrInvalidMode when mode does not match the allowed
+// charset (^[a-z0-9_-]{1,32}$).
 func ValidateMode(mode string) error {
-	if mode == "" || len(mode) > maxModeLen {
+	if !modeRe.MatchString(mode) {
 		return ErrInvalidMode
 	}
 

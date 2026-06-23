@@ -12,6 +12,12 @@ import (
 	"github.com/pizdagladki/full/services/matchmaking/internal/api/domain"
 )
 
+// queueTTL is a backstop TTL set on mm:queue:<mode> hashes after every
+// Enqueue. If a service instance crashes without calling Remove, the hash
+// self-expires after this duration so no phantom entries linger forever.
+// The value is intentionally generous — it is a safety net, not a timeout.
+const queueTTL = 5 * time.Minute
+
 // queueKey returns the Redis hash key for the given mode.
 // Layout: mm:queue:<mode>   field=userID (base-10)   value=JSON{level,enqueued_at}
 func queueKey(mode string) string {
@@ -34,7 +40,8 @@ func NewQueueRepository(client *redis.Client) QueueRepository {
 	return &queueRepository{client: client}
 }
 
-// Enqueue adds player to the per-mode hash in Redis.
+// Enqueue adds player to the per-mode hash in Redis and refreshes the
+// backstop TTL on the hash key.
 func (r *queueRepository) Enqueue(ctx context.Context, player domain.Player) error {
 	entry := queueEntry{
 		Level:      player.Level,
@@ -46,9 +53,19 @@ func (r *queueRepository) Enqueue(ctx context.Context, player domain.Player) err
 		return fmt.Errorf("marshal queue entry: %w", err)
 	}
 
+	key := queueKey(player.Mode)
 	field := strconv.FormatInt(player.UserID, 10)
 
-	return r.client.HSet(ctx, queueKey(player.Mode), field, val).Err()
+	pipe := r.client.Pipeline()
+	pipe.HSet(ctx, key, field, val)
+	pipe.Expire(ctx, key, queueTTL)
+
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("enqueue player: %w", err)
+	}
+
+	return nil
 }
 
 // ListWaiting returns all players waiting in the given mode.
