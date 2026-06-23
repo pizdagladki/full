@@ -28,6 +28,10 @@ type (
 		// when BOTH entries are present at call time. Returns false if either
 		// is already gone (lost the race).
 		Pair(ctx context.Context, a, b domain.Player) (bool, error)
+		// Refresh resets the backstop TTL on the queue hash for the given mode.
+		// Call this each Tick while a mode still has live waiters so connected
+		// players are never evicted by the orphan-cleanup TTL.
+		Refresh(ctx context.Context, mode string) error
 	}
 
 	// SessionRepository reads read-only session data from Redis.

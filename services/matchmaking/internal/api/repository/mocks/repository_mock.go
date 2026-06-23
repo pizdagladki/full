@@ -85,6 +85,20 @@ func (mr *MockQueueRepositoryMockRecorder) Pair(ctx, a, b any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Pair", reflect.TypeOf((*MockQueueRepository)(nil).Pair), ctx, a, b)
 }
 
+// Refresh mocks base method.
+func (m *MockQueueRepository) Refresh(ctx context.Context, mode string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Refresh", ctx, mode)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Refresh indicates an expected call of Refresh.
+func (mr *MockQueueRepositoryMockRecorder) Refresh(ctx, mode any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Refresh", reflect.TypeOf((*MockQueueRepository)(nil).Refresh), ctx, mode)
+}
+
 // Remove mocks base method.
 func (m *MockQueueRepository) Remove(ctx context.Context, mode string, userID int64) (bool, error) {
 	m.ctrl.T.Helper()

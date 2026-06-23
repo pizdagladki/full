@@ -300,8 +300,9 @@ func TestMatchmakingService_Tick_FallbackAfterDeadline(t *testing.T) {
 		t.Fatalf("Join B: %v", err)
 	}
 
-	// Tick before deadline — no match expected.
+	// Tick before deadline — no match expected; both waiters remain so Refresh fires.
 	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
+	f.queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(nil)
 	f.svc.Tick(ctx)
 
 	if len(connA.Messages()) != 0 {
@@ -357,9 +358,11 @@ func TestMatchmakingService_Tick_NoPairingWhenPairReturnsFalse(t *testing.T) {
 	// Pair returns false → lost the race, no messages sent.
 	// Both orderings are acceptable: the service iterates the slice and may try
 	// (pA,pB) first or (pB,pA) first depending on which is the outer candidate.
-	// All Pair calls return false so no match is emitted.
+	// All Pair calls return false so no match is emitted. Both players remain,
+	// so Refresh must be called.
 	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
 	f.queueRepo.EXPECT().Pair(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	f.queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(nil)
 
 	f.svc.Tick(ctx)
 
@@ -401,10 +404,11 @@ func TestMatchmakingService_Tick_NoDoubleMatch(t *testing.T) {
 		t.Fatalf("Join C: %v", err)
 	}
 
-	// A pairs with B (first match); C remains unmatched.
+	// A pairs with B (first match); C remains unmatched, so Refresh fires for C.
 	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB, pC}, nil)
 	f.queueRepo.EXPECT().Pair(gomock.Any(), pA, pB).Return(true, nil)
 	// No second Pair call for C — it has no partner.
+	f.queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(nil)
 
 	f.svc.Tick(ctx)
 
@@ -572,6 +576,7 @@ func TestMatchmakingService_Tick_MultipleModesIsolated(t *testing.T) {
 	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "casual").Return([]domain.Player{pCasual1, pCasual2}, nil)
 	f.queueRepo.EXPECT().Pair(gomock.Any(), pRanked1, pRanked2).Return(true, nil)
 	f.queueRepo.EXPECT().Pair(gomock.Any(), pCasual1, pCasual2).Return(true, nil)
+	// Both modes are fully drained → no Refresh expected.
 
 	f.svc.Tick(ctx)
 
@@ -580,4 +585,98 @@ func TestMatchmakingService_Tick_MultipleModesIsolated(t *testing.T) {
 			t.Errorf("conn %d: want 1 message, got %d", c.UserID(), len(c.Messages()))
 		}
 	}
+}
+
+// TestMatchmakingService_Tick_Refresh_SoloWaiter asserts that when a mode has
+// one lone player (no opponent found), Refresh is called to extend the hash TTL
+// so the live waiter is never evicted by the crash-orphan backstop.
+func TestMatchmakingService_Tick_Refresh_SoloWaiter(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t, 3, 10*time.Second)
+	ctx := context.Background()
+	now := f.clock.Now()
+
+	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
+	connA := newFakeConn(1)
+
+	f.queueRepo.EXPECT().Enqueue(gomock.Any(), pA).Return(nil)
+	if err := f.svc.Join(ctx, connA, pA); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+
+	// One player, no opponents → no Pair call. Refresh must be called.
+	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA}, nil)
+	f.queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(nil)
+
+	f.svc.Tick(ctx)
+
+	// No match message was sent.
+	if len(connA.Messages()) != 0 {
+		t.Errorf("solo waiter: got %d messages, want 0", len(connA.Messages()))
+	}
+}
+
+// TestMatchmakingService_Tick_NoRefresh_FullyDrained asserts that when all
+// players in a mode are paired away, Refresh is NOT called (the key is already
+// gone or the mode is no longer live).
+func TestMatchmakingService_Tick_NoRefresh_FullyDrained(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t, 3, 10*time.Second)
+	ctx := context.Background()
+	now := f.clock.Now()
+
+	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
+
+	connA := newFakeConn(1)
+	connB := newFakeConn(2)
+
+	f.queueRepo.EXPECT().Enqueue(gomock.Any(), pA).Return(nil)
+	f.queueRepo.EXPECT().Enqueue(gomock.Any(), pB).Return(nil)
+	if err := f.svc.Join(ctx, connA, pA); err != nil {
+		t.Fatalf("Join A: %v", err)
+	}
+	if err := f.svc.Join(ctx, connB, pB); err != nil {
+		t.Fatalf("Join B: %v", err)
+	}
+
+	// Both paired away → no Refresh expected.
+	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
+	f.queueRepo.EXPECT().Pair(gomock.Any(), pA, pB).Return(true, nil)
+	// gomock will fail the test if Refresh is called unexpectedly.
+
+	f.svc.Tick(ctx)
+
+	if len(connA.Messages()) != 1 {
+		t.Fatalf("connA: want 1 message, got %d", len(connA.Messages()))
+	}
+	if len(connB.Messages()) != 1 {
+		t.Fatalf("connB: want 1 message, got %d", len(connB.Messages()))
+	}
+}
+
+// TestMatchmakingService_Tick_Refresh_Error asserts that a Refresh error is
+// logged but does not abort the tick or panic.
+func TestMatchmakingService_Tick_Refresh_Error(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t, 3, 10*time.Second)
+	ctx := context.Background()
+	now := f.clock.Now()
+
+	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
+	connA := newFakeConn(1)
+
+	f.queueRepo.EXPECT().Enqueue(gomock.Any(), pA).Return(nil)
+	if err := f.svc.Join(ctx, connA, pA); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+
+	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA}, nil)
+	f.queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(fmt.Errorf("redis timeout"))
+
+	// Must not panic.
+	f.svc.Tick(ctx)
 }

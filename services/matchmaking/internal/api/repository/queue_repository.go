@@ -129,6 +129,18 @@ redis.call("HDEL", kb, fb)
 return 1
 `)
 
+// Refresh resets the backstop TTL on the queue hash for the given mode.
+// It is called by the matcher Tick while a mode still has live waiters,
+// so a connected solo searcher is never silently expired from Redis.
+func (r *queueRepository) Refresh(ctx context.Context, mode string) error {
+	err := r.client.Expire(ctx, queueKey(mode), queueTTL).Err()
+	if err != nil {
+		return fmt.Errorf("refresh ttl for mode %q: %w", mode, err)
+	}
+
+	return nil
+}
+
 // Pair atomically removes both players from the queue. Returns false when
 // either player is already gone (lost the race — no match should be emitted).
 func (r *queueRepository) Pair(ctx context.Context, a, b domain.Player) (bool, error) {

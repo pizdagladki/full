@@ -178,6 +178,26 @@ func (s *matchmakingService) tickMode(ctx context.Context, mode string) {
 
 		s.tryPair(ctx, cand, *opp, paired)
 	}
+
+	// Count how many players from this tick were not paired away.
+	stillWaiting := 0
+
+	for i := range waiting {
+		if _, wasPaired := paired[waiting[i].UserID]; !wasPaired {
+			stillWaiting++
+		}
+	}
+
+	// Refresh the backstop TTL while live waiters remain so a connected
+	// solo searcher is never silently evicted from Redis by the crash-orphan
+	// TTL. A mode with no remaining waiters needs no refresh — its key either
+	// no longer exists or will expire naturally.
+	if stillWaiting > 0 {
+		refreshErr := s.queueRepo.Refresh(ctx, mode)
+		if refreshErr != nil {
+			s.logger.Error("refresh queue ttl", zap.String("mode", mode), zap.Error(refreshErr))
+		}
+	}
 }
 
 // tryPair atomically claims the pair via the repo and notifies both conns.

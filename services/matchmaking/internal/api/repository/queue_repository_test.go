@@ -339,3 +339,48 @@ func TestQueueRepository_Enqueue_TTL_Orphan_Expires(t *testing.T) {
 		t.Errorf("expected empty queue after TTL expiry, got %d players", len(players))
 	}
 }
+
+// TestQueueRepository_Refresh verifies that Refresh extends the hash TTL so
+// a live waiter is not evicted by the crash-orphan backstop timer.
+func TestQueueRepository_Refresh(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client, mr := newTestRedisWithMR(t)
+	p := domain.Player{UserID: 55, Mode: "ranked", Level: 5, EnqueuedAt: time.Now()}
+
+	r := NewQueueRepository(client)
+	if err := r.Enqueue(ctx, p); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Advance partway through the TTL (half of queueTTL).
+	halfTTL := queueTTL / 2
+	mr.FastForward(halfTTL)
+
+	// Refresh — should reset the TTL back to queueTTL from now.
+	if err := r.Refresh(ctx, "ranked"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Fast-forward past the original TTL deadline (but within the refreshed window).
+	// At this point: elapsed = halfTTL + halfTTL = queueTTL. Without the Refresh
+	// the entry would have expired. With it, the TTL was reset so it should still
+	// be present.
+	mr.FastForward(halfTTL)
+
+	players, err := r.ListWaiting(ctx, "ranked")
+	if err != nil {
+		t.Fatalf("ListWaiting after partial forward: %v", err)
+	}
+
+	if len(players) != 1 {
+		t.Errorf("expected player to still be present after Refresh, got %d players", len(players))
+	}
+
+	// Verify the refreshed TTL is positive and reasonable.
+	ttl := mr.TTL(queueKey("ranked"))
+	if ttl <= 0 {
+		t.Errorf("TTL after Refresh = %v, want > 0", ttl)
+	}
+}
