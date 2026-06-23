@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -35,11 +36,12 @@ func TestGetCatalog(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		queryKind  string
-		setupSvc   func(m *svcmocks.MockCatalogService)
-		wantStatus int
-		wantLen    int
+		name            string
+		queryKind       string
+		setupSvc        func(m *svcmocks.MockCatalogService)
+		wantStatus      int
+		wantLen         int
+		wantBodyExclude string // substring that must NOT appear in the error body
 	}{
 		{
 			name:      "no kind filter returns all products",
@@ -78,13 +80,14 @@ func TestGetCatalog(t *testing.T) {
 			wantLen:    0,
 		},
 		{
-			name:      "service error returns 500",
+			name:      "service error returns 500 with generic body not internal detail",
 			queryKind: "",
 			setupSvc: func(m *svcmocks.MockCatalogService) {
 				m.EXPECT().ListCatalog(gomock.Any(), (*string)(nil)).
 					Return(nil, errors.New("db down"))
 			},
-			wantStatus: http.StatusInternalServerError,
+			wantStatus:      http.StatusInternalServerError,
+			wantBodyExclude: "db down",
 		},
 	}
 
@@ -115,9 +118,15 @@ func TestGetCatalog(t *testing.T) {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
 			}
 
+			body := rec.Body.String()
+
+			if tt.wantBodyExclude != "" && strings.Contains(body, tt.wantBodyExclude) {
+				t.Errorf("body must not contain internal detail %q but got: %s", tt.wantBodyExclude, body)
+			}
+
 			if tt.wantStatus == http.StatusOK {
 				var resp []map[string]any
-				if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				if err := json.Unmarshal([]byte(body), &resp); err != nil {
 					t.Fatalf("decode response: %v", err)
 				}
 
@@ -143,11 +152,12 @@ func TestGetInventory(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		userID     any // the value stored in context; use int64 for valid, other type for missing
-		setupSvc   func(m *svcmocks.MockInventoryService)
-		wantStatus int
-		wantLen    int
+		name            string
+		userID          any // the value stored in context; use int64 for valid, other type for missing
+		setupSvc        func(m *svcmocks.MockInventoryService)
+		wantStatus      int
+		wantLen         int
+		wantBodyExclude string // substring that must NOT appear in the error body
 	}{
 		{
 			name:   "authenticated user with items",
@@ -176,13 +186,14 @@ func TestGetInventory(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name:   "service error returns 500",
+			name:   "service error returns 500 with generic body not internal detail",
 			userID: int64(1),
 			setupSvc: func(m *svcmocks.MockInventoryService) {
 				m.EXPECT().ListInventory(gomock.Any(), int64(1)).
 					Return(nil, errors.New("db down"))
 			},
-			wantStatus: http.StatusInternalServerError,
+			wantStatus:      http.StatusInternalServerError,
+			wantBodyExclude: "db down",
 		},
 	}
 
@@ -212,9 +223,15 @@ func TestGetInventory(t *testing.T) {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
 			}
 
+			body := rec.Body.String()
+
+			if tt.wantBodyExclude != "" && strings.Contains(body, tt.wantBodyExclude) {
+				t.Errorf("body must not contain internal detail %q but got: %s", tt.wantBodyExclude, body)
+			}
+
 			if tt.wantStatus == http.StatusOK {
 				var resp []map[string]any
-				if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				if err := json.Unmarshal([]byte(body), &resp); err != nil {
 					t.Fatalf("decode response: %v", err)
 				}
 

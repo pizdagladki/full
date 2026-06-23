@@ -1,9 +1,11 @@
 package middleware_test
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -22,11 +24,13 @@ func TestRequireAuth(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		cookie     *http.Cookie
-		setupSvc   func(m *svcmocks.MockSessionService)
-		wantStatus int
-		wantUserID *int64
+		name            string
+		cookie          *http.Cookie
+		setupSvc        func(m *svcmocks.MockSessionService)
+		wantStatus      int
+		wantUserID      *int64
+		wantBody        string // exact JSON body to assert (non-empty)
+		wantBodyExclude string // substring that must NOT appear in body (non-empty)
 	}{
 		{
 			name:       "no cookie returns 401",
@@ -44,13 +48,15 @@ func TestRequireAuth(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name:   "unexpected resolve error returns 401",
+			name:   "unexpected resolve error returns 401 with generic body not raw error",
 			cookie: &http.Cookie{Name: testCookieName, Value: "broken"},
 			setupSvc: func(m *svcmocks.MockSessionService) {
 				m.EXPECT().ResolveSession(gomock.Any(), "broken").
 					Return(int64(0), errors.New("redis timeout"))
 			},
-			wantStatus: http.StatusUnauthorized,
+			wantStatus:      http.StatusUnauthorized,
+			wantBody:        `{"error":"unauthorized"}`,
+			wantBodyExclude: "timeout",
 		},
 		{
 			name:   "valid session sets user id in context and calls next",
@@ -97,6 +103,30 @@ func TestRequireAuth(t *testing.T) {
 
 			if rec.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+
+			body := rec.Body.String()
+
+			if tt.wantBody != "" {
+				var got map[string]string
+				if err := json.Unmarshal([]byte(body), &got); err != nil {
+					t.Fatalf("decode body: %v (body=%q)", err, body)
+				}
+
+				var want map[string]string
+				if err := json.Unmarshal([]byte(tt.wantBody), &want); err != nil {
+					t.Fatalf("decode wantBody: %v", err)
+				}
+
+				for k, v := range want {
+					if got[k] != v {
+						t.Errorf("body[%q] = %q, want %q", k, got[k], v)
+					}
+				}
+			}
+
+			if tt.wantBodyExclude != "" && strings.Contains(body, tt.wantBodyExclude) {
+				t.Errorf("body must not contain internal error %q but got: %s", tt.wantBodyExclude, body)
 			}
 
 			if tt.wantUserID != nil {

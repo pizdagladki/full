@@ -143,14 +143,8 @@ func TestInitRepositories(t *testing.T) {
 func TestInitServices(t *testing.T) {
 	t.Parallel()
 
-	ctrl := gomock.NewController(t)
-
 	a := New("store")
-	// Use mock repos so no real pool is needed.
-	a.catalogRepo = nil // catalogService constructor accepts nil (stores it)
-	a.inventoryRepo = nil
-	a.sessionRepo = nil
-	a.initRepositories() // wire real repo wrappers around nil pools
+	a.initRepositories() // wires repo wrappers around nil pools (nil-safe construction)
 	a.initServices()
 
 	if a.catalogSvc == nil {
@@ -162,8 +156,6 @@ func TestInitServices(t *testing.T) {
 	if a.sessionSvc == nil {
 		t.Error("sessionSvc is nil after initServices")
 	}
-
-	_ = ctrl
 }
 
 // TestInitHandlers verifies that initHandlers wires storeHandler.
