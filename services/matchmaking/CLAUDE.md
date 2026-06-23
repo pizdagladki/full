@@ -18,3 +18,4 @@ Role: WebSocket realtime. Stack — the `go-backend-conventions` skill. Uses: Re
 - Shared infra comes from `internal/platform/{logger,redis}`; never duplicate it inside the service.
 - No Echo dependency — the HTTP surface is a plain `net/http` server in `internal/app/worker_ws.go`.
 - `websocket.Accept` uses the secure default (no `InsecureSkipVerify`). `BaseContext` propagates the app context into in-flight WS handlers so cancellation is clean.
+- **MVP tradeoff — no per-connection join/leave rate limiting:** every accepted WS connection can call `Join`/`Leave` at arbitrary frequency, writing to Redis on each call. Under untrusted traffic this is a Redis write-amplification risk; add rate limiting before exposing the endpoint to the public internet.

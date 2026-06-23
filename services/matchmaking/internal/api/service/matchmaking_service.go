@@ -39,7 +39,7 @@ type matchmakingService struct {
 	fallbackAfter time.Duration
 
 	mu    sync.Mutex
-	conns map[int64]Conn   // userID → active connection
+	conns map[int64]Conn   // userID → active connection; single-instance only — K8s scale-out would need a shared store
 	modes map[int64]string // userID → mode (needed for Leave cleanup)
 }
 
@@ -140,8 +140,8 @@ func (s *matchmakingService) tickMode(ctx context.Context, mode string) {
 	paired := make(map[int64]struct{})
 
 	for i := range waiting {
-		cand := waiting[i]
-		if _, alreadyPaired := paired[cand.UserID]; alreadyPaired {
+		candidate := waiting[i]
+		if _, alreadyPaired := paired[candidate.UserID]; alreadyPaired {
 			continue
 		}
 
@@ -150,7 +150,7 @@ func (s *matchmakingService) tickMode(ctx context.Context, mode string) {
 
 		for j := range waiting {
 			opp := waiting[j]
-			if opp.UserID == cand.UserID {
+			if opp.UserID == candidate.UserID {
 				continue
 			}
 			if _, alreadyPaired := paired[opp.UserID]; alreadyPaired {
@@ -165,18 +165,18 @@ func (s *matchmakingService) tickMode(ctx context.Context, mode string) {
 		}
 
 		// In-distance match first.
-		opp := domain.NearestWithinDistance(cand, available, s.levelDist)
+		opp := domain.NearestWithinDistance(candidate, available, s.levelDist)
 
 		// Fallback: after the deadline, pair with nearest regardless.
-		if opp == nil && domain.PastFallbackDeadline(now, cand.EnqueuedAt, s.fallbackAfter) {
-			opp = domain.NearestRegardless(cand, available)
+		if opp == nil && domain.PastFallbackDeadline(now, candidate.EnqueuedAt, s.fallbackAfter) {
+			opp = domain.NearestRegardless(candidate, available)
 		}
 
 		if opp == nil {
 			continue
 		}
 
-		s.tryPair(ctx, cand, *opp, paired)
+		s.tryPair(ctx, candidate, *opp, paired)
 	}
 
 	// Count how many players from this tick were not paired away.

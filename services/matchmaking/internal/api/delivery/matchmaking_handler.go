@@ -198,5 +198,5 @@ func (c *adaptedConn) Send(msg domain.MatchedMessage) error {
 }
 
 func (c *adaptedConn) Close(reason string) {
-	_ = c.conn.Close(websocket.StatusPolicyViolation, reason)
+	_ = c.conn.Close(websocket.StatusInternalError, reason)
 }

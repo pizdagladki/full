@@ -142,7 +142,7 @@ func TestLoad_MatchmakingConfig_File(t *testing.T) {
 		{
 			name: "invalid fallback_after string errors",
 			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validAddr + "\"\n" +
-				"matchmaking:\n  fallback_after: \"notaduration\"\n",
+				"matchmaking:\n  fallback_after: \"not-a-duration\"\n",
 			wantErr: true,
 		},
 	}
@@ -210,7 +210,7 @@ func TestLoad_MatchmakingConfig_Env(t *testing.T) {
 			name: "invalid MM_LEVEL_DISTANCE falls back to default",
 			env: map[string]string{
 				"REDIS_ADDR":        validAddr,
-				"MM_LEVEL_DISTANCE": "notanint",
+				"MM_LEVEL_DISTANCE": "not-an-int",
 			},
 			wantLevelDist:     defaultLevelDist,
 			wantFallbackAfter: defaultFallbackAfter,
@@ -220,7 +220,7 @@ func TestLoad_MatchmakingConfig_Env(t *testing.T) {
 			name: "invalid MM_FALLBACK_AFTER falls back to default",
 			env: map[string]string{
 				"REDIS_ADDR":        validAddr,
-				"MM_FALLBACK_AFTER": "notaduration",
+				"MM_FALLBACK_AFTER": "not-a-duration",
 			},
 			wantLevelDist:     defaultLevelDist,
 			wantFallbackAfter: defaultFallbackAfter,
