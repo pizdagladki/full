@@ -55,3 +55,16 @@ type AuthService interface {
 	// the session is missing, expired, or the user no longer exists.
 	Authenticate(ctx context.Context, sessionID string) (domain.User, error)
 }
+
+// ConsentService is the business-logic contract for registration consents.
+type ConsentService interface {
+	// RecordConsent persists the (already-validated) consent for userID. The
+	// caller must supply all three flags set to true; validation is the
+	// delivery layer's responsibility. The returned Consent carries the
+	// DB-generated accepted_at timestamp.
+	RecordConsent(ctx context.Context, userID int64, req domain.ConsentRequest) (domain.Consent, error)
+
+	// GetConsent returns the current consent state for userID, or (nil, nil)
+	// when the user has not yet submitted consent.
+	GetConsent(ctx context.Context, userID int64) (*domain.Consent, error)
+}

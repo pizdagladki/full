@@ -2,6 +2,7 @@ package delivery_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,19 @@ func newTestEcho() *echo.Echo {
 	e.Validator = &echoValidator{v: validator.New()}
 
 	return e
+}
+
+// newHandler is a helper that creates an AuthHandler with stub mocks for both
+// AuthService and ConsentService so tests that only care about one can ignore
+// the other.
+func newHandler(t *testing.T, authSvc service.AuthService, consentSvc service.ConsentService) delivery.AuthHandler {
+	t.Helper()
+
+	return delivery.NewAuthHandler(authSvc, consentSvc, zap.NewNop(), delivery.HandlerConfig{
+		CookieName:   "session",
+		CookieTTL:    24 * time.Hour,
+		CookieSecure: false,
+	})
 }
 
 func TestAuthHandler_LoginGoogle(t *testing.T) {
@@ -86,14 +100,11 @@ func TestAuthHandler_LoginGoogle(t *testing.T) {
 			t.Parallel()
 
 			ctrl := gomock.NewController(t)
-			svcMock := svcmocks.NewMockAuthService(ctrl)
-			tt.setupSvc(svcMock)
+			authMock := svcmocks.NewMockAuthService(ctrl)
+			consentMock := svcmocks.NewMockConsentService(ctrl)
+			tt.setupSvc(authMock)
 
-			h := delivery.NewAuthHandler(svcMock, zap.NewNop(), delivery.HandlerConfig{
-				CookieName:   "session",
-				CookieTTL:    24 * time.Hour,
-				CookieSecure: false,
-			})
+			h := newHandler(t, authMock, consentMock)
 
 			e := newTestEcho()
 			req := httptest.NewRequest(http.MethodPost, "/v1/auth/google", strings.NewReader(tt.body))
@@ -137,27 +148,61 @@ func TestAuthHandler_LoginGoogle(t *testing.T) {
 func TestAuthHandler_GetMe(t *testing.T) {
 	t.Parallel()
 
+	fixedTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	fixedConsent := &domain.Consent{
+		IsAdult:          true,
+		ConsentRecording: true,
+		ConsentTos:       true,
+		AcceptedAt:       fixedTime,
+	}
+
 	tests := []struct {
-		name       string
-		ctxUser    any // what to set under UserContextKey
-		wantStatus int
-		wantEmail  string
+		name            string
+		ctxUser         any // what to set under UserContextKey
+		setupConsentSvc func(m *svcmocks.MockConsentService)
+		wantStatus      int
+		wantEmail       string
+		wantConsent     bool // whether resp.Consent should be non-null
 	}{
 		{
-			name:       "valid user in context - 200",
-			ctxUser:    domain.User{ID: 7, Email: "bob@example.com"},
-			wantStatus: http.StatusOK,
-			wantEmail:  "bob@example.com",
+			name:    "valid user in context with consent - 200",
+			ctxUser: domain.User{ID: 7, Email: "bob@example.com"},
+			setupConsentSvc: func(m *svcmocks.MockConsentService) {
+				m.EXPECT().GetConsent(gomock.Any(), int64(7)).Return(fixedConsent, nil)
+			},
+			wantStatus:  http.StatusOK,
+			wantEmail:   "bob@example.com",
+			wantConsent: true,
 		},
 		{
-			name:       "no user in context - 401",
-			ctxUser:    nil,
-			wantStatus: http.StatusUnauthorized,
+			name:    "valid user in context with no consent yet - consent null",
+			ctxUser: domain.User{ID: 8, Email: "carol@example.com"},
+			setupConsentSvc: func(m *svcmocks.MockConsentService) {
+				m.EXPECT().GetConsent(gomock.Any(), int64(8)).Return(nil, nil)
+			},
+			wantStatus:  http.StatusOK,
+			wantEmail:   "carol@example.com",
+			wantConsent: false,
 		},
 		{
-			name:       "wrong type in context - 401",
-			ctxUser:    "not-a-user",
-			wantStatus: http.StatusUnauthorized,
+			name:            "no user in context - 401",
+			ctxUser:         nil,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnauthorized,
+		},
+		{
+			name:            "wrong type in context - 401",
+			ctxUser:         "not-a-user",
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnauthorized,
+		},
+		{
+			name:    "consent service error - 500",
+			ctxUser: domain.User{ID: 9, Email: "dave@example.com"},
+			setupConsentSvc: func(m *svcmocks.MockConsentService) {
+				m.EXPECT().GetConsent(gomock.Any(), int64(9)).Return(nil, errors.New("db error"))
+			},
+			wantStatus: http.StatusInternalServerError,
 		},
 	}
 
@@ -166,12 +211,11 @@ func TestAuthHandler_GetMe(t *testing.T) {
 			t.Parallel()
 
 			ctrl := gomock.NewController(t)
-			svcMock := svcmocks.NewMockAuthService(ctrl)
+			authMock := svcmocks.NewMockAuthService(ctrl)
+			consentMock := svcmocks.NewMockConsentService(ctrl)
+			tt.setupConsentSvc(consentMock)
 
-			h := delivery.NewAuthHandler(svcMock, zap.NewNop(), delivery.HandlerConfig{
-				CookieName: "session",
-				CookieTTL:  24 * time.Hour,
-			})
+			h := newHandler(t, authMock, consentMock)
 
 			e := newTestEcho()
 			req := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
@@ -196,6 +240,150 @@ func TestAuthHandler_GetMe(t *testing.T) {
 				if resp.Email != tt.wantEmail {
 					t.Errorf("email = %q, want %q", resp.Email, tt.wantEmail)
 				}
+				if tt.wantConsent && resp.Consent == nil {
+					t.Error("resp.Consent = nil, want non-null consent object")
+				}
+				if !tt.wantConsent && resp.Consent != nil {
+					t.Errorf("resp.Consent = %+v, want null", resp.Consent)
+				}
+			}
+		})
+	}
+}
+
+// TestAuthHandler_SubmitConsent covers acceptance criteria 1, 2, 3, 4.
+func TestAuthHandler_SubmitConsent(t *testing.T) {
+	t.Parallel()
+
+	fixedTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	allTrue := domain.ConsentRequest{IsAdult: true, ConsentRecording: true, ConsentTos: true}
+	returnedConsent := domain.Consent{
+		IsAdult:          true,
+		ConsentRecording: true,
+		ConsentTos:       true,
+		AcceptedAt:       fixedTime,
+	}
+
+	tests := []struct {
+		name            string
+		ctxUser         any
+		body            string
+		setupConsentSvc func(m *svcmocks.MockConsentService)
+		wantStatus      int
+	}{
+		{
+			// Criterion 1: all three flags true → 200, service called once.
+			name:    "all flags true - 200",
+			ctxUser: domain.User{ID: 42, Email: "alice@example.com"},
+			body:    `{"is_adult":true,"consent_recording":true,"consent_tos":true}`,
+			setupConsentSvc: func(m *svcmocks.MockConsentService) {
+				m.EXPECT().RecordConsent(gomock.Any(), int64(42), allTrue).
+					Return(returnedConsent, nil)
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			// Criterion 2: is_adult explicitly false → 422, service NOT called.
+			name:            "is_adult false - 422",
+			ctxUser:         domain.User{ID: 42, Email: "alice@example.com"},
+			body:            `{"is_adult":false,"consent_recording":true,"consent_tos":true}`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnprocessableEntity,
+		},
+		{
+			// Criterion 2: consent_recording explicitly false → 422.
+			name:            "consent_recording false - 422",
+			ctxUser:         domain.User{ID: 42, Email: "alice@example.com"},
+			body:            `{"is_adult":true,"consent_recording":false,"consent_tos":true}`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnprocessableEntity,
+		},
+		{
+			// Criterion 2: consent_tos explicitly false → 422.
+			name:            "consent_tos false - 422",
+			ctxUser:         domain.User{ID: 42, Email: "alice@example.com"},
+			body:            `{"is_adult":true,"consent_recording":true,"consent_tos":false}`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnprocessableEntity,
+		},
+		{
+			// Criterion 2: missing fields → 422.
+			name:            "missing fields - 422",
+			ctxUser:         domain.User{ID: 42, Email: "alice@example.com"},
+			body:            `{}`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnprocessableEntity,
+		},
+		{
+			// Criterion 2: only one field set → 422.
+			name:            "only is_adult set - 422",
+			ctxUser:         domain.User{ID: 42, Email: "alice@example.com"},
+			body:            `{"is_adult":true}`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnprocessableEntity,
+		},
+		{
+			// Malformed JSON → 400.
+			name:            "malformed JSON - 400",
+			ctxUser:         domain.User{ID: 42, Email: "alice@example.com"},
+			body:            `{bad json`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusBadRequest,
+		},
+		{
+			// Criterion 3: no session context → 401.
+			name:            "no session context - 401",
+			ctxUser:         nil,
+			body:            `{"is_adult":true,"consent_recording":true,"consent_tos":true}`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnauthorized,
+		},
+		{
+			// Criterion 3: wrong type in context → 401.
+			name:            "wrong type in context - 401",
+			ctxUser:         "not-a-user",
+			body:            `{"is_adult":true,"consent_recording":true,"consent_tos":true}`,
+			setupConsentSvc: func(_ *svcmocks.MockConsentService) {},
+			wantStatus:      http.StatusUnauthorized,
+		},
+		{
+			// Service error propagates as 500.
+			name:    "service error - 500",
+			ctxUser: domain.User{ID: 42, Email: "alice@example.com"},
+			body:    `{"is_adult":true,"consent_recording":true,"consent_tos":true}`,
+			setupConsentSvc: func(m *svcmocks.MockConsentService) {
+				m.EXPECT().RecordConsent(gomock.Any(), int64(42), allTrue).
+					Return(domain.Consent{}, errors.New("db error"))
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			authMock := svcmocks.NewMockAuthService(ctrl)
+			consentMock := svcmocks.NewMockConsentService(ctrl)
+			tt.setupConsentSvc(consentMock)
+
+			h := newHandler(t, authMock, consentMock)
+
+			e := newTestEcho()
+			req := httptest.NewRequest(http.MethodPost, "/v1/auth/consent", strings.NewReader(tt.body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			if tt.ctxUser != nil {
+				c.Set(delivery.UserContextKey, tt.ctxUser)
+			}
+
+			_ = h.SubmitConsent(c)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
 		})
 	}

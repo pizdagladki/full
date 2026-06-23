@@ -25,14 +25,20 @@ type HandlerConfig struct {
 }
 
 type authHandler struct {
-	svc    service.AuthService
-	logger *zap.Logger
-	cfg    HandlerConfig
+	svc        service.AuthService
+	consentSvc service.ConsentService
+	logger     *zap.Logger
+	cfg        HandlerConfig
 }
 
-// NewAuthHandler returns an AuthHandler wired to the given AuthService.
-func NewAuthHandler(svc service.AuthService, logger *zap.Logger, cfg HandlerConfig) AuthHandler {
-	return &authHandler{svc: svc, logger: logger, cfg: cfg}
+// NewAuthHandler returns an AuthHandler wired to the given services.
+func NewAuthHandler(
+	svc service.AuthService,
+	consentSvc service.ConsentService,
+	logger *zap.Logger,
+	cfg HandlerConfig,
+) AuthHandler {
+	return &authHandler{svc: svc, consentSvc: consentSvc, logger: logger, cfg: cfg}
 }
 
 func (h *authHandler) LoginGoogle(c echo.Context) error {
@@ -80,5 +86,47 @@ func (h *authHandler) GetMe(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 	}
 
-	return c.JSON(http.StatusOK, domain.MeResponse{ID: user.ID, Email: user.Email})
+	consent, err := h.consentSvc.GetConsent(c.Request().Context(), user.ID)
+	if err != nil {
+		h.logger.Error("get consent", zap.Int64("user_id", user.ID), zap.Error(err))
+
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	}
+
+	resp := domain.MeResponse{ID: user.ID, Email: user.Email}
+
+	if consent != nil {
+		ci := domain.ConsentInfo(*consent)
+		resp.Consent = &ci
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *authHandler) SubmitConsent(c echo.Context) error {
+	user, ok := c.Get(UserContextKey).(domain.User)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	var req domain.ConsentRequest
+
+	err := c.Bind(&req)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad request"})
+	}
+
+	err = c.Validate(&req)
+	if err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "all consent flags must be true"})
+	}
+
+	result, err := h.consentSvc.RecordConsent(c.Request().Context(), user.ID, req)
+	if err != nil {
+		h.logger.Error("record consent", zap.Int64("user_id", user.ID), zap.Error(err))
+
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	}
+
+	return c.JSON(http.StatusOK, domain.ConsentInfo(result))
 }

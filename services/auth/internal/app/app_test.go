@@ -15,6 +15,7 @@ import (
 
 	"github.com/pizdagladki/full/services/auth/internal/api/delivery"
 	"github.com/pizdagladki/full/services/auth/internal/api/middleware"
+	repomocks "github.com/pizdagladki/full/services/auth/internal/api/repository/mocks"
 	svcmocks "github.com/pizdagladki/full/services/auth/internal/api/service/mocks"
 	"github.com/pizdagladki/full/services/auth/internal/config"
 )
@@ -135,6 +136,9 @@ func TestInitRepositories(t *testing.T) {
 	if a.userRepo == nil {
 		t.Fatal("userRepo is nil after initRepositories")
 	}
+	if a.consentRepo == nil {
+		t.Fatal("consentRepo is nil after initRepositories")
+	}
 }
 
 // TestInitServices verifies that initServices wires oauth, sessionStore, and
@@ -156,7 +160,7 @@ func TestInitServices(t *testing.T) {
 		Session: config.SessionConfig{Name: "session", TTL: time.Hour},
 	}
 	a.redisClient = client
-	a.initRepositories() // userRepo needed by initServices
+	a.initRepositories() // userRepo and consentRepo needed by initServices
 
 	a.initServices()
 
@@ -169,15 +173,20 @@ func TestInitServices(t *testing.T) {
 	if a.authService == nil {
 		t.Error("authService is nil after initServices")
 	}
+	if a.consentService == nil {
+		t.Error("consentService is nil after initServices")
+	}
 }
 
 // TestInitHandlers verifies that initHandlers wires authHandler using an
-// already-initialized authService.
+// already-initialized authService and consentService.
 func TestInitHandlers(t *testing.T) {
 	t.Parallel()
 
 	ctrl := gomock.NewController(t)
 	svcMock := svcmocks.NewMockAuthService(ctrl)
+	consentSvcMock := svcmocks.NewMockConsentService(ctrl)
+	consentRepoMock := repomocks.NewMockConsentRepository(ctrl)
 
 	a := New("auth")
 	a.logger = zap.NewNop()
@@ -185,6 +194,8 @@ func TestInitHandlers(t *testing.T) {
 		Session: config.SessionConfig{Name: "session", TTL: time.Hour},
 	}
 	a.authService = svcMock
+	a.consentService = consentSvcMock
+	a.consentRepo = consentRepoMock
 
 	a.initHandlers()
 
@@ -293,8 +304,10 @@ func newTestApp(t *testing.T, addr string) *App {
 		GoogleOAuth: config.GoogleOAuthConfig{ClientID: "cid", ClientSecret: "csec", RedirectURL: "http://localhost/cb"},
 	}
 
+	consentSvcMock := svcmocks.NewMockConsentService(ctrl)
+
 	// Wire stub handler and middleware so registerHTTPRoutes works.
-	a.authHandler = delivery.NewAuthHandler(svcMock, zap.NewNop(), delivery.HandlerConfig{
+	a.authHandler = delivery.NewAuthHandler(svcMock, consentSvcMock, zap.NewNop(), delivery.HandlerConfig{
 		CookieName: "session",
 		CookieTTL:  time.Hour,
 	})
