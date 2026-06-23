@@ -6,9 +6,9 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// registerHTTPRoutes builds the service's Echo router. Resource routes are added
-// by downstream slices behind an auth-middleware group; the scaffold exposes only
-// the liveness probe.
+// registerHTTPRoutes builds the service's Echo router. Public routes are
+// registered directly on the root; protected routes are grouped behind
+// RequireAuth.
 func (a *App) registerHTTPRoutes() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
@@ -16,6 +16,13 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	e.Validator = a.validator
 
 	e.GET("/healthz", handleHealthz)
+
+	// Public store endpoints.
+	e.GET("/v1/store/catalog", a.storeHandler.GetCatalog)
+
+	// Protected store endpoints — session required.
+	v1 := e.Group("/v1", a.authMiddleware.RequireAuth)
+	v1.GET("/store/inventory", a.storeHandler.GetInventory)
 
 	return e
 }

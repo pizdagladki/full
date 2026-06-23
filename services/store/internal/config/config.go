@@ -13,6 +13,12 @@ type Config struct {
 	HTTP     HTTPConfig     `yaml:"http" validate:"required"`
 	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
 	Redis    RedisConfig    `yaml:"redis" validate:"required"`
+	Session  SessionConfig  `yaml:"session"`
+}
+
+// SessionConfig holds session cookie settings.
+type SessionConfig struct {
+	CookieName string `yaml:"cookie_name"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -31,7 +37,10 @@ type RedisConfig struct {
 	Password string `yaml:"password"`
 }
 
-const defaultAddr = ":8083"
+const (
+	defaultAddr              = ":8083"
+	defaultSessionCookieName = "session"
+)
 
 // Load reads the config from environment variables when IS_DOCKER is set,
 // otherwise from the YAML file at path, then validates it.
@@ -68,6 +77,9 @@ func loadFromEnv() *Config {
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
 		},
+		Session: SessionConfig{
+			CookieName: getEnv("SESSION_COOKIE_NAME", defaultSessionCookieName),
+		},
 	}
 }
 
@@ -77,7 +89,10 @@ func loadFromFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config %q: %w", path, err)
 	}
 
-	cfg := &Config{HTTP: HTTPConfig{Addr: defaultAddr}}
+	cfg := &Config{
+		HTTP:    HTTPConfig{Addr: defaultAddr},
+		Session: SessionConfig{CookieName: defaultSessionCookieName},
+	}
 
 	err = yaml.Unmarshal(b, cfg)
 	if err != nil {
@@ -86,6 +101,10 @@ func loadFromFile(path string) (*Config, error) {
 
 	if cfg.HTTP.Addr == "" {
 		cfg.HTTP.Addr = defaultAddr
+	}
+
+	if cfg.Session.CookieName == "" {
+		cfg.Session.CookieName = defaultSessionCookieName
 	}
 
 	return cfg, nil
