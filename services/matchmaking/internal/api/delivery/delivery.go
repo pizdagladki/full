@@ -1,6 +1,13 @@
-// Package delivery holds the matchmaking service WebSocket and HTTP handlers
-// (transport layer: request parse/validate, status codes, serialization). Handler
-// interfaces are added here by downstream resource slices via the new-resource
-// skill; the scaffold ships only the liveness probe and the /ws ping-ack handler
-// wired in the app layer.
+// Package delivery holds the matchmaking service WebSocket handler (transport
+// layer: request parse/validate, status codes, serialization).
 package delivery
+
+import (
+	"net/http"
+)
+
+// MatchmakingHandler handles the authenticated /ws endpoint.
+type MatchmakingHandler interface {
+	// ServeWS handles an incoming WebSocket upgrade request.
+	ServeWS(w http.ResponseWriter, r *http.Request)
+}

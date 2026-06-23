@@ -4,14 +4,17 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the matchmaking service configuration.
 type Config struct {
-	HTTP  HTTPConfig  `yaml:"http"  validate:"required"`
-	Redis RedisConfig `yaml:"redis" validate:"required"`
+	HTTP        HTTPConfig        `yaml:"http"        validate:"required"`
+	Redis       RedisConfig       `yaml:"redis"       validate:"required"`
+	Matchmaking MatchmakingConfig `yaml:"matchmaking"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -25,7 +28,23 @@ type RedisConfig struct {
 	Password string `yaml:"password"`
 }
 
-const defaultAddr = ":8080"
+// MatchmakingConfig holds the pairing algorithm settings.
+type MatchmakingConfig struct {
+	// LevelDistance is the maximum level difference D for an in-distance match.
+	LevelDistance int `yaml:"level_distance"`
+	// FallbackAfter is how long a player waits before the fallback (nearest-
+	// regardless) pairing is used.
+	FallbackAfter time.Duration `yaml:"fallback_after"`
+	// SessionCookie is the name of the HTTP cookie that carries the session id.
+	SessionCookie string `yaml:"session_cookie"`
+}
+
+const (
+	defaultAddr          = ":8080"
+	defaultLevelDist     = 3
+	defaultFallbackAfter = 10 * time.Second
+	defaultSessionCookie = "session"
+)
 
 // Load reads the config from environment variables when IS_DOCKER is set,
 // otherwise from the YAML file at path, then validates it.
@@ -44,6 +63,8 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	applyMatchmakingDefaults(&cfg.Matchmaking)
+
 	err = ValidateConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -53,11 +74,34 @@ func Load(path string) (*Config, error) {
 }
 
 func loadFromEnv() *Config {
+	levelDist := defaultLevelDist
+	if v := os.Getenv("MM_LEVEL_DISTANCE"); v != "" {
+		n, atoiErr := strconv.Atoi(v)
+		if atoiErr == nil {
+			levelDist = n
+		}
+	}
+
+	fallbackAfter := defaultFallbackAfter
+	if v := os.Getenv("MM_FALLBACK_AFTER"); v != "" {
+		d, parseErr := time.ParseDuration(v)
+		if parseErr == nil {
+			fallbackAfter = d
+		}
+	}
+
+	sessionCookie := getEnv("MM_SESSION_COOKIE", defaultSessionCookie)
+
 	return &Config{
 		HTTP: HTTPConfig{Addr: getEnv("HTTP_ADDR", defaultAddr)},
 		Redis: RedisConfig{
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
+		},
+		Matchmaking: MatchmakingConfig{
+			LevelDistance: levelDist,
+			FallbackAfter: fallbackAfter,
+			SessionCookie: sessionCookie,
 		},
 	}
 }
@@ -80,6 +124,21 @@ func loadFromFile(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// applyMatchmakingDefaults fills zero values with sane defaults.
+func applyMatchmakingDefaults(m *MatchmakingConfig) {
+	if m.LevelDistance == 0 {
+		m.LevelDistance = defaultLevelDist
+	}
+
+	if m.FallbackAfter == 0 {
+		m.FallbackAfter = defaultFallbackAfter
+	}
+
+	if m.SessionCookie == "" {
+		m.SessionCookie = defaultSessionCookie
+	}
 }
 
 func getEnv(key, def string) string {
