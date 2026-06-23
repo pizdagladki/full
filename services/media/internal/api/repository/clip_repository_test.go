@@ -312,6 +312,22 @@ func TestClipRepository_DeleteOldestBeyondLimit(t *testing.T) {
 			wantKeys: []string{"clips/42/oldest.webm"},
 		},
 		{
+			// FIFO keep-last-10: 11th upload must evict exactly the oldest clip.
+			// The SQL receives userID=42 and OFFSET=domain.MaxClipsPerUser (10),
+			// so only the row(s) beyond the newest 10 are deleted.
+			name:   "FIFO: 11th upload evicts exactly the oldest clip (uses MaxClipsPerUser as OFFSET)",
+			userID: 42,
+			limit:  domain.MaxClipsPerUser,
+			setup: func(m pgxmock.PgxPoolIface) {
+				rows := pgxmock.NewRows([]string{"object_key"}).
+					AddRow("clips/42/clip-00001.webm") // oldest, now evicted
+				m.ExpectQuery(`DELETE FROM clips`).
+					WithArgs(int64(42), domain.MaxClipsPerUser).
+					WillReturnRows(rows)
+			},
+			wantKeys: []string{"clips/42/clip-00001.webm"},
+		},
+		{
 			name:   "returns empty slice when nothing to evict",
 			userID: 42,
 			limit:  10,

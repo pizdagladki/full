@@ -36,8 +36,14 @@ func (s *minioObjectStore) Put(ctx context.Context, key string, r io.Reader, siz
 }
 
 // PresignedGetURL returns a pre-signed GET URL for the given key valid for ttl.
+// The URL carries response-content-disposition=attachment so that browsers
+// download the file rather than rendering it inline, preventing any
+// HTML/XSS-via-object-URL concern when the link is opened directly.
 func (s *minioObjectStore) PresignedGetURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	u, err := s.client.PresignedGetObject(ctx, s.bucket, key, ttl, url.Values{})
+	reqParams := url.Values{}
+	reqParams.Set("response-content-disposition", "attachment")
+
+	u, err := s.client.PresignedGetObject(ctx, s.bucket, key, ttl, reqParams)
 	if err != nil {
 		return "", err
 	}
