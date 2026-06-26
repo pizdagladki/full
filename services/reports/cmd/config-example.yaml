@@ -5,3 +5,17 @@ postgres:
 redis:
   addr: "localhost:6379"
   password: ""
+storage:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  bucket: "reports"
+  use_ssl: false
+telegram:
+  bot_token: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+  chat_id: "-1001234567890"
+session:
+  cookie_name: "session"
+bug_report:
+  max_upload_bytes: 524288000   # 500 MiB
+  reports_key_prefix: "bug-reports/"

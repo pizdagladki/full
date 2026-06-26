@@ -7,10 +7,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/pizdagladki/full/services/reports/internal/api/domain"
 )
+
+// ErrSessionNotFound is returned when a session key is absent or expired.
+var ErrSessionNotFound = errors.New("session: not found or expired")
 
 type (
 	// CheatReportsRepository provides access to cheat_reports table.
@@ -30,5 +34,24 @@ type (
 		// GetCooldown returns whether a cooldown is active and how many seconds
 		// remain on it. Returns active=false when the key is absent or has no TTL.
 		GetCooldown(ctx context.Context, userID int64) (active bool, secondsRemaining int, err error)
+	}
+
+	// BugReportsRepository provides access to bug_reports table.
+	BugReportsRepository interface {
+		// InsertBugReport inserts a bug report row.
+		InsertBugReport(ctx context.Context, report domain.BugReport) error
+	}
+
+	// SessionRepository resolves authenticated sessions stored in Redis.
+	SessionRepository interface {
+		// UserIDBySession looks up the user ID for a session token.
+		// Returns ErrSessionNotFound when the key is absent or expired.
+		UserIDBySession(ctx context.Context, sessionID string) (int64, error)
+	}
+
+	// BugRecordingStorage stores bug-report recordings in object storage.
+	BugRecordingStorage interface {
+		// StoreRecording writes data under key in the configured bucket.
+		StoreRecording(ctx context.Context, key string, data []byte) error
 	}
 )
