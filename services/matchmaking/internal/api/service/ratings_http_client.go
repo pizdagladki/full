@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 type ratingsHTTPClient struct {
@@ -16,7 +17,7 @@ type ratingsHTTPClient struct {
 func NewRatingsHTTPClient(baseURL string) RatingsClient {
 	return &ratingsHTTPClient{
 		baseURL:    baseURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 3 * time.Second},
 	}
 }
 
