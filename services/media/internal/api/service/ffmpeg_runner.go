@@ -18,10 +18,13 @@ func NewExecFFmpegRunner(bin string) FFmpegRunner {
 
 // buildFFmpegArgs returns the slice of arguments for the ffmpeg conversion
 // command. It is exported for testing the command-builder without invoking a
-// real binary.
+// real binary. The -loglevel error -hide_banner flags limit stderr volume to
+// actual errors only, bounding the output captured by CombinedOutput.
 func buildFFmpegArgs(inputPath, outputPath string) []string {
 	return []string{
 		"-y",
+		"-loglevel", "error",
+		"-hide_banner",
 		"-i", inputPath,
 		"-c", "copy",
 		"-movflags", "+faststart",

@@ -162,9 +162,14 @@ func (s *clipService) RequestConvert(ctx context.Context, userID, clipID int64) 
 
 	mp4Key := domain.BuildMP4Key(clip.UserID, strconv.FormatInt(clipID, 10))
 
-	err = s.repo.UpdateConversion(ctx, clipID, mp4Key, domain.ConversionStatusPending)
+	claimed, err := s.repo.ClaimConversion(ctx, clipID, mp4Key)
 	if err != nil {
-		return "", fmt.Errorf("set pending: %w", err)
+		return "", fmt.Errorf("claim conversion: %w", err)
+	}
+
+	if !claimed {
+		// Another concurrent request already claimed it.
+		return domain.ConversionStatusPending, nil
 	}
 
 	go s.doConvert(clip.ObjectKey, mp4Key, clipID) //nolint:contextcheck,gosec // intentional: outlives HTTP request
@@ -204,9 +209,14 @@ func (s *clipService) GetMP4URL(ctx context.Context, userID, clipID int64) (stri
 // doConvert runs the WebM→MP4 conversion pipeline in a goroutine. It downloads
 // the WebM from the object store, shells out to ffmpeg, and uploads the MP4.
 // It uses context.Background() so it is not canceled when the HTTP handler
-// returns.
+// returns. A 30-minute deadline bounds the total conversion time so that a
+// malformed WebM cannot hang ffmpeg indefinitely.
 func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
-	ctx := context.Background() //nolint:contextcheck // intentional: runs after HTTP handler returns
+	const conversionTimeout = 30 * time.Minute
+
+	//nolint:contextcheck // intentional: runs after HTTP handler returns
+	ctx, cancel := context.WithTimeout(context.Background(), conversionTimeout)
+	defer cancel()
 
 	// Download WebM to temp file.
 	rc, err := s.store.Get(ctx, webmKey)

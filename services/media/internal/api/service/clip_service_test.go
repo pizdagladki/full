@@ -442,9 +442,9 @@ func TestClipService_RequestConvert(t *testing.T) {
 					ObjectKey:        "clips/42/uuid.webm",
 					ConversionStatus: domain.ConversionStatusNone,
 				}, nil)
-				// must mark pending before spawning goroutine
-				m.EXPECT().UpdateConversion(gomock.Any(), clipID, gomock.Any(), domain.ConversionStatusPending).Return(nil)
-				// goroutine will call GetByID or UpdateConversion again — allow it
+				// must atomically claim pending before spawning goroutine
+				m.EXPECT().ClaimConversion(gomock.Any(), clipID, gomock.Any()).Return(true, nil)
+				// goroutine will call UpdateConversion for done/failed — allow it
 				m.EXPECT().UpdateConversion(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
 			},
 			wantStatus: domain.ConversionStatusPending,
@@ -461,8 +461,26 @@ func TestClipService_RequestConvert(t *testing.T) {
 					ObjectKey:        "clips/42/uuid.webm",
 					ConversionStatus: domain.ConversionStatusFailed,
 				}, nil)
-				m.EXPECT().UpdateConversion(gomock.Any(), clipID, gomock.Any(), domain.ConversionStatusPending).Return(nil)
+				m.EXPECT().ClaimConversion(gomock.Any(), clipID, gomock.Any()).Return(true, nil)
 				m.EXPECT().UpdateConversion(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
+			},
+			wantStatus: domain.ConversionStatusPending,
+		},
+		{
+			// criterion: 6 — concurrent claim: ClaimConversion returns false → returns pending without goroutine
+			name:   "concurrent claim — ClaimConversion returns false → returns pending without goroutine",
+			userID: ownerID,
+			clipID: clipID,
+			setupRepo: func(m *repomocks.MockClipRepository) {
+				m.EXPECT().GetByID(gomock.Any(), clipID).Return(domain.Clip{
+					ID:               clipID,
+					UserID:           ownerID,
+					ObjectKey:        "clips/42/uuid.webm",
+					ConversionStatus: domain.ConversionStatusNone,
+				}, nil)
+				// concurrent worker already claimed it — returns false, no goroutine spawned
+				m.EXPECT().ClaimConversion(gomock.Any(), clipID, gomock.Any()).Return(false, nil)
+				// UpdateConversion must NOT be called (no goroutine spawned)
 			},
 			wantStatus: domain.ConversionStatusPending,
 		},

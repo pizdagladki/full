@@ -171,3 +171,18 @@ func (r *clipRepository) UpdateConversion(ctx context.Context, id int64, mp4Key,
 
 	return nil
 }
+
+const claimConversionSQL = `
+UPDATE clips
+   SET mp4_object_key = $2, conversion_status = 'pending'
+ WHERE id = $1
+   AND conversion_status IN ('none', 'failed')`
+
+func (r *clipRepository) ClaimConversion(ctx context.Context, id int64, mp4Key string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, claimConversionSQL, id, mp4Key)
+	if err != nil {
+		return false, fmt.Errorf("claim conversion: %w", err)
+	}
+
+	return tag.RowsAffected() == 1, nil
+}

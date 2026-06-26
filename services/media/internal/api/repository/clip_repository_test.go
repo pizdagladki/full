@@ -408,6 +408,91 @@ func TestClipRepository_DeleteOldestBeyondLimit(t *testing.T) {
 	}
 }
 
+func TestClipRepository_ClaimConversion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		id      int64
+		mp4Key  string
+		setup   func(m pgxmock.PgxPoolIface)
+		wantOK  bool
+		wantErr bool
+	}{
+		{
+			// criterion: 6 — ClaimConversion with 'none' status atomically transitions to 'pending'
+			name:   "success: claims clip with none status (returns true)",
+			id:     5,
+			mp4Key: "clips/42/5.mp4",
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectExec(`UPDATE clips`).
+					WithArgs(int64(5), "clips/42/5.mp4").
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+			},
+			wantOK: true,
+		},
+		{
+			// criterion: 6 — ClaimConversion when already pending returns false without error
+			name:   "already pending: returns false without error",
+			id:     5,
+			mp4Key: "clips/42/5.mp4",
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectExec(`UPDATE clips`).
+					WithArgs(int64(5), "clips/42/5.mp4").
+					WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+			},
+			wantOK: false,
+		},
+		{
+			// criterion: 6 — ClaimConversion DB error propagated
+			name:   "DB error propagated",
+			id:     5,
+			mp4Key: "clips/42/5.mp4",
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectExec(`UPDATE clips`).WillReturnError(errors.New("db error"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock, err := pgxmock.NewPool()
+			if err != nil {
+				t.Fatalf("pgxmock.NewPool() error = %v", err)
+			}
+			defer mock.Close()
+
+			tt.setup(mock)
+
+			repo := repository.NewClipRepository(mock)
+			ok, err := repo.ClaimConversion(context.Background(), tt.id, tt.mp4Key)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ClaimConversion() error = nil, want error")
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ClaimConversion() unexpected error = %v", err)
+			}
+
+			if ok != tt.wantOK {
+				t.Errorf("ClaimConversion() claimed = %v, want %v", ok, tt.wantOK)
+			}
+
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unfulfilled pgxmock expectations: %v", err)
+			}
+		})
+	}
+}
+
 func TestClipRepository_UpdateConversion(t *testing.T) {
 	t.Parallel()
 

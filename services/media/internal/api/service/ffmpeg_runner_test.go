@@ -35,6 +35,8 @@ func TestBuildFFmpegArgs(t *testing.T) {
 			outputPath: "/tmp/out.mp4",
 			wantArgs: []string{
 				"-y",
+				"-loglevel", "error",
+				"-hide_banner",
 				"-i", "/tmp/in.webm",
 				"-c", "copy",
 				"-movflags", "+faststart",
@@ -48,6 +50,8 @@ func TestBuildFFmpegArgs(t *testing.T) {
 			outputPath: "/var/tmp/b.mp4",
 			wantArgs: []string{
 				"-y",
+				"-loglevel", "error",
+				"-hide_banner",
 				"-i", "/var/tmp/a.webm",
 				"-c", "copy",
 				"-movflags", "+faststart",

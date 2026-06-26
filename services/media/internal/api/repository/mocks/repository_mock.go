@@ -41,6 +41,21 @@ func (m *MockClipRepository) EXPECT() *MockClipRepositoryMockRecorder {
 	return m.recorder
 }
 
+// ClaimConversion mocks base method.
+func (m *MockClipRepository) ClaimConversion(ctx context.Context, id int64, mp4Key string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClaimConversion", ctx, id, mp4Key)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ClaimConversion indicates an expected call of ClaimConversion.
+func (mr *MockClipRepositoryMockRecorder) ClaimConversion(ctx, id, mp4Key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimConversion", reflect.TypeOf((*MockClipRepository)(nil).ClaimConversion), ctx, id, mp4Key)
+}
+
 // Create mocks base method.
 func (m *MockClipRepository) Create(ctx context.Context, clip domain.Clip) (domain.Clip, error) {
 	m.ctrl.T.Helper()
