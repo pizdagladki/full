@@ -12,4 +12,5 @@ func (a *App) initServices() {
 	)
 	a.sessionStore = service.NewRedisSessionStore(a.redisClient, a.cfg.Session.TTL)
 	a.authService = service.NewAuthService(a.userRepo, a.oauth, a.sessionStore, a.logger)
+	a.consentService = service.NewConsentService(a.consentRepo, a.logger)
 }

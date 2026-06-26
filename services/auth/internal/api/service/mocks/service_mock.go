@@ -179,3 +179,57 @@ func (mr *MockAuthServiceMockRecorder) LoginGoogle(ctx, code any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LoginGoogle", reflect.TypeOf((*MockAuthService)(nil).LoginGoogle), ctx, code)
 }
+
+// MockConsentService is a mock of ConsentService interface.
+type MockConsentService struct {
+	ctrl     *gomock.Controller
+	recorder *MockConsentServiceMockRecorder
+	isgomock struct{}
+}
+
+// MockConsentServiceMockRecorder is the mock recorder for MockConsentService.
+type MockConsentServiceMockRecorder struct {
+	mock *MockConsentService
+}
+
+// NewMockConsentService creates a new mock instance.
+func NewMockConsentService(ctrl *gomock.Controller) *MockConsentService {
+	mock := &MockConsentService{ctrl: ctrl}
+	mock.recorder = &MockConsentServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockConsentService) EXPECT() *MockConsentServiceMockRecorder {
+	return m.recorder
+}
+
+// GetConsent mocks base method.
+func (m *MockConsentService) GetConsent(ctx context.Context, userID int64) (*domain.Consent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetConsent", ctx, userID)
+	ret0, _ := ret[0].(*domain.Consent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetConsent indicates an expected call of GetConsent.
+func (mr *MockConsentServiceMockRecorder) GetConsent(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetConsent", reflect.TypeOf((*MockConsentService)(nil).GetConsent), ctx, userID)
+}
+
+// RecordConsent mocks base method.
+func (m *MockConsentService) RecordConsent(ctx context.Context, userID int64, req domain.ConsentRequest) (domain.Consent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordConsent", ctx, userID, req)
+	ret0, _ := ret[0].(domain.Consent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RecordConsent indicates an expected call of RecordConsent.
+func (mr *MockConsentServiceMockRecorder) RecordConsent(ctx, userID, req any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordConsent", reflect.TypeOf((*MockConsentService)(nil).RecordConsent), ctx, userID, req)
+}
