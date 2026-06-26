@@ -93,6 +93,7 @@ func (a *App) initRepositories() {
 }
 
 func (a *App) initServices() {
+	ratingsClient := service.NewRatingsHTTPClient(a.cfg.Ratings.BaseURL)
 	a.matchmakingSvc = service.NewMatchmakingService(
 		a.logger,
 		a.queueRepo,
@@ -100,6 +101,7 @@ func (a *App) initServices() {
 		service.UUIDRoomIDGenerator,
 		a.cfg.Matchmaking.LevelDistance,
 		a.cfg.Matchmaking.FallbackAfter,
+		ratingsClient,
 	)
 }
 

@@ -7,3 +7,5 @@ matchmaking:
   level_distance: 3
   fallback_after: "10s"
   session_cookie: "session"
+ratings:
+  base_url: "http://ratings:8080"

@@ -29,6 +29,9 @@ func (uuidRoomIDGen) NewRoomID() string {
 // UUIDRoomIDGenerator is the production room-id generator.
 var UUIDRoomIDGenerator RoomIDGenerator = uuidRoomIDGen{}
 
+// defaultLevel is the level assigned when the ratings service is unavailable.
+const defaultLevel = 4
+
 // matchmakingService implements MatchmakingService.
 type matchmakingService struct {
 	logger        *zap.Logger
@@ -37,6 +40,7 @@ type matchmakingService struct {
 	roomIDGen     RoomIDGenerator
 	levelDist     int
 	fallbackAfter time.Duration
+	ratingsClient RatingsClient
 
 	mu    sync.Mutex
 	conns map[int64]Conn   // userID → active connection; single-instance only — K8s scale-out would need a shared store
@@ -51,6 +55,7 @@ func NewMatchmakingService(
 	roomIDGen RoomIDGenerator,
 	levelDist int,
 	fallbackAfter time.Duration,
+	ratingsClient RatingsClient,
 ) MatchmakingService {
 	return &matchmakingService{
 		logger:        logger,
@@ -59,6 +64,7 @@ func NewMatchmakingService(
 		roomIDGen:     roomIDGen,
 		levelDist:     levelDist,
 		fallbackAfter: fallbackAfter,
+		ratingsClient: ratingsClient,
 		conns:         make(map[int64]Conn),
 		modes:         make(map[int64]string),
 	}
@@ -66,7 +72,17 @@ func NewMatchmakingService(
 
 // Join validates the join request, enqueues the player, and registers the conn.
 func (s *matchmakingService) Join(ctx context.Context, conn Conn, player domain.Player) error {
-	err := domain.ValidateJoin(player.Mode, player.Level)
+	authLevel, err := s.ratingsClient.GetLevel(ctx, player.UserID)
+	if err != nil {
+		s.logger.Warn("ratings lookup failed, using default level",
+			zap.Int64("user_id", player.UserID),
+			zap.Int("default_level", defaultLevel),
+			zap.Error(err))
+		authLevel = defaultLevel
+	}
+	player.Level = authLevel
+
+	err = domain.ValidateJoin(player.Mode, player.Level)
 	if err != nil {
 		return err
 	}
