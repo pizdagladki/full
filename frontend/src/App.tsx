@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Outlet, Navigate } from 'react-router-dom';
 import type { RouteObject } from 'react-router-dom';
 import {
   Landing,
@@ -9,6 +9,9 @@ import {
   Results,
   Profile,
   Store,
+  AuthProvider,
+  Login,
+  ProtectedRoute,
 } from './features';
 
 function Layout() {
@@ -27,14 +30,59 @@ export const routes: RouteObject[] = [
     path: '/',
     element: <Layout />,
     children: [
-      { index: true, element: <Landing /> },
+      { index: true, element: <Login /> },
+      { path: 'auth/callback', element: <Login /> },
+      { path: 'landing', element: <Landing /> },
       { path: 'register', element: <Register /> },
-      { path: 'home', element: <Home /> },
-      { path: 'search', element: <Search /> },
-      { path: 'battle', element: <Battle /> },
-      { path: 'results', element: <Results /> },
-      { path: 'profile', element: <Profile /> },
-      { path: 'store', element: <Store /> },
+      {
+        path: 'home',
+        element: (
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'search',
+        element: (
+          <ProtectedRoute>
+            <Search />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'battle',
+        element: (
+          <ProtectedRoute>
+            <Battle />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'results',
+        element: (
+          <ProtectedRoute>
+            <Results />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'profile',
+        element: (
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'store',
+        element: (
+          <ProtectedRoute>
+            <Store />
+          </ProtectedRoute>
+        ),
+      },
+      { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
 ];
@@ -42,5 +90,9 @@ export const routes: RouteObject[] = [
 const browserRouter = createBrowserRouter(routes);
 
 export function App() {
-  return <RouterProvider router={browserRouter} />;
+  return (
+    <AuthProvider>
+      <RouterProvider router={browserRouter} />
+    </AuthProvider>
+  );
 }
