@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
@@ -30,6 +31,7 @@ func newTestEcho(h RatingsHandler) *echo.Echo {
 	e.Validator = &echoValidator{v: validator.New()}
 	e.POST("/v1/matches/result", h.PostMatchResult)
 	e.GET("/v1/ratings/:user_id", h.GetRating)
+	e.GET("/v1/matches/history", h.GetMatchHistory)
 
 	return e
 }
@@ -174,6 +176,272 @@ func TestPostMatchResult(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/matches/result",
 				strings.NewReader(tt.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantBody != nil {
+				tt.wantBody(t, rec.Body.String())
+			}
+		})
+	}
+}
+
+// ─── GetMatchHistory ──────────────────────────────────────────────────────────
+
+func TestGetMatchHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	dur := 4000
+	winnerDelta := 32
+	loserDelta := -26
+
+	tests := []struct {
+		name       string
+		query      string
+		setup      func(svc *svcmocks.MockRatingsService)
+		wantStatus int
+		wantBody   func(t *testing.T, body string)
+	}{
+		{
+			// criterion: 3 — missing user_id → 400
+			name:       "400 missing user_id",
+			query:      "/v1/matches/history",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — non-numeric user_id → 400
+			name:       "400 non-numeric user_id",
+			query:      "/v1/matches/history?user_id=abc",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — negative user_id → 400
+			name:       "400 negative user_id",
+			query:      "/v1/matches/history?user_id=-1",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — zero user_id → 400
+			name:       "400 zero user_id",
+			query:      "/v1/matches/history?user_id=0",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — non-numeric limit → 400
+			name:       "400 non-numeric limit",
+			query:      "/v1/matches/history?user_id=1&limit=abc",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — negative limit → 400
+			name:       "400 negative limit",
+			query:      "/v1/matches/history?user_id=1&limit=-1",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — non-numeric offset → 400
+			name:       "400 non-numeric offset",
+			query:      "/v1/matches/history?user_id=1&offset=abc",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — negative offset → 400
+			name:       "400 negative offset",
+			query:      "/v1/matches/history?user_id=1&offset=-5",
+			setup:      func(_ *svcmocks.MockRatingsService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — limit > 50 is silently capped to 50
+			name:  "200 limit capped to 50",
+			query: "/v1/matches/history?user_id=1&limit=100",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				// The handler must cap to 50 before calling the service.
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(1), 50, 0).
+					Return([]domain.MatchHistoryItem{}, nil)
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			// criterion: 3 — default limit (20) and offset (0) when not supplied
+			name:  "200 default limit and offset",
+			query: "/v1/matches/history?user_id=5",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(5), 20, 0).
+					Return([]domain.MatchHistoryItem{}, nil)
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			// criterion: 2 — win result with correct (winner's) elo_delta
+			name:  "200 win result and winner elo_delta",
+			query: "/v1/matches/history?user_id=1",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(1), 20, 0).
+					Return([]domain.MatchHistoryItem{
+						{MatchID: 10, OpponentID: 2, Result: "win", Mode: "classic", ELODelta: winnerDelta, DurationMS: &dur, CreatedAt: now},
+					}, nil)
+			},
+			wantStatus: http.StatusOK,
+			wantBody: func(t *testing.T, body string) {
+				t.Helper()
+
+				var resp matchHistoryResponse
+				if err := json.Unmarshal([]byte(body), &resp); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+
+				if len(resp.Matches) != 1 {
+					t.Fatalf("len(matches) = %d, want 1", len(resp.Matches))
+				}
+
+				if resp.Matches[0].Result != "win" {
+					t.Errorf("result = %q, want %q", resp.Matches[0].Result, "win")
+				}
+
+				if resp.Matches[0].ELODelta != winnerDelta {
+					t.Errorf("elo_delta = %d, want %d (winner's delta)", resp.Matches[0].ELODelta, winnerDelta)
+				}
+			},
+		},
+		{
+			// criterion: 2 — loss result with correct (loser's) elo_delta
+			name:  "200 loss result and loser elo_delta",
+			query: "/v1/matches/history?user_id=2",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(2), 20, 0).
+					Return([]domain.MatchHistoryItem{
+						{MatchID: 10, OpponentID: 1, Result: "loss", Mode: "classic", ELODelta: loserDelta, DurationMS: nil, CreatedAt: now},
+					}, nil)
+			},
+			wantStatus: http.StatusOK,
+			wantBody: func(t *testing.T, body string) {
+				t.Helper()
+
+				var resp matchHistoryResponse
+				if err := json.Unmarshal([]byte(body), &resp); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+
+				if len(resp.Matches) != 1 {
+					t.Fatalf("len(matches) = %d, want 1", len(resp.Matches))
+				}
+
+				if resp.Matches[0].Result != "loss" {
+					t.Errorf("result = %q, want %q", resp.Matches[0].Result, "loss")
+				}
+
+				if resp.Matches[0].ELODelta != loserDelta {
+					t.Errorf("elo_delta = %d, want %d (loser's delta)", resp.Matches[0].ELODelta, loserDelta)
+				}
+			},
+		},
+		{
+			// criterion: 4 — user with no matches → 200, matches=[] (not null)
+			name:  "200 empty list not null",
+			query: "/v1/matches/history?user_id=99",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(99), 20, 0).
+					Return([]domain.MatchHistoryItem{}, nil)
+			},
+			wantStatus: http.StatusOK,
+			wantBody: func(t *testing.T, body string) {
+				t.Helper()
+
+				var resp matchHistoryResponse
+				if err := json.Unmarshal([]byte(body), &resp); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+
+				if resp.Matches == nil {
+					t.Error("matches must not be JSON null — want []")
+				}
+
+				if len(resp.Matches) != 0 {
+					t.Errorf("len(matches) = %d, want 0", len(resp.Matches))
+				}
+			},
+		},
+		{
+			// criterion: 5 — service error → 500
+			name:  "500 service error",
+			query: "/v1/matches/history?user_id=1",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(1), 20, 0).
+					Return(nil, errors.New("db timeout"))
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			// criterion: 3 — pagination params wired end-to-end
+			name:  "200 explicit limit and offset forwarded to service",
+			query: "/v1/matches/history?user_id=1&limit=5&offset=10",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(1), 5, 10).
+					Return([]domain.MatchHistoryItem{}, nil)
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			// criterion: 1 — newest-first ordering preserved in response
+			name:  "200 newest-first ordering preserved",
+			query: "/v1/matches/history?user_id=1",
+			setup: func(svc *svcmocks.MockRatingsService) {
+				earlier := now.Add(-time.Hour)
+				svc.EXPECT().ListMatchHistory(gomock.Any(), int64(1), 20, 0).
+					Return([]domain.MatchHistoryItem{
+						{MatchID: 20, OpponentID: 3, Result: "win", Mode: "ranked", ELODelta: 16, CreatedAt: now},
+						{MatchID: 19, OpponentID: 4, Result: "loss", Mode: "classic", ELODelta: -13, CreatedAt: earlier},
+					}, nil)
+			},
+			wantStatus: http.StatusOK,
+			wantBody: func(t *testing.T, body string) {
+				t.Helper()
+
+				var resp matchHistoryResponse
+				if err := json.Unmarshal([]byte(body), &resp); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+
+				if len(resp.Matches) != 2 {
+					t.Fatalf("len(matches) = %d, want 2", len(resp.Matches))
+				}
+
+				if resp.Matches[0].MatchID != 20 {
+					t.Errorf("matches[0].match_id = %d, want 20 (newest first)", resp.Matches[0].MatchID)
+				}
+
+				if resp.Matches[1].MatchID != 19 {
+					t.Errorf("matches[1].match_id = %d, want 19", resp.Matches[1].MatchID)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			svc := svcmocks.NewMockRatingsService(ctrl)
+			tt.setup(svc)
+
+			h := NewRatingsHandler(svc, zap.NewNop())
+			e := newTestEcho(h)
+
+			req := httptest.NewRequest(http.MethodGet, tt.query, nil)
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
 

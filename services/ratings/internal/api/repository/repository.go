@@ -23,5 +23,9 @@ type (
 		// (ELO=1000, Level=4, GamesPlayed=0) when the player has no row yet.
 		// A missing row is NOT an error; it does NOT insert anything.
 		GetRating(ctx context.Context, userID int64) (domain.Rating, error)
+
+		// ListMatchHistory returns the player's match history, newest first,
+		// paginated by limit and offset.
+		ListMatchHistory(ctx context.Context, userID int64, limit, offset int) ([]domain.MatchHistoryItem, error)
 	}
 )

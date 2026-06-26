@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -106,6 +107,100 @@ func TestRatingsService_ApplyMatchResult(t *testing.T) {
 
 			if got != tt.want {
 				t.Errorf("ApplyMatchResult() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRatingsService_ListMatchHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	dur := 3000
+
+	tests := []struct {
+		name    string
+		userID  int64
+		limit   int
+		offset  int
+		setup   func(repo *repomocks.MockRatingsRepository)
+		want    []domain.MatchHistoryItem
+		wantErr bool
+	}{
+		{
+			// criterion: 1,2 — items from repo forwarded with correct fields
+			name:   "items returned are forwarded to caller",
+			userID: 1,
+			limit:  10,
+			offset: 0,
+			setup: func(repo *repomocks.MockRatingsRepository) {
+				repo.EXPECT().ListMatchHistory(gomock.Any(), int64(1), 10, 0).
+					Return([]domain.MatchHistoryItem{
+						{MatchID: 7, OpponentID: 2, Result: "win", Mode: "classic", ELODelta: 32, DurationMS: &dur, CreatedAt: now},
+					}, nil)
+			},
+			want: []domain.MatchHistoryItem{
+				{MatchID: 7, OpponentID: 2, Result: "win", Mode: "classic", ELODelta: 32, DurationMS: &dur, CreatedAt: now},
+			},
+		},
+		{
+			// criterion: 4 — empty list forwarded (not nil)
+			name:   "empty list forwarded from repo",
+			userID: 99,
+			limit:  20,
+			offset: 0,
+			setup: func(repo *repomocks.MockRatingsRepository) {
+				repo.EXPECT().ListMatchHistory(gomock.Any(), int64(99), 20, 0).
+					Return([]domain.MatchHistoryItem{}, nil)
+			},
+			want: []domain.MatchHistoryItem{},
+		},
+		{
+			// criterion: 5 — repo error is propagated
+			name:   "repo error is propagated",
+			userID: 1,
+			limit:  10,
+			offset: 0,
+			setup: func(repo *repomocks.MockRatingsRepository) {
+				repo.EXPECT().ListMatchHistory(gomock.Any(), int64(1), 10, 0).
+					Return(nil, errors.New("db error"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			repo := repomocks.NewMockRatingsRepository(ctrl)
+			tt.setup(repo)
+
+			svc := NewRatingsService(repo, zap.NewNop())
+			got, err := svc.ListMatchHistory(context.Background(), tt.userID, tt.limit, tt.offset)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ListMatchHistory() error = nil, want error")
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ListMatchHistory() unexpected error = %v", err)
+			}
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("ListMatchHistory() len = %d, want %d", len(got), len(tt.want))
+			}
+
+			for i, item := range got {
+				w := tt.want[i]
+				if item.MatchID != w.MatchID || item.Result != w.Result || item.ELODelta != w.ELODelta {
+					t.Errorf("[%d] got %+v, want %+v", i, item, w)
+				}
 			}
 		})
 	}
