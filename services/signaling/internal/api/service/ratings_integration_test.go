@@ -270,6 +270,102 @@ func TestRatingsClient_DuplicateOutcomeNotRecalled(t *testing.T) {
 	}
 }
 
+// TestRatingsClient_RankedForfeitCallsApplyResultOnce verifies that when a peer
+// leaves a ranked room before any blink is decided, ApplyResult is called exactly
+// once with winner=remaining peer, loser=leaving peer, mode=ranked, positive duration_ms.
+//
+// criterion: 1 — ranked forfeit (Leave) fires ApplyResult exactly once with correct payload.
+// criterion: 5 — Leave-forfeit code path is covered.
+func TestRatingsClient_RankedForfeitCallsApplyResultOnce(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Unix(5000, 0)
+	t1 := t0.Add(8 * time.Millisecond) // Leave's s.now() call for durationMs
+	times := []time.Time{t0, t1}
+
+	spy := &spyRatingsClient{}
+	svc, _ := newRatingsFixture(t, spy, times, 150*time.Millisecond)
+
+	connA := newFakeConn(1) // leaves — forfeits (loser)
+	connB := newFakeConn(2) // stays — wins
+	ctx := context.Background()
+
+	// A joins first — no battleStart yet (only 1 member).
+	if err := svc.Join(ctx, connA, "room-forfeit-ranked", domain.ModeRanked); err != nil {
+		t.Fatalf("A Join error = %v", err)
+	}
+	// B joins second — room is full, battleStart = t0.
+	if err := svc.Join(ctx, connB, "room-forfeit-ranked", domain.ModeRanked); err != nil {
+		t.Fatalf("B Join error = %v", err)
+	}
+
+	// A disconnects before any blink — A forfeits, B wins.
+	svc.Leave(ctx, connA, "room-forfeit-ranked")
+
+	// Wait for the async goroutine.
+	got := waitForRatingsCall(spy, 1, 200*time.Millisecond)
+	// criterion: 1 — fails if ApplyResult not called exactly once on ranked forfeit
+	if got != 1 {
+		t.Fatalf("ApplyResult called %d times, want 1 (criterion: 1 — ranked forfeit must call ratings once)", got)
+	}
+
+	calls := spy.snapshot()
+	req := calls[0]
+
+	if req.WinnerID != 2 {
+		t.Errorf("winner_id = %d, want 2 (criterion: 1 — correct winner on forfeit)", req.WinnerID)
+	}
+	if req.LoserID != 1 {
+		t.Errorf("loser_id = %d, want 1 (criterion: 1 — correct loser on forfeit)", req.LoserID)
+	}
+	if req.Mode != domain.ModeRanked {
+		t.Errorf("mode = %q, want %q (criterion: 1 — mode must be ranked on forfeit)", req.Mode, domain.ModeRanked)
+	}
+	if req.DurationMs <= 0 {
+		t.Errorf("duration_ms = %d, want positive (criterion: 1 — positive duration on forfeit)", req.DurationMs)
+	}
+}
+
+// TestRatingsClient_UnrankedForfeitNoCall verifies that when a peer leaves an
+// unranked room, ApplyResult is never called even though the remaining peer wins.
+//
+// criterion: 2 — unranked forfeit (Leave) never fires ApplyResult.
+func TestRatingsClient_UnrankedForfeitNoCall(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Unix(6000, 0)
+	times := []time.Time{t0}
+
+	spy := &spyRatingsClient{}
+	svc, _ := newRatingsFixture(t, spy, times, 150*time.Millisecond)
+
+	connA := newFakeConn(1) // leaves
+	connB := newFakeConn(2) // remains
+	ctx := context.Background()
+
+	if err := svc.Join(ctx, connA, "room-forfeit-unranked", domain.ModeUnranked); err != nil {
+		t.Fatalf("A Join error = %v", err)
+	}
+	if err := svc.Join(ctx, connB, "room-forfeit-unranked", domain.ModeUnranked); err != nil {
+		t.Fatalf("B Join error = %v", err)
+	}
+
+	// A disconnects — B wins by forfeit; no ratings call expected.
+	svc.Leave(ctx, connA, "room-forfeit-unranked")
+
+	time.Sleep(30 * time.Millisecond)
+
+	// criterion: 2 — fails if ApplyResult called for an unranked forfeit
+	if n := spy.count(); n != 0 {
+		t.Errorf("ApplyResult called %d times for unranked forfeit, want 0 (criterion: 2 — unranked must not call ratings)", n)
+	}
+
+	// The remaining peer B must still receive the outcome frame (forfeit win).
+	if len(connB.Sent()) == 0 {
+		t.Error("connB did not receive outcome frame on unranked forfeit")
+	}
+}
+
 // TestRatingsClient_ClientErrorDoesNotBlockOutcome verifies that when the
 // ratings client returns an error, the outcome frame is still delivered to both
 // peers (fire-and-forget: errors do not block the match outcome).
