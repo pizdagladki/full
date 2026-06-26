@@ -27,7 +27,7 @@ function makeAuthApi(overrides: Partial<AuthApi> = {}): AuthApi {
 
 function renderLogin(
   { search = '', authApi }: { search?: string; authApi?: AuthApi } = {},
-  authState: AuthState = { user: null, loading: false, error: null },
+  authState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) },
 ) {
   const router = createMemoryRouter(
     [
@@ -172,7 +172,7 @@ describe('Login — 401 handling', () => {
 describe('ProtectedRoute — redirect', () => {
   it('criterion-3: redirects unauthenticated user to / from a protected route', () => {
     // criterion: 3 — unauthenticated user visiting a protected route is redirected to login
-    const unauthState: AuthState = { user: null, loading: false, error: null };
+    const unauthState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     const router = createMemoryRouter(
       [
         { path: '/', element: <div>Login</div> },
@@ -205,6 +205,7 @@ describe('ProtectedRoute — redirect', () => {
       },
       loading: false,
       error: null,
+      refreshUser: vi.fn().mockResolvedValue(undefined),
     };
     const router = createMemoryRouter(
       [
@@ -231,7 +232,7 @@ describe('ProtectedRoute — redirect', () => {
 
   it('criterion-3 guard: shows nothing while loading (no premature redirect)', () => {
     // criterion: 3 — while auth state is loading, ProtectedRoute renders null (no redirect yet)
-    const loadingState: AuthState = { user: null, loading: true, error: null };
+    const loadingState: AuthState = { user: null, loading: true, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     const router = createMemoryRouter(
       [
         { path: '/', element: <div>Login</div> },
@@ -458,7 +459,7 @@ describe('AuthContext — state population', () => {
 describe('Login — redirect authenticated user', () => {
   it('criterion-3: authenticated user visiting Login (/) is redirected to /home', async () => {
     // criterion: 3 — already-authenticated user visiting / should see /home, not the login screen
-    const authState: AuthState = { user: { id: '1', email: 'u@u.com' }, loading: false, error: null };
+    const authState: AuthState = { user: { id: '1', email: 'u@u.com' }, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     const router = createMemoryRouter(
       [
         { path: '/', element: <AuthContext.Provider value={authState}><Login /></AuthContext.Provider> },
@@ -475,7 +476,7 @@ describe('Login — redirect authenticated user', () => {
 
   it('criterion-3 guard: unauthenticated user visiting Login (/) sees the login screen', () => {
     // criterion: 3 guard — unauthenticated user should NOT be redirected away from login
-    const authState: AuthState = { user: null, loading: false, error: null };
+    const authState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     const router = createMemoryRouter(
       [
         { path: '/', element: <AuthContext.Provider value={authState}><Login /></AuthContext.Provider> },
@@ -509,7 +510,7 @@ describe('Login — OAuth state CSRF protection', () => {
 
     const router = createMemoryRouter(
       [
-        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null }}><Login authApi={api} /></AuthContext.Provider> },
+        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) }}><Login authApi={api} /></AuthContext.Provider> },
         { path: '/home', element: <div>Home</div> },
       ],
       { initialEntries: ['/?code=mycode&state=wrong-state'] },
@@ -531,7 +532,7 @@ describe('Login — OAuth state CSRF protection', () => {
 
     const router = createMemoryRouter(
       [
-        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null }}><Login authApi={api} /></AuthContext.Provider> },
+        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) }}><Login authApi={api} /></AuthContext.Provider> },
         { path: '/home', element: <div>Home</div> },
       ],
       { initialEntries: ['/?code=mycode&state=correct-state'] },
@@ -552,7 +553,7 @@ describe('Login — OAuth state CSRF protection', () => {
 
     const router = createMemoryRouter(
       [
-        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null }}><Login authApi={api} /></AuthContext.Provider> },
+        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) }}><Login authApi={api} /></AuthContext.Provider> },
         { path: '/home', element: <div>Home</div> },
       ],
       { initialEntries: ['/?code=mycode&state=some-state'] },

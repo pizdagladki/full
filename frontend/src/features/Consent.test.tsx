@@ -54,11 +54,14 @@ function makeAuthApi(overrides: Partial<AuthApi> = {}): AuthApi {
   };
 }
 
+const mockRefreshUser = vi.fn().mockResolvedValue(undefined);
+
 function setAuthState(state: Partial<AuthState>) {
   const full: AuthState = {
     user: makeUser({ consent: null }),
     loading: false,
     error: null,
+    refreshUser: mockRefreshUser,
     ...state,
   };
   vi.mocked(useAuth).mockReturnValue(full);
@@ -226,6 +229,8 @@ describe('Consent — criterion 2: gating and submit payload', () => {
 describe('Consent — criterion 3: success routes to /home', () => {
   beforeEach(() => {
     mockNavigate.mockReset();
+    mockRefreshUser.mockReset();
+    mockRefreshUser.mockResolvedValue(undefined);
     setAuthState({ user: makeUser({ consent: null }) });
   });
 
@@ -244,6 +249,55 @@ describe('Consent — criterion 3: success routes to /home', () => {
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
+  });
+
+  it('criterion-3: refreshUser is called before navigate on successful submitConsent', async () => {
+    // criterion: 3 — refreshUser must be called to update auth context before ProtectedRoute evaluates
+    const callOrder: string[] = [];
+    mockRefreshUser.mockImplementation(async () => {
+      callOrder.push('refreshUser');
+    });
+    mockNavigate.mockImplementation(() => {
+      callOrder.push('navigate');
+    });
+
+    const api = makeAuthApi({
+      submitConsent: vi.fn().mockResolvedValue(makeConsentInfo()),
+    });
+    renderConsent(api);
+
+    fireEvent.click(screen.getByTestId('checkbox-adult'));
+    fireEvent.click(screen.getByTestId('checkbox-recording'));
+    fireEvent.click(screen.getByTestId('checkbox-tos'));
+    fireEvent.click(screen.getByTestId('btn-continue'));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
+    });
+
+    // refreshUser must be called, and it must precede navigate
+    expect(mockRefreshUser).toHaveBeenCalledTimes(1);
+    expect(callOrder).toEqual(['refreshUser', 'navigate']);
+  });
+
+  it('criterion-3: refreshUser is NOT called if submitConsent fails', async () => {
+    // criterion: 3 guard — on error, refreshUser must not be called
+    const api = makeAuthApi({
+      submitConsent: vi.fn().mockRejectedValue(new Error('server error')),
+    });
+    renderConsent(api);
+
+    fireEvent.click(screen.getByTestId('checkbox-adult'));
+    fireEvent.click(screen.getByTestId('checkbox-recording'));
+    fireEvent.click(screen.getByTestId('checkbox-tos'));
+    fireEvent.click(screen.getByTestId('btn-continue'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error-message')).toBeInTheDocument();
+    });
+
+    expect(mockRefreshUser).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it('criterion-3 guard: does not navigate if submitConsent is not called', () => {

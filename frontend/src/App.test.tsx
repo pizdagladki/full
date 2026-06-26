@@ -16,6 +16,7 @@ const authenticatedState: AuthState = {
   },
   loading: false,
   error: null,
+  refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
 function renderWithAuth(routesList: RouteObject[], path: string, authState: AuthState = authenticatedState) {
@@ -44,6 +45,7 @@ const unauthenticatedState: AuthState = {
   user: null,
   loading: false,
   error: null,
+  refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
 describe('App routes', () => {
@@ -121,7 +123,7 @@ describe('App routes', () => {
 
   it('redirects unauthenticated user from /home to / — criterion 3 guard', () => {
     // criterion: 3 — unauthenticated user visiting protected route is redirected to login
-    const unauthState: AuthState = { user: null, loading: false, error: null };
+    const unauthState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     renderWithAuth(routes, '/home', unauthState);
     expect(screen.queryByTestId('home-screen')).not.toBeInTheDocument();
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();

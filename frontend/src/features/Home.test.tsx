@@ -15,6 +15,7 @@ const AUTH_STATE: AuthState = {
   user: { id: 'user-42', email: 'test@example.com' },
   loading: false,
   error: null,
+  refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
 /** Renders <Home /> inside the auth context and a MemoryRouter. */
@@ -224,7 +225,7 @@ describe('Criterion 3 — level progress bar', () => {
 
   it('criterion-3: shows neutral placeholder when user is null (no user id to fetch)', async () => {
     // criterion: 3 — null user should not crash the component; placeholder is shown
-    const nullUserState: AuthState = { user: null, loading: false, error: null };
+    const nullUserState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     renderHome(nullUserState);
 
     // No progressbar, placeholder visible

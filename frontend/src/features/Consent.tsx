@@ -9,7 +9,7 @@ interface ConsentProps {
 }
 
 export function Consent({ authApi = defaultAuthApi }: ConsentProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const navigate = useNavigate();
 
   const [adultChecked, setAdultChecked] = useState(false);
@@ -35,6 +35,7 @@ export function Consent({ authApi = defaultAuthApi }: ConsentProps) {
         consent_recording: true,
         consent_tos: true,
       });
+      await refreshUser();
       navigate('/home');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'An error occurred';
