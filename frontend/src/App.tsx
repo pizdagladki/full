@@ -1,4 +1,5 @@
 import { createBrowserRouter, RouterProvider, Outlet, Navigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import type { RouteObject } from 'react-router-dom';
 import {
   Landing,
@@ -12,7 +13,17 @@ import {
   AuthProvider,
   Login,
   ProtectedRoute,
+  useAuth,
 } from './features';
+import { Consent } from './features/Consent';
+
+// AuthRoute: checks auth (loading/user) but does NOT check consent (avoids /consent → /consent loop)
+function AuthRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  if (!user) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 
 function Layout() {
   return (
@@ -34,6 +45,14 @@ export const routes: RouteObject[] = [
       { path: 'auth/callback', element: <Login /> },
       { path: 'landing', element: <Landing /> },
       { path: 'register', element: <Register /> },
+      {
+        path: 'consent',
+        element: (
+          <AuthRoute>
+            <Consent />
+          </AuthRoute>
+        ),
+      },
       {
         path: 'home',
         element: (

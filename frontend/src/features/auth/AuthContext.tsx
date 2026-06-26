@@ -8,9 +8,12 @@ export interface AuthState {
   user: User | null;
   loading: boolean;
   error: string | null;
+  refreshUser: () => Promise<void>;
 }
 
-const defaultState: AuthState = { user: null, loading: true, error: null };
+const noopRefresh = () => Promise.resolve();
+
+const defaultState: AuthState = { user: null, loading: true, error: null, refreshUser: noopRefresh };
 
 export const AuthContext = createContext<AuthState>(defaultState);
 
@@ -24,17 +27,21 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children, authApi = defaultAuthApi }: AuthProviderProps) {
-  const [state, setState] = useState<AuthState>(defaultState);
+  const [state, setState] = useState<Omit<AuthState, 'refreshUser'>>({
+    user: null,
+    loading: true,
+    error: null,
+  });
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = { value: false };
     authApi
       .getMe()
       .then((user) => {
-        if (!cancelled) setState({ user, loading: false, error: null });
+        if (!cancelled.value) setState({ user, loading: false, error: null });
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (cancelled.value) return;
         if (err instanceof ApiError && err.status === 401) {
           setState({ user: null, loading: false, error: null });
         } else {
@@ -43,9 +50,25 @@ export function AuthProvider({ children, authApi = defaultAuthApi }: AuthProvide
         }
       });
     return () => {
-      cancelled = true;
+      cancelled.value = true;
     };
   }, [authApi]);
 
-  return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>;
+  const refreshUser = async () => {
+    try {
+      const user = await authApi.getMe();
+      setState({ user, loading: false, error: null });
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 401) {
+        setState({ user: null, loading: false, error: null });
+      } else {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        setState({ user: null, loading: false, error: msg });
+      }
+    }
+  };
+
+  const contextValue: AuthState = { ...state, refreshUser };
+
+  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
 }

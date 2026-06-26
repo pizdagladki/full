@@ -6,11 +6,17 @@ import { routes } from './App';
 import { AuthContext } from './features';
 import type { AuthState } from './features';
 
-// Provide an authenticated context so ProtectedRoute doesn't redirect
+// Provide an authenticated context so ProtectedRoute doesn't redirect.
+// consent must be set so ProtectedRoute does not gate to /consent.
 const authenticatedState: AuthState = {
-  user: { id: '1', email: 'test@test.com' },
+  user: {
+    id: '1',
+    email: 'test@test.com',
+    consent: { is_adult: true, consent_recording: true, consent_tos: true, accepted_at: '2026-01-01T00:00:00Z' },
+  },
   loading: false,
   error: null,
+  refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
 function renderWithAuth(routesList: RouteObject[], path: string, authState: AuthState = authenticatedState) {
@@ -39,6 +45,7 @@ const unauthenticatedState: AuthState = {
   user: null,
   loading: false,
   error: null,
+  refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
 describe('App routes', () => {
@@ -116,7 +123,7 @@ describe('App routes', () => {
 
   it('redirects unauthenticated user from /home to / — criterion 3 guard', () => {
     // criterion: 3 — unauthenticated user visiting protected route is redirected to login
-    const unauthState: AuthState = { user: null, loading: false, error: null };
+    const unauthState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     renderWithAuth(routes, '/home', unauthState);
     expect(screen.queryByTestId('home-screen')).not.toBeInTheDocument();
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
