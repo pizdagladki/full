@@ -31,13 +31,18 @@ type App struct {
 	catalogRepo   repository.CatalogRepository
 	inventoryRepo repository.InventoryRepository
 	sessionRepo   repository.SessionRepository
+	purchaseRepo  repository.PurchaseRepository
 
 	catalogSvc   service.CatalogService
 	inventorySvc service.InventoryService
 	sessionSvc   service.SessionService
+	purchaseSvc  service.PurchaseService
 
-	storeHandler   delivery.StoreHandler
-	authMiddleware *middleware.AuthMiddleware
+	paymentProvider service.PaymentProvider
+
+	storeHandler    delivery.StoreHandler
+	purchaseHandler delivery.PurchaseHandler
+	authMiddleware  *middleware.AuthMiddleware
 }
 
 // New returns an empty App for the given service name.

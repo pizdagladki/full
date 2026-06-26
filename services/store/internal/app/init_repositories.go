@@ -6,4 +6,5 @@ func (a *App) initRepositories() {
 	a.catalogRepo = repository.NewCatalogRepository(a.pgxPool)
 	a.inventoryRepo = repository.NewInventoryRepository(a.pgxPool)
 	a.sessionRepo = repository.NewSessionRepository(a.redisClient)
+	a.purchaseRepo = repository.NewPurchaseRepository(a.pgxPool)
 }
