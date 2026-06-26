@@ -8,6 +8,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/internal/platform/logger"
+	"github.com/pizdagladki/full/services/signaling/internal/api/delivery"
+	"github.com/pizdagladki/full/services/signaling/internal/api/repository"
+	"github.com/pizdagladki/full/services/signaling/internal/api/service"
 	"github.com/pizdagladki/full/services/signaling/internal/config"
 )
 
@@ -19,6 +22,13 @@ type App struct {
 	cfg    *config.Config
 
 	redisClient *redis.Client
+
+	sessionRepo repository.SessionRepository
+	roomRepo    repository.RoomRepository
+
+	signalingSvc service.SignalingService
+
+	wsHandler delivery.SignalingHandler
 }
 
 // New returns an empty App for the given service name.
@@ -47,6 +57,10 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = a.redisClient.Close() }()
+
+	a.initRepositories()
+	a.initServices()
+	a.initHandlers()
 
 	return a.runWorkers(ctx)
 }

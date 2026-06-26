@@ -3,3 +3,8 @@ http:
 redis:
   addr: "localhost:6379"
   password: ""
+signaling:
+  session_cookie: "session"
+  room_ttl: "30m"
+  keepalive_interval: "30s"
+  keepalive_ping_timeout: "10s"
