@@ -206,6 +206,19 @@ func (s *clipService) GetMP4URL(ctx context.Context, userID, clipID int64) (stri
 	}
 }
 
+// recordConvStatus writes a terminal conversion status using a fresh short-lived
+// context so that a canceled encode context (e.g. 30-minute deadline expired)
+// cannot silently prevent the status write from reaching the database.
+func (s *clipService) recordConvStatus(clipID int64, mp4Key string, status string) {
+	recCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := s.repo.UpdateConversion(recCtx, clipID, mp4Key, status)
+	if err != nil {
+		s.logger.Error("record conversion status", zap.String("status", status), zap.Error(err))
+	}
+}
+
 // doConvert runs the WebM→MP4 conversion pipeline in a goroutine. It downloads
 // the WebM from the object store, shells out to ffmpeg, and uploads the MP4.
 // It uses context.Background() so it is not canceled when the HTTP handler
@@ -222,7 +235,7 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 	rc, err := s.store.Get(ctx, webmKey)
 	if err != nil {
 		s.logger.Error("ffmpeg: download webm", zap.String("key", webmKey), zap.Error(err))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
@@ -231,7 +244,7 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 	tmpIn, err := os.CreateTemp("", "media-in-*.webm")
 	if err != nil {
 		s.logger.Error("ffmpeg: create temp input", zap.Error(err))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
@@ -242,7 +255,7 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 
 	if copyErr != nil {
 		s.logger.Error("ffmpeg: write temp input", zap.Error(copyErr))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
@@ -250,7 +263,7 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 	tmpOut, err := os.CreateTemp("", "media-out-*.mp4")
 	if err != nil {
 		s.logger.Error("ffmpeg: create temp output", zap.Error(err))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
@@ -260,7 +273,7 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 	err = s.runner.Convert(ctx, tmpIn.Name(), tmpOut.Name())
 	if err != nil {
 		s.logger.Error("ffmpeg: convert", zap.Error(err))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
@@ -269,7 +282,7 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 	f, err := os.Open(tmpOut.Name())
 	if err != nil {
 		s.logger.Error("ffmpeg: open output", zap.Error(err))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
@@ -278,7 +291,7 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 	info, err := f.Stat()
 	if err != nil {
 		s.logger.Error("ffmpeg: stat output", zap.Error(err))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
@@ -286,13 +299,10 @@ func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
 	err = s.store.Put(ctx, mp4Key, f, info.Size(), domain.ContentTypeMP4)
 	if err != nil {
 		s.logger.Error("ffmpeg: upload mp4", zap.String("key", mp4Key), zap.Error(err))
-		_ = s.repo.UpdateConversion(ctx, clipID, "", domain.ConversionStatusFailed)
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
 
 		return
 	}
 
-	err = s.repo.UpdateConversion(ctx, clipID, mp4Key, domain.ConversionStatusDone)
-	if err != nil {
-		s.logger.Error("ffmpeg: record done", zap.Error(err))
-	}
+	s.recordConvStatus(clipID, mp4Key, domain.ConversionStatusDone)
 }
