@@ -4,17 +4,28 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
-// registerHTTPRoutes builds the service's Echo router. Resource routes are added
-// by downstream resource slices; the scaffold exposes only the liveness probe.
+// registerHTTPRoutes builds the service's Echo router.
 func (a *App) registerHTTPRoutes() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 	e.Validator = a.validator
 
+	// Cap request bodies so an unauthenticated POST cannot stream an arbitrarily
+	// large payload into memory.
+	e.Use(middleware.BodyLimit("16K"))
+
 	e.GET("/healthz", handleHealthz)
+
+	// Ratings resource routes — only registered when the handler is wired
+	// (it is nil in newTestApp which exercises only /healthz).
+	if a.ratingsHandler != nil {
+		e.POST("/v1/matches/result", a.ratingsHandler.PostMatchResult)
+		e.GET("/v1/ratings/:user_id", a.ratingsHandler.GetRating)
+	}
 
 	return e
 }
