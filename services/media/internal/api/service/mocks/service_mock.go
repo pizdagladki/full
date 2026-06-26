@@ -43,6 +43,21 @@ func (m *MockObjectStore) EXPECT() *MockObjectStoreMockRecorder {
 	return m.recorder
 }
 
+// Get mocks base method.
+func (m *MockObjectStore) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Get", ctx, key)
+	ret0, _ := ret[0].(io.ReadCloser)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Get indicates an expected call of Get.
+func (mr *MockObjectStoreMockRecorder) Get(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockObjectStore)(nil).Get), ctx, key)
+}
+
 // PresignedGetURL mocks base method.
 func (m *MockObjectStore) PresignedGetURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	m.ctrl.T.Helper()
@@ -86,6 +101,44 @@ func (mr *MockObjectStoreMockRecorder) Remove(ctx, key any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Remove", reflect.TypeOf((*MockObjectStore)(nil).Remove), ctx, key)
 }
 
+// MockFFmpegRunner is a mock of FFmpegRunner interface.
+type MockFFmpegRunner struct {
+	ctrl     *gomock.Controller
+	recorder *MockFFmpegRunnerMockRecorder
+	isgomock struct{}
+}
+
+// MockFFmpegRunnerMockRecorder is the mock recorder for MockFFmpegRunner.
+type MockFFmpegRunnerMockRecorder struct {
+	mock *MockFFmpegRunner
+}
+
+// NewMockFFmpegRunner creates a new mock instance.
+func NewMockFFmpegRunner(ctrl *gomock.Controller) *MockFFmpegRunner {
+	mock := &MockFFmpegRunner{ctrl: ctrl}
+	mock.recorder = &MockFFmpegRunnerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockFFmpegRunner) EXPECT() *MockFFmpegRunnerMockRecorder {
+	return m.recorder
+}
+
+// Convert mocks base method.
+func (m *MockFFmpegRunner) Convert(ctx context.Context, inputPath, outputPath string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Convert", ctx, inputPath, outputPath)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Convert indicates an expected call of Convert.
+func (mr *MockFFmpegRunnerMockRecorder) Convert(ctx, inputPath, outputPath any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Convert", reflect.TypeOf((*MockFFmpegRunner)(nil).Convert), ctx, inputPath, outputPath)
+}
+
 // MockClipService is a mock of ClipService interface.
 type MockClipService struct {
 	ctrl     *gomock.Controller
@@ -125,6 +178,21 @@ func (mr *MockClipServiceMockRecorder) DownloadURL(ctx, userID, clipID any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadURL", reflect.TypeOf((*MockClipService)(nil).DownloadURL), ctx, userID, clipID)
 }
 
+// GetMP4URL mocks base method.
+func (m *MockClipService) GetMP4URL(ctx context.Context, userID, clipID int64) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMP4URL", ctx, userID, clipID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetMP4URL indicates an expected call of GetMP4URL.
+func (mr *MockClipServiceMockRecorder) GetMP4URL(ctx, userID, clipID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMP4URL", reflect.TypeOf((*MockClipService)(nil).GetMP4URL), ctx, userID, clipID)
+}
+
 // List mocks base method.
 func (m *MockClipService) List(ctx context.Context, userID int64) ([]domain.Clip, error) {
 	m.ctrl.T.Helper()
@@ -138,6 +206,21 @@ func (m *MockClipService) List(ctx context.Context, userID int64) ([]domain.Clip
 func (mr *MockClipServiceMockRecorder) List(ctx, userID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockClipService)(nil).List), ctx, userID)
+}
+
+// RequestConvert mocks base method.
+func (m *MockClipService) RequestConvert(ctx context.Context, userID, clipID int64) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RequestConvert", ctx, userID, clipID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RequestConvert indicates an expected call of RequestConvert.
+func (mr *MockClipServiceMockRecorder) RequestConvert(ctx, userID, clipID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestConvert", reflect.TypeOf((*MockClipService)(nil).RequestConvert), ctx, userID, clipID)
 }
 
 // Upload mocks base method.

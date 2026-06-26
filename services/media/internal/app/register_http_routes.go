@@ -22,6 +22,8 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	v1.POST("/clips", a.clipHandler.Upload)
 	v1.GET("/clips", a.clipHandler.List)
 	v1.GET("/clips/:id/download", a.clipHandler.Download)
+	v1.POST("/clips/:id/convert", a.clipHandler.Convert)
+	v1.GET("/clips/:id/mp4", a.clipHandler.GetMP4)
 
 	return e
 }

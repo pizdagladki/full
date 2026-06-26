@@ -83,7 +83,12 @@ func (a *App) Run(ctx context.Context) error {
 	defer func() { _ = a.redisClient.Close() }()
 
 	a.initRepositories()
-	a.initServices()
+
+	err = a.initServices()
+	if err != nil {
+		return err
+	}
+
 	a.initHandlers()
 	a.initMiddleware()
 

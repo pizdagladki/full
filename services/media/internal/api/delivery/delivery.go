@@ -19,4 +19,8 @@ type ClipHandler interface {
 	List(c echo.Context) error
 	// Download handles GET /v1/clips/:id/download.
 	Download(c echo.Context) error
+	// Convert handles POST /v1/clips/:id/convert.
+	Convert(c echo.Context) error
+	// GetMP4 handles GET /v1/clips/:id/mp4.
+	GetMP4(c echo.Context) error
 }

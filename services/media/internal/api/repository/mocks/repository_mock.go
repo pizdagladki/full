@@ -101,6 +101,20 @@ func (mr *MockClipRepositoryMockRecorder) ListByUser(ctx, userID any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByUser", reflect.TypeOf((*MockClipRepository)(nil).ListByUser), ctx, userID)
 }
 
+// UpdateConversion mocks base method.
+func (m *MockClipRepository) UpdateConversion(ctx context.Context, id int64, mp4Key, status string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateConversion", ctx, id, mp4Key, status)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateConversion indicates an expected call of UpdateConversion.
+func (mr *MockClipRepositoryMockRecorder) UpdateConversion(ctx, id, mp4Key, status any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateConversion", reflect.TypeOf((*MockClipRepository)(nil).UpdateConversion), ctx, id, mp4Key, status)
+}
+
 // MockSessionRepository is a mock of SessionRepository interface.
 type MockSessionRepository struct {
 	ctrl     *gomock.Controller

@@ -13,7 +13,11 @@ import (
 )
 
 func clipCols() []string {
-	return []string{"id", "user_id", "object_key", "mode", "result", "size_bytes", "content_type", "created_at"}
+	return []string{
+		"id", "user_id", "object_key", "mode", "result",
+		"size_bytes", "content_type", "created_at",
+		"mp4_object_key", "conversion_status",
+	}
 }
 
 func TestClipRepository_Create(t *testing.T) {
@@ -41,20 +45,23 @@ func TestClipRepository_Create(t *testing.T) {
 			},
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols).
-					AddRow(int64(1), int64(42), "clips/42/uuid.webm", "default", "win", int64(1000), "video/webm", now)
+					AddRow(int64(1), int64(42), "clips/42/uuid.webm", "default", "win",
+						int64(1000), "video/webm", now, "", "none")
 				m.ExpectQuery(`INSERT INTO clips`).
 					WithArgs(int64(42), "clips/42/uuid.webm", "default", "win", int64(1000), "video/webm").
 					WillReturnRows(rows)
 			},
 			want: domain.Clip{
-				ID:          1,
-				UserID:      42,
-				ObjectKey:   "clips/42/uuid.webm",
-				Mode:        "default",
-				Result:      "win",
-				ContentType: "video/webm",
-				SizeBytes:   1000,
-				CreatedAt:   now,
+				ID:               1,
+				UserID:           42,
+				ObjectKey:        "clips/42/uuid.webm",
+				Mode:             "default",
+				Result:           "win",
+				ContentType:      "video/webm",
+				SizeBytes:        1000,
+				CreatedAt:        now,
+				MP4ObjectKey:     "",
+				ConversionStatus: "none",
 			},
 		},
 		{
@@ -102,6 +109,10 @@ func TestClipRepository_Create(t *testing.T) {
 				t.Errorf("ObjectKey = %q, want %q", got.ObjectKey, tt.want.ObjectKey)
 			}
 
+			if got.ConversionStatus != tt.want.ConversionStatus {
+				t.Errorf("ConversionStatus = %q, want %q", got.ConversionStatus, tt.want.ConversionStatus)
+			}
+
 			if err = mock.ExpectationsWereMet(); err != nil {
 				t.Errorf("unfulfilled pgxmock expectations: %v", err)
 			}
@@ -127,8 +138,10 @@ func TestClipRepository_ListByUser(t *testing.T) {
 			userID: 42,
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols).
-					AddRow(int64(3), int64(42), "clips/42/c.webm", "default", "win", int64(300), "video/webm", now).
-					AddRow(int64(1), int64(42), "clips/42/a.webm", "default", "win", int64(100), "video/webm", now.Add(-time.Minute))
+					AddRow(int64(3), int64(42), "clips/42/c.webm", "default", "win",
+						int64(300), "video/webm", now, "", "none").
+					AddRow(int64(1), int64(42), "clips/42/a.webm", "default", "win",
+						int64(100), "video/webm", now.Add(-time.Minute), "clips/42/1.mp4", "done")
 				m.ExpectQuery(`SELECT`).WithArgs(int64(42)).WillReturnRows(rows)
 			},
 			wantLen: 2,
@@ -221,7 +234,8 @@ func TestClipRepository_GetByID(t *testing.T) {
 			id:   1,
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols).
-					AddRow(int64(1), int64(42), "clips/42/a.webm", "default", "win", int64(500), "video/webm", now)
+					AddRow(int64(1), int64(42), "clips/42/a.webm", "default", "win",
+						int64(500), "video/webm", now, "", "none")
 				m.ExpectQuery(`SELECT`).WithArgs(int64(1)).WillReturnRows(rows)
 			},
 			wantID: 1,
@@ -385,6 +399,88 @@ func TestClipRepository_DeleteOldestBeyondLimit(t *testing.T) {
 				if k != tt.wantKeys[i] {
 					t.Errorf("keys[%d] = %q, want %q", i, k, tt.wantKeys[i])
 				}
+			}
+
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unfulfilled pgxmock expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestClipRepository_UpdateConversion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		id      int64
+		mp4Key  string
+		status  string
+		setup   func(m pgxmock.PgxPoolIface)
+		wantErr bool
+	}{
+		{
+			// criterion: 1 — UpdateConversion stores mp4 key and done status
+			name:   "success: sets mp4 key and done status",
+			id:     5,
+			mp4Key: "clips/42/5.mp4",
+			status: domain.ConversionStatusDone,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectExec(`UPDATE clips`).
+					WithArgs(int64(5), "clips/42/5.mp4", domain.ConversionStatusDone).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+			},
+		},
+		{
+			// criterion: 4 — UpdateConversion stores failure status
+			name:   "success: sets failed status with empty key",
+			id:     5,
+			mp4Key: "",
+			status: domain.ConversionStatusFailed,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectExec(`UPDATE clips`).
+					WithArgs(int64(5), "", domain.ConversionStatusFailed).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+			},
+		},
+		{
+			// criterion: 4 — DB error is propagated
+			name:   "DB error propagated",
+			id:     5,
+			mp4Key: "clips/42/5.mp4",
+			status: domain.ConversionStatusDone,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectExec(`UPDATE clips`).WillReturnError(errors.New("db error"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock, err := pgxmock.NewPool()
+			if err != nil {
+				t.Fatalf("pgxmock.NewPool() error = %v", err)
+			}
+			defer mock.Close()
+
+			tt.setup(mock)
+
+			repo := repository.NewClipRepository(mock)
+			err = repo.UpdateConversion(context.Background(), tt.id, tt.mp4Key, tt.status)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("UpdateConversion() error = nil, want error")
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("UpdateConversion() unexpected error = %v", err)
 			}
 
 			if err = mock.ExpectationsWereMet(); err != nil {
