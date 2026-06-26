@@ -8,3 +8,11 @@ storage:
   secret_key: "minioadmin"
   bucket: "media"
   use_ssl: false
+redis:
+  addr: "localhost:6379"
+  password: ""
+session:
+  cookie_name: "session"
+clips:
+  max_upload_bytes: 52428800
+  download_url_ttl: "15m"

@@ -10,8 +10,29 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 
+	"github.com/pizdagladki/full/services/media/internal/api/delivery"
+	"github.com/pizdagladki/full/services/media/internal/api/middleware"
 	"github.com/pizdagladki/full/services/media/internal/config"
 )
+
+// noopSessionSvc is a minimal SessionService for tests that never resolves a
+// session — it is used only to satisfy the AuthMiddleware constructor so that
+// registerHTTPRoutes does not panic on a nil middleware.
+type noopSessionSvc struct{}
+
+func (noopSessionSvc) ResolveSession(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
+// noopClipHandler is a minimal ClipHandler for tests that only exercise the
+// HTTP worker lifecycle, not the clip routes.
+type noopClipHandler struct{}
+
+func (noopClipHandler) Upload(c echo.Context) error   { return c.NoContent(http.StatusNotImplemented) }
+func (noopClipHandler) List(c echo.Context) error     { return c.NoContent(http.StatusNotImplemented) }
+func (noopClipHandler) Download(c echo.Context) error { return c.NoContent(http.StatusNotImplemented) }
+
+var _ delivery.ClipHandler = noopClipHandler{}
 
 func TestNew(t *testing.T) {
 	t.Parallel()
@@ -188,6 +209,7 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 	t.Setenv("STORAGE_ACCESS_KEY", "minioadmin")
 	t.Setenv("STORAGE_SECRET_KEY", "minioadmin")
 	t.Setenv("STORAGE_BUCKET", "media")
+	t.Setenv("REDIS_ADDR", "localhost:6379")
 
 	a := New("media")
 	if err := a.Run(context.Background()); err == nil {
@@ -196,12 +218,18 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 }
 
 // newTestApp builds an App wired with the minimum needed to exercise the HTTP
-// worker and router: a no-op logger, the validator, and an HTTP addr.
+// worker and router: a no-op logger, the validator, an HTTP addr, and a no-op
+// auth middleware so registerHTTPRoutes does not panic on a nil middleware.
 func newTestApp(addr string) *App {
 	a := New("media-test")
 	a.logger = zap.NewNop()
 	a.initValidator()
-	a.cfg = &config.Config{HTTP: config.HTTPConfig{Addr: addr}}
+	a.cfg = &config.Config{
+		HTTP:    config.HTTPConfig{Addr: addr},
+		Session: config.SessionConfig{CookieName: "session"},
+	}
+	a.authMiddleware = middleware.NewAuthMiddleware(noopSessionSvc{}, "session", zap.NewNop())
+	a.clipHandler = noopClipHandler{}
 
 	return a
 }

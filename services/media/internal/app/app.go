@@ -7,9 +7,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/minio/minio-go/v7"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/internal/platform/logger"
+	"github.com/pizdagladki/full/services/media/internal/api/delivery"
+	"github.com/pizdagladki/full/services/media/internal/api/middleware"
+	"github.com/pizdagladki/full/services/media/internal/api/repository"
+	"github.com/pizdagladki/full/services/media/internal/api/service"
 	"github.com/pizdagladki/full/services/media/internal/config"
 )
 
@@ -23,6 +28,17 @@ type App struct {
 
 	pgxPool     *pgxpool.Pool
 	minioClient *minio.Client
+	redisClient *redis.Client
+
+	clipRepo    repository.ClipRepository
+	sessionRepo repository.SessionRepository
+	objectStore service.ObjectStore
+
+	clipSvc    service.ClipService
+	sessionSvc service.SessionService
+
+	clipHandler    delivery.ClipHandler
+	authMiddleware *middleware.AuthMiddleware
 }
 
 // New returns an empty App for the given service name.
@@ -31,7 +47,8 @@ func New(name string) *App {
 }
 
 // Run initializes dependencies in order and runs the workers until ctx is
-// canceled (graceful shutdown). A failed Postgres or MinIO connection aborts startup.
+// canceled (graceful shutdown). A failed Postgres, MinIO, or Redis connection
+// aborts startup.
 func (a *App) Run(ctx context.Context) error {
 	err := a.initLogger()
 	if err != nil {
@@ -58,6 +75,17 @@ func (a *App) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	err = a.initRedis(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = a.redisClient.Close() }()
+
+	a.initRepositories()
+	a.initServices()
+	a.initHandlers()
+	a.initMiddleware()
 
 	return a.runWorkers(ctx)
 }
