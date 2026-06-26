@@ -7,6 +7,7 @@ import (
 
 	"github.com/pashagolub/pgxmock/v4"
 
+	"github.com/pizdagladki/full/services/store/internal/api/domain"
 	"github.com/pizdagladki/full/services/store/internal/api/repository"
 )
 
@@ -19,13 +20,16 @@ func TestCatalogRepository_ListProducts(t *testing.T) {
 	tier1 := 1
 
 	tests := []struct {
-		name    string
-		kind    *string
-		setup   func(m pgxmock.PgxPoolIface)
-		wantLen int
-		wantErr bool
+		name         string
+		kind         *string
+		setup        func(m pgxmock.PgxPoolIface)
+		wantLen      int
+		wantErr      bool
+		wantProducts []domain.Product // non-nil: assert scanned field values exactly (criterion: 1)
 	}{
 		{
+			// criterion: 1 — "all products returned when kind is nil" asserts scanned field values:
+			// id, kind, tier (nil for edit, non-nil for distraction), name, price_cents, is_free.
 			name: "all products returned when kind is nil",
 			kind: nil,
 			setup: func(m pgxmock.PgxPoolIface) {
@@ -35,6 +39,10 @@ func TestCatalogRepository_ListProducts(t *testing.T) {
 				m.ExpectQuery(`SELECT`).WillReturnRows(rows)
 			},
 			wantLen: 2,
+			wantProducts: []domain.Product{
+				{ID: 1, Kind: "distraction", Tier: ptr(1), Name: "Spinner", PriceCents: 0, IsFree: true},
+				{ID: 2, Kind: "edit", Tier: nil, Name: "Blur", PriceCents: 100, IsFree: false},
+			},
 		},
 		{
 			name: "filter by kind=distraction returns only matching rows",
@@ -110,6 +118,45 @@ func TestCatalogRepository_ListProducts(t *testing.T) {
 			// Verify non-nil slice even for empty result.
 			if got == nil {
 				t.Error("ListProducts() returned nil, want non-nil slice")
+			}
+
+			// criterion: 1 — assert scanned field values including Tier nil/non-nil.
+			for i, want := range tt.wantProducts {
+				if i >= len(got) {
+					t.Errorf("got[%d] missing, have only %d items", i, len(got))
+					break
+				}
+
+				p := got[i]
+
+				if p.ID != want.ID {
+					t.Errorf("products[%d].ID = %d, want %d", i, p.ID, want.ID)
+				}
+
+				if p.Kind != want.Kind {
+					t.Errorf("products[%d].Kind = %q, want %q", i, p.Kind, want.Kind)
+				}
+
+				switch {
+				case want.Tier == nil && p.Tier != nil:
+					t.Errorf("products[%d].Tier = %v, want nil", i, *p.Tier)
+				case want.Tier != nil && p.Tier == nil:
+					t.Errorf("products[%d].Tier = nil, want %d", i, *want.Tier)
+				case want.Tier != nil && p.Tier != nil && *p.Tier != *want.Tier:
+					t.Errorf("products[%d].Tier = %d, want %d", i, *p.Tier, *want.Tier)
+				}
+
+				if p.Name != want.Name {
+					t.Errorf("products[%d].Name = %q, want %q", i, p.Name, want.Name)
+				}
+
+				if p.PriceCents != want.PriceCents {
+					t.Errorf("products[%d].PriceCents = %d, want %d", i, p.PriceCents, want.PriceCents)
+				}
+
+				if p.IsFree != want.IsFree {
+					t.Errorf("products[%d].IsFree = %v, want %v", i, p.IsFree, want.IsFree)
+				}
 			}
 
 			if err = mock.ExpectationsWereMet(); err != nil {

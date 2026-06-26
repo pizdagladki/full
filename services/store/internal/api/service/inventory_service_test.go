@@ -26,8 +26,11 @@ func TestInventoryService_ListInventory(t *testing.T) {
 		setupRepo func(m *repomocks.MockInventoryRepository)
 		wantLen   int
 		wantErr   bool
+		wantItems []domain.InventoryItem // non-nil: assert product_id and quantity by value (criterion: 2)
 	}{
 		{
+			// criterion: 2 — "owned items returned for user" asserts exact product_id and quantity values
+			// passed through from the repository to the caller unchanged.
 			name:   "owned items returned for user",
 			userID: 42,
 			setupRepo: func(m *repomocks.MockInventoryRepository) {
@@ -35,6 +38,10 @@ func TestInventoryService_ListInventory(t *testing.T) {
 					Return(ownedItems, nil)
 			},
 			wantLen: 2,
+			wantItems: []domain.InventoryItem{
+				{ProductID: 1, Quantity: 3},
+				{ProductID: 5, Quantity: 1},
+			},
 		},
 		{
 			name:   "empty inventory returns empty slice",
@@ -82,6 +89,24 @@ func TestInventoryService_ListInventory(t *testing.T) {
 
 			if len(got) != tt.wantLen {
 				t.Errorf("len(items) = %d, want %d", len(got), tt.wantLen)
+			}
+
+			// criterion: 2 — assert exact product_id and quantity for each item.
+			for i, want := range tt.wantItems {
+				if i >= len(got) {
+					t.Errorf("got[%d] missing, have only %d items", i, len(got))
+					break
+				}
+
+				item := got[i]
+
+				if item.ProductID != want.ProductID {
+					t.Errorf("items[%d].ProductID = %d, want %d", i, item.ProductID, want.ProductID)
+				}
+
+				if item.Quantity != want.Quantity {
+					t.Errorf("items[%d].Quantity = %d, want %d", i, item.Quantity, want.Quantity)
+				}
 			}
 		})
 	}
