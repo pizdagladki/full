@@ -16,51 +16,62 @@ func TestConsentRepository_Upsert(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
+	// laterNow simulates the refreshed accepted_at that the ON CONFLICT DO UPDATE
+	// path writes (accepted_at = now() in the SET clause). It must differ from now
+	// so the conflict case is genuinely distinguishable from the insert case.
+	laterNow := now.Add(time.Hour)
 
 	tests := []struct {
 		name    string
 		userID  int64
 		input   domain.Consent
+		want    domain.Consent // criterion 4: each happy-path case asserts its own expected return
 		setup   func(m pgxmock.PgxPoolIface)
 		wantErr bool
 	}{
 		{
-			// Criterion 1 + 4: first insert upserts and returns row.
+			// criterion: 1+4 — first insert upserts and returns a row via ON CONFLICT … DO UPDATE.
 			name:   "first insert returns consent row",
 			userID: 1,
 			input:  domain.Consent{IsAdult: true, ConsentRecording: true, ConsentTos: true},
+			want:   domain.Consent{IsAdult: true, ConsentRecording: true, ConsentTos: true, AcceptedAt: now},
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows([]string{"is_adult", "consent_recording", "consent_tos", "accepted_at"}).
 					AddRow(true, true, true, now)
-				m.ExpectQuery(`INSERT INTO user_consents`).
+				// Regex requires the ON CONFLICT clause: removing it from consentUpsertSQL
+				// makes the matcher fail to find a match, causing this test to fail.
+				m.ExpectQuery(`ON CONFLICT \(user_id\) DO UPDATE`).
 					WithArgs(int64(1), true, true, true).
 					WillReturnRows(rows)
 			},
 		},
 		{
-			// Criterion 4: second submit for same user updates the single row.
+			// criterion: 4 — second submit for same user hits ON CONFLICT and updates the row;
+			// the returned accepted_at is refreshed (later than the original insert timestamp).
 			name:   "conflict update returns updated row",
 			userID: 1,
 			input:  domain.Consent{IsAdult: true, ConsentRecording: true, ConsentTos: true},
+			want:   domain.Consent{IsAdult: true, ConsentRecording: true, ConsentTos: true, AcceptedAt: laterNow},
 			setup: func(m pgxmock.PgxPoolIface) {
-				// ON CONFLICT path: same row returned with fresh accepted_at
+				// ON CONFLICT path: accepted_at is renewed (laterNow), proving the UPDATE
+				// branch ran rather than a duplicate INSERT.
 				rows := pgxmock.NewRows([]string{"is_adult", "consent_recording", "consent_tos", "accepted_at"}).
-					AddRow(true, true, true, now)
-				m.ExpectQuery(`INSERT INTO user_consents`).
+					AddRow(true, true, true, laterNow)
+				m.ExpectQuery(`ON CONFLICT \(user_id\) DO UPDATE`).
 					WithArgs(int64(1), true, true, true).
 					WillReturnRows(rows)
 			},
 		},
 		{
-			name:   "db error propagated",
-			userID: 99,
-			input:  domain.Consent{IsAdult: true, ConsentRecording: true, ConsentTos: true},
+			name:    "db error propagated",
+			userID:  99,
+			input:   domain.Consent{IsAdult: true, ConsentRecording: true, ConsentTos: true},
+			wantErr: true,
 			setup: func(m pgxmock.PgxPoolIface) {
-				m.ExpectQuery(`INSERT INTO user_consents`).
+				m.ExpectQuery(`ON CONFLICT \(user_id\) DO UPDATE`).
 					WithArgs(int64(99), true, true, true).
 					WillReturnError(errors.New("connection refused"))
 			},
-			wantErr: true,
 		},
 	}
 
@@ -91,17 +102,19 @@ func TestConsentRepository_Upsert(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Upsert() unexpected error = %v", err)
 			}
-			if !result.IsAdult {
-				t.Error("result.IsAdult = false, want true")
+
+			// Assert each field against the per-case expected return (criterion 4).
+			if result.IsAdult != tt.want.IsAdult {
+				t.Errorf("result.IsAdult = %v, want %v", result.IsAdult, tt.want.IsAdult)
 			}
-			if !result.ConsentRecording {
-				t.Error("result.ConsentRecording = false, want true")
+			if result.ConsentRecording != tt.want.ConsentRecording {
+				t.Errorf("result.ConsentRecording = %v, want %v", result.ConsentRecording, tt.want.ConsentRecording)
 			}
-			if !result.ConsentTos {
-				t.Error("result.ConsentTos = false, want true")
+			if result.ConsentTos != tt.want.ConsentTos {
+				t.Errorf("result.ConsentTos = %v, want %v", result.ConsentTos, tt.want.ConsentTos)
 			}
-			if result.AcceptedAt.IsZero() {
-				t.Error("result.AcceptedAt is zero, want a non-zero timestamp")
+			if !result.AcceptedAt.Equal(tt.want.AcceptedAt) {
+				t.Errorf("result.AcceptedAt = %v, want %v", result.AcceptedAt, tt.want.AcceptedAt)
 			}
 
 			if err = mock.ExpectationsWereMet(); err != nil {
