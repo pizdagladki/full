@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -10,8 +11,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/internal/platform/logger"
+	"github.com/pizdagladki/full/services/reports/internal/api/delivery"
+	"github.com/pizdagladki/full/services/reports/internal/api/repository"
+	"github.com/pizdagladki/full/services/reports/internal/api/service"
 	"github.com/pizdagladki/full/services/reports/internal/config"
 )
+
+const defaultCooldownTTL = 1800 * time.Second
 
 // App holds the service dependencies and drives its lifecycle.
 type App struct {
@@ -23,6 +29,11 @@ type App struct {
 
 	pgxPool     *pgxpool.Pool
 	redisClient *redis.Client
+
+	cheatRepo      repository.CheatReportsRepository
+	cooldownStore  repository.CooldownStore
+	reportsService service.ReportsService
+	reportsHandler delivery.ReportsHandler
 }
 
 // New returns an empty App for the given service name.
@@ -90,16 +101,19 @@ func (a *App) populateConfig() error {
 }
 
 func (a *App) initRepositories() {
-	// No repositories yet; resources are added by downstream slices via the
-	// new-resource skill.
+	a.cheatRepo = repository.NewCheatReportsRepository(a.pgxPool)
+	a.cooldownStore = repository.NewCooldownStore(a.redisClient)
 }
 
 func (a *App) initServices() {
-	// No services yet; resources are added by downstream slices via the
-	// new-resource skill.
+	ttl := defaultCooldownTTL
+	if a.cfg.Reports.CooldownTTLSeconds > 0 {
+		ttl = time.Duration(a.cfg.Reports.CooldownTTLSeconds) * time.Second
+	}
+
+	a.reportsService = service.NewReportsService(a.cheatRepo, a.cooldownStore, a.logger, ttl)
 }
 
 func (a *App) initHandlers() {
-	// No handlers yet; resources are added by downstream slices via the
-	// new-resource skill.
+	a.reportsHandler = delivery.NewReportsHandler(a.reportsService, a.logger)
 }
