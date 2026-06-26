@@ -482,4 +482,34 @@ describe('RtcPeerImpl', () => {
     expect(ws.close).toHaveBeenCalled();
     expect(pc.close).toHaveBeenCalled();
   });
+
+  // criterion: error path — onnegotiationneeded error is caught (line 128)
+  it('onnegotiationneeded error is caught and does not throw', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    pc.createOffer = vi.fn().mockRejectedValue(new Error('offer-rejected'));
+    makePeer(wsFactory, pcFactory);
+    ws.simulateOpen();
+    pc.simulateNegotiationNeeded();
+    // Let the async catch run
+    await new Promise((r) => setTimeout(r, 50));
+    // no unhandled rejection = pass
+    expect(pc.createOffer).toHaveBeenCalled();
+  });
+
+  // criterion: error path — handleSignalingMessage error is caught (line 165)
+  it('handleSignalingMessage error is caught and does not throw', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    pc.addIceCandidate = vi.fn().mockRejectedValue(new Error('ice-rejected'));
+    makePeer(wsFactory, pcFactory);
+    ws.simulateOpen();
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'ice',
+        candidate: { candidate: 'c', sdpMid: '0', sdpMLineIndex: 0 },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    // no unhandled rejection = pass
+    expect(pc.addIceCandidate).toHaveBeenCalled();
+  });
 });
