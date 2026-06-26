@@ -17,3 +17,12 @@ type StoreHandler interface {
 	// GetInventory handles GET /v1/store/inventory (requires auth).
 	GetInventory(c echo.Context) error
 }
+
+// PurchaseHandler is the transport contract for the purchase resource.
+type PurchaseHandler interface {
+	// CreatePurchase handles POST /v1/store/purchase (requires auth).
+	// Returns a Stripe client secret for the frontend to complete payment.
+	CreatePurchase(c echo.Context) error
+	// StripeWebhook handles POST /v1/store/stripe/webhook (public, no auth).
+	StripeWebhook(c echo.Context) error
+}

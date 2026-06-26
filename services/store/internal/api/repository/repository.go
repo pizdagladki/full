@@ -13,6 +13,26 @@ import (
 	"github.com/pizdagladki/full/services/store/internal/api/domain"
 )
 
+// PurchaseRepository is the data-access contract for purchase and inventory
+// grant operations.
+type PurchaseRepository interface {
+	// GetProduct fetches a product by ID. Returns ErrProductNotFound when absent.
+	GetProduct(ctx context.Context, productID int64) (*domain.Product, error)
+	// IsOwned reports whether userID already has quantity > 0 for productID.
+	IsOwned(ctx context.Context, userID, productID int64) (bool, error)
+	// CreatePurchase inserts a pending purchase record and returns its ID.
+	CreatePurchase(ctx context.Context, p domain.Purchase) (int64, error)
+	// WebhookEventExists reports whether a purchase with stripe_event_id=eventID
+	// already exists (idempotency guard).
+	WebhookEventExists(ctx context.Context, eventID string) (bool, error)
+	// FindByProviderRef returns the purchase whose provider_ref matches
+	// providerRef (i.e. Stripe PaymentIntent ID).
+	FindByProviderRef(ctx context.Context, providerRef string) (*domain.Purchase, error)
+	// ConfirmAndGrant atomically marks the purchase as paid (set stripe_event_id)
+	// and upserts inventory: distractions increment quantity; edits use DO NOTHING.
+	ConfirmAndGrant(ctx context.Context, providerRef, eventID, kind string, userID, productID int64) error
+}
+
 // ErrSessionNotFound is returned by SessionRepository when the session key is
 // absent from Redis or has expired.
 var ErrSessionNotFound = errors.New("session: not found or expired")

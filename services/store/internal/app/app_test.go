@@ -137,6 +137,9 @@ func TestInitRepositories(t *testing.T) {
 	if a.sessionRepo == nil {
 		t.Fatal("sessionRepo is nil after initRepositories")
 	}
+	if a.purchaseRepo == nil {
+		t.Fatal("purchaseRepo is nil after initRepositories")
+	}
 }
 
 // TestInitServices verifies that initServices wires all services from repos.
@@ -144,6 +147,13 @@ func TestInitServices(t *testing.T) {
 	t.Parallel()
 
 	a := New("store")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{
+		Stripe: config.StripeConfig{
+			SecretKey:            "sk_test_key",
+			WebhookSigningSecret: "whsec_secret",
+		},
+	}
 	a.initRepositories() // wires repo wrappers around nil pools (nil-safe construction)
 	a.initServices()
 
@@ -156,25 +166,37 @@ func TestInitServices(t *testing.T) {
 	if a.sessionSvc == nil {
 		t.Error("sessionSvc is nil after initServices")
 	}
+	if a.purchaseSvc == nil {
+		t.Error("purchaseSvc is nil after initServices")
+	}
+	if a.paymentProvider == nil {
+		t.Error("paymentProvider is nil after initServices")
+	}
 }
 
-// TestInitHandlers verifies that initHandlers wires storeHandler.
+// TestInitHandlers verifies that initHandlers wires storeHandler and purchaseHandler.
 func TestInitHandlers(t *testing.T) {
 	t.Parallel()
 
 	ctrl := gomock.NewController(t)
 	catalogMock := svcmocks.NewMockCatalogService(ctrl)
 	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
+	purchaseMock := svcmocks.NewMockPurchaseService(ctrl)
 
 	a := New("store")
 	a.logger = zap.NewNop()
 	a.catalogSvc = catalogMock
 	a.inventorySvc = inventoryMock
+	a.purchaseSvc = purchaseMock
 
 	a.initHandlers()
 
 	if a.storeHandler == nil {
 		t.Fatal("storeHandler is nil after initHandlers")
+	}
+
+	if a.purchaseHandler == nil {
+		t.Fatal("purchaseHandler is nil after initHandlers")
 	}
 }
 
@@ -248,6 +270,8 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("POSTGRES_DSN", "postgres://localhost:not-a-port/db")
 	t.Setenv("REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("STRIPE_SECRET_KEY", "sk_test_key")
+	t.Setenv("STRIPE_WEBHOOK_SIGNING_SECRET", "whsec_secret")
 
 	a := New("store")
 	if err := a.Run(context.Background()); err == nil {
@@ -265,6 +289,7 @@ func newTestApp(t *testing.T, addr string) *App {
 	catalogMock := svcmocks.NewMockCatalogService(ctrl)
 	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
 	sessionMock := svcmocks.NewMockSessionService(ctrl)
+	purchaseMock := svcmocks.NewMockPurchaseService(ctrl)
 
 	a := New("store-test")
 	a.logger = zap.NewNop()
@@ -274,8 +299,9 @@ func newTestApp(t *testing.T, addr string) *App {
 		Session: config.SessionConfig{CookieName: "session"},
 	}
 
-	// Wire stub handler and middleware so registerHTTPRoutes works.
+	// Wire stub handlers and middleware so registerHTTPRoutes works.
 	a.storeHandler = delivery.NewStoreHandler(catalogMock, inventoryMock, zap.NewNop())
+	a.purchaseHandler = delivery.NewPurchaseHandler(purchaseMock, zap.NewNop())
 	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
 
 	return a

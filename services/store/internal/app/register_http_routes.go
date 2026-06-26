@@ -20,9 +20,13 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	// Public store endpoints.
 	e.GET("/v1/store/catalog", a.storeHandler.GetCatalog)
 
+	// Public Stripe webhook endpoint — Stripe POSTs here without a session.
+	e.POST("/v1/store/stripe/webhook", a.purchaseHandler.StripeWebhook)
+
 	// Protected store endpoints — session required.
 	v1 := e.Group("/v1", a.authMiddleware.RequireAuth)
 	v1.GET("/store/inventory", a.storeHandler.GetInventory)
+	v1.POST("/store/purchase", a.purchaseHandler.CreatePurchase)
 
 	return e
 }

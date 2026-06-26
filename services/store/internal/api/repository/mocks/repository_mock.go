@@ -17,6 +17,119 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
+// MockPurchaseRepository is a mock of PurchaseRepository interface.
+type MockPurchaseRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockPurchaseRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockPurchaseRepositoryMockRecorder is the mock recorder for MockPurchaseRepository.
+type MockPurchaseRepositoryMockRecorder struct {
+	mock *MockPurchaseRepository
+}
+
+// NewMockPurchaseRepository creates a new mock instance.
+func NewMockPurchaseRepository(ctrl *gomock.Controller) *MockPurchaseRepository {
+	mock := &MockPurchaseRepository{ctrl: ctrl}
+	mock.recorder = &MockPurchaseRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPurchaseRepository) EXPECT() *MockPurchaseRepositoryMockRecorder {
+	return m.recorder
+}
+
+// ConfirmAndGrant mocks base method.
+func (m *MockPurchaseRepository) ConfirmAndGrant(ctx context.Context, providerRef, eventID, kind string, userID, productID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConfirmAndGrant", ctx, providerRef, eventID, kind, userID, productID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ConfirmAndGrant indicates an expected call of ConfirmAndGrant.
+func (mr *MockPurchaseRepositoryMockRecorder) ConfirmAndGrant(ctx, providerRef, eventID, kind, userID, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConfirmAndGrant", reflect.TypeOf((*MockPurchaseRepository)(nil).ConfirmAndGrant), ctx, providerRef, eventID, kind, userID, productID)
+}
+
+// CreatePurchase mocks base method.
+func (m *MockPurchaseRepository) CreatePurchase(ctx context.Context, p domain.Purchase) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreatePurchase", ctx, p)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePurchase indicates an expected call of CreatePurchase.
+func (mr *MockPurchaseRepositoryMockRecorder) CreatePurchase(ctx, p any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePurchase", reflect.TypeOf((*MockPurchaseRepository)(nil).CreatePurchase), ctx, p)
+}
+
+// FindByProviderRef mocks base method.
+func (m *MockPurchaseRepository) FindByProviderRef(ctx context.Context, providerRef string) (*domain.Purchase, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindByProviderRef", ctx, providerRef)
+	ret0, _ := ret[0].(*domain.Purchase)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindByProviderRef indicates an expected call of FindByProviderRef.
+func (mr *MockPurchaseRepositoryMockRecorder) FindByProviderRef(ctx, providerRef any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindByProviderRef", reflect.TypeOf((*MockPurchaseRepository)(nil).FindByProviderRef), ctx, providerRef)
+}
+
+// GetProduct mocks base method.
+func (m *MockPurchaseRepository) GetProduct(ctx context.Context, productID int64) (*domain.Product, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetProduct", ctx, productID)
+	ret0, _ := ret[0].(*domain.Product)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetProduct indicates an expected call of GetProduct.
+func (mr *MockPurchaseRepositoryMockRecorder) GetProduct(ctx, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetProduct", reflect.TypeOf((*MockPurchaseRepository)(nil).GetProduct), ctx, productID)
+}
+
+// IsOwned mocks base method.
+func (m *MockPurchaseRepository) IsOwned(ctx context.Context, userID, productID int64) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsOwned", ctx, userID, productID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsOwned indicates an expected call of IsOwned.
+func (mr *MockPurchaseRepositoryMockRecorder) IsOwned(ctx, userID, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsOwned", reflect.TypeOf((*MockPurchaseRepository)(nil).IsOwned), ctx, userID, productID)
+}
+
+// WebhookEventExists mocks base method.
+func (m *MockPurchaseRepository) WebhookEventExists(ctx context.Context, eventID string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WebhookEventExists", ctx, eventID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// WebhookEventExists indicates an expected call of WebhookEventExists.
+func (mr *MockPurchaseRepositoryMockRecorder) WebhookEventExists(ctx, eventID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WebhookEventExists", reflect.TypeOf((*MockPurchaseRepository)(nil).WebhookEventExists), ctx, eventID)
+}
+
 // MockCatalogRepository is a mock of CatalogRepository interface.
 type MockCatalogRepository struct {
 	ctrl     *gomock.Controller

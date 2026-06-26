@@ -14,6 +14,13 @@ type Config struct {
 	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
 	Redis    RedisConfig    `yaml:"redis" validate:"required"`
 	Session  SessionConfig  `yaml:"session"`
+	Stripe   StripeConfig   `yaml:"stripe" validate:"required"`
+}
+
+// StripeConfig holds Stripe API credentials and webhook settings.
+type StripeConfig struct {
+	SecretKey            string `yaml:"secret_key" validate:"required"`
+	WebhookSigningSecret string `yaml:"webhook_signing_secret" validate:"required"`
 }
 
 // SessionConfig holds session cookie settings.
@@ -79,6 +86,10 @@ func loadFromEnv() *Config {
 		},
 		Session: SessionConfig{
 			CookieName: getEnv("SESSION_COOKIE_NAME", defaultSessionCookieName),
+		},
+		Stripe: StripeConfig{
+			SecretKey:            os.Getenv("STRIPE_SECRET_KEY"),
+			WebhookSigningSecret: os.Getenv("STRIPE_WEBHOOK_SIGNING_SECRET"),
 		},
 	}
 }

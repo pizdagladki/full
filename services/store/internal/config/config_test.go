@@ -12,6 +12,19 @@ func TestLoad(t *testing.T) {
 		validAddr = "localhost:6379"
 	)
 
+	const (
+		validStripeKey     = "sk_test_valid"
+		validStripeWebhook = "whsec_valid"
+	)
+
+	stripeEnv := map[string]string{
+		"STRIPE_SECRET_KEY":             validStripeKey,
+		"STRIPE_WEBHOOK_SIGNING_SECRET": validStripeWebhook,
+	}
+
+	// stripeYAML appends the stripe section to a YAML config string.
+	stripeYAML := "stripe:\n  secret_key: \"" + validStripeKey + "\"\n  webhook_signing_secret: \"" + validStripeWebhook + "\"\n"
+
 	tests := []struct {
 		name           string
 		isDocker       bool
@@ -24,40 +37,54 @@ func TestLoad(t *testing.T) {
 		{
 			name:           "env mode all set with explicit HTTP_ADDR",
 			isDocker:       true,
-			env:            map[string]string{"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			env:            mergeMaps(map[string]string{"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr}, stripeEnv),
 			wantAddr:       ":9090",
 			wantCookieName: "session",
 		},
 		{
 			name:           "env mode default HTTP addr",
 			isDocker:       true,
-			env:            map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			env:            mergeMaps(map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr}, stripeEnv),
 			wantAddr:       ":8083",
 			wantCookieName: "session",
 		},
 		{
 			name:           "env mode custom session cookie name",
 			isDocker:       true,
-			env:            map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "SESSION_COOKIE_NAME": "my_session"},
+			env:            mergeMaps(map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "SESSION_COOKIE_NAME": "my_session"}, stripeEnv),
 			wantAddr:       ":8083",
 			wantCookieName: "my_session",
 		},
 		{
 			name:     "env mode missing Postgres DSN fails validation",
 			isDocker: true,
-			env:      map[string]string{"REDIS_ADDR": validAddr},
+			env:      mergeMaps(map[string]string{"REDIS_ADDR": validAddr}, stripeEnv),
 			wantErr:  true,
 		},
 		{
 			name:     "env mode missing Redis addr fails validation",
 			isDocker: true,
-			env:      map[string]string{"POSTGRES_DSN": validDSN},
+			env:      mergeMaps(map[string]string{"POSTGRES_DSN": validDSN}, stripeEnv),
+			wantErr:  true,
+		},
+		{
+			// criterion: stripe-required — missing Stripe secret key fails validation
+			name:     "env mode missing Stripe secret key fails validation",
+			isDocker: true,
+			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "STRIPE_WEBHOOK_SIGNING_SECRET": validStripeWebhook},
+			wantErr:  true,
+		},
+		{
+			// criterion: stripe-required — missing Stripe webhook signing secret fails validation
+			name:     "env mode missing Stripe webhook signing secret fails validation",
+			isDocker: true,
+			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "STRIPE_SECRET_KEY": validStripeKey},
 			wantErr:  true,
 		},
 		{
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n"+stripeYAML)
 			},
 			wantAddr:       ":7070",
 			wantCookieName: "session",
@@ -65,7 +92,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "file mode reads session cookie name from yaml",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\nsession:\n  cookie_name: custom_cookie\n")
+				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\nsession:\n  cookie_name: custom_cookie\n"+stripeYAML)
 			},
 			wantAddr:       ":7070",
 			wantCookieName: "custom_cookie",
@@ -73,7 +100,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n"+stripeYAML)
 			},
 			wantAddr:       ":8083",
 			wantCookieName: "session",
@@ -81,7 +108,15 @@ func TestLoad(t *testing.T) {
 		{
 			name: "file mode missing required Postgres fails validation",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\n"+stripeYAML)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: stripe-required — missing Stripe in YAML fails validation
+			name: "file mode missing Stripe section fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
 			},
 			wantErr: true,
 		},
@@ -145,4 +180,17 @@ func writeTempConfig(t *testing.T, body string) string {
 	}
 
 	return path
+}
+
+// mergeMaps merges multiple string maps into a new map. Later maps win on
+// duplicate keys.
+func mergeMaps(maps ...map[string]string) map[string]string {
+	out := make(map[string]string)
+	for _, m := range maps {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+
+	return out
 }
