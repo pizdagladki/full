@@ -28,16 +28,22 @@ One run = the four phases in `SKILL.md`:
   issues — they're noted as `Manual prerequisite (human): …` in the relevant task's Context.
 - **Phase 2 — emit.** In topological order, creates issues with `task,proposed` and the real resolved
   `Depends on #N`, hiding a stable fingerprint `<!-- fdr-<area>-<slug> -->` in each body. Before creating it
-  searches **all** issues for that fingerprint and skips if present.
-- **Phase 3 — report.** Created-vs-skipped counts, the dependency graph, and the grouped list of manual
-  prerequisites. Then exits.
+  searches **all** issues for that fingerprint. If a unit overlaps an existing issue it does NOT blindly
+  skip — it diffs the updated-spec criteria against that issue's: unchanged → skip; **diverged + the issue
+  is closed/merged → emit a `…-reconcile` task** (a forward modification on top of the shipped code);
+  diverged + the issue is still open → flag it for human re-triage.
+- **Phase 3 — report.** Created (new vs reconcile) vs skipped counts, the dependency graph, the
+  `[RE-TRIAGE]` list of open issues whose criteria drifted, and the grouped manual prerequisites. Then exits.
 
 ## Why it's idempotent (survives crashes, re-run on every spec change)
 
 State lives in **GitHub, not the agent's memory**. The fingerprint in each body is a stable anchor, and the
 existence check scans issues of **any** state/label on purpose — so a re-run recreates neither an approved
-issue (it has lost `proposed`) nor a rejected one (it's `closed`). Run it again whenever the spec changes;
-it tops up only what's new.
+issue (it has lost `proposed`) nor a rejected one (it's `closed`). Run it again whenever the spec changes:
+for units it already issued it tops up only what's NEW, and where the spec has MOVED under already-shipped
+code it emits a `reconcile` task (or flags an open task for re-triage) instead of silently missing the change.
+It does NOT diff the spec against the CODE — only against existing issues' criteria — so it catches spec
+drift on things it has an issue for, not undocumented drift.
 
 ## Run it (one-shot, never a loop)
 
