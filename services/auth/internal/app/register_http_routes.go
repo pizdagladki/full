@@ -23,6 +23,7 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	// Protected endpoints — session required.
 	v1 := e.Group("/v1", a.authMiddleware.RequireAuth)
 	v1.GET("/auth/me", a.authHandler.GetMe)
+	v1.POST("/auth/consent", a.authHandler.SubmitConsent)
 
 	return e
 }
