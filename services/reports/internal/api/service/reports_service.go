@@ -46,7 +46,8 @@ func NewReportsService(
 // ReportCheat records a cheat report and, when the reported player accumulates
 // >= 5 reports across their 10 most recent matches, sets a Redis cooldown key.
 func (s *reportsService) ReportCheat(ctx context.Context, reporterID, reportedID int64, matchID string) error {
-	if reporterID == reportedID {
+	// Only check self-report when reporter_id is known (non-zero).
+	if reporterID != 0 && reporterID == reportedID {
 		return ErrSelfReport
 	}
 

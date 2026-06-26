@@ -90,6 +90,11 @@ func TestCountRecentCheatReports(t *testing.T) {
 	const reportedID = int64(2)
 	const lastN = 10
 
+	// The regex pins the key structural elements: GROUP BY match_id ensures
+	// per-match dedup (each match counted once), LIMIT ensures the
+	// 10-recent-matches window.
+	const distinctLimitRegex = `(?i)SELECT\s+COUNT.*GROUP\s+BY.*match_id.*LIMIT`
+
 	tests := []struct {
 		name      string
 		setup     func(m pgxmock.PgxPoolIface)
@@ -101,7 +106,9 @@ func TestCountRecentCheatReports(t *testing.T) {
 			name: "returns count below threshold",
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows([]string{"count"}).AddRow(4)
-				m.ExpectQuery(`SELECT COUNT`).
+				// The regex pins the key structural elements: GROUP BY match_id ensures
+				// per-match dedup, LIMIT ensures the 10-recent-matches window.
+				m.ExpectQuery(distinctLimitRegex).
 					WithArgs(reportedID, lastN).
 					WillReturnRows(rows)
 			},
@@ -112,7 +119,9 @@ func TestCountRecentCheatReports(t *testing.T) {
 			name: "returns count at threshold",
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows([]string{"count"}).AddRow(5)
-				m.ExpectQuery(`SELECT COUNT`).
+				// The regex pins the key structural elements: GROUP BY match_id ensures
+				// per-match dedup, LIMIT ensures the 10-recent-matches window.
+				m.ExpectQuery(distinctLimitRegex).
 					WithArgs(reportedID, lastN).
 					WillReturnRows(rows)
 			},
@@ -122,10 +131,27 @@ func TestCountRecentCheatReports(t *testing.T) {
 			// criterion: 2 — DB error is wrapped and propagated
 			name: "query error is propagated",
 			setup: func(m pgxmock.PgxPoolIface) {
-				m.ExpectQuery(`SELECT COUNT`).
+				// The regex pins the key structural elements: GROUP BY match_id ensures
+				// per-match dedup, LIMIT ensures the 10-recent-matches window.
+				m.ExpectQuery(distinctLimitRegex).
 					WillReturnError(errors.New("db error"))
 			},
 			wantErr: true,
+		},
+		{
+			// criterion: 2 — uses GROUP BY match_id and LIMIT in query (structural regression guard)
+			// This case uses the specific regex expectation: a query that drops GROUP BY or
+			// LIMIT would fail the mock expectation with "no expectations matched".
+			name: "uses GROUP BY match_id and LIMIT in query",
+			setup: func(m pgxmock.PgxPoolIface) {
+				rows := pgxmock.NewRows([]string{"count"}).AddRow(3)
+				// The regex pins the key structural elements: GROUP BY match_id ensures
+				// per-match dedup, LIMIT ensures the 10-recent-matches window.
+				m.ExpectQuery(distinctLimitRegex).
+					WithArgs(reportedID, lastN).
+					WillReturnRows(rows)
+			},
+			wantCount: 3,
 		},
 	}
 

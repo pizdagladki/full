@@ -66,6 +66,17 @@ func TestPostCheatReport(t *testing.T) {
 			wantStatus: http.StatusCreated,
 		},
 		{
+			// criterion: 1 — documented body without reporter_id returns 201
+			name: "documented body without reporter_id returns 201",
+			body: `{"reported_id":2,"match_id":"m1"}`,
+			setupMock: func(svc *svcmocks.MockReportsService) {
+				svc.EXPECT().
+					ReportCheat(gomock.Any(), int64(0), int64(2), "m1").
+					Return(nil)
+			},
+			wantStatus: http.StatusCreated,
+		},
+		{
 			// criterion: 4 — self-report returns 400
 			name: "self-report returns 400",
 			body: `{"reporter_id":1,"reported_id":1,"match_id":"m1"}`,

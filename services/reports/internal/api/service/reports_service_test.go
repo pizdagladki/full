@@ -118,6 +118,22 @@ func TestReportCheat(t *testing.T) {
 			},
 			wantErr: service.ErrSelfReport,
 		},
+		{
+			// criterion: 1 — reporter_id zero skips self-report check, proceeds to upsert
+			name:       "reporter_id zero skips self-report check",
+			reporterID: 0,
+			reportedID: reportedID,
+			matchID:    testMatchID,
+			setupMock: func(repo *repomocks.MockCheatReportsRepository, cooldown *repomocks.MockCooldownStore) {
+				repo.EXPECT().
+					UpsertCheatReport(gomock.Any(), domain.CheatReport{ReporterID: 0, ReportedID: reportedID, MatchID: testMatchID}).
+					Return(nil)
+				repo.EXPECT().
+					CountRecentCheatReports(gomock.Any(), reportedID, 10).
+					Return(0, nil)
+				// SetCooldown must NOT be called — count 0 is below threshold
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -22,8 +22,10 @@ func NewReportsHandler(svc service.ReportsService, logger *zap.Logger) ReportsHa
 }
 
 // postCheatReportRequest is the request body for POST /v1/reports/cheat.
+// ReporterID is optional; if absent (zero) the self-report check is skipped.
+// The documented minimal body is {reported_id, match_id}.
 type postCheatReportRequest struct {
-	ReporterID int64  `json:"reporter_id" validate:"required"`
+	ReporterID int64  `json:"reporter_id"` // optional; future: from auth session
 	ReportedID int64  `json:"reported_id" validate:"required"`
 	MatchID    string `json:"match_id"    validate:"required"`
 }
