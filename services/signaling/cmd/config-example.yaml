@@ -8,3 +8,4 @@ signaling:
   room_ttl: "30m"
   keepalive_interval: "30s"
   keepalive_ping_timeout: "10s"
+ratings_base_url: "http://localhost:8082"

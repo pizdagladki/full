@@ -134,7 +134,7 @@ func (h *signalingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			joinErr := h.svc.Join(ctx, adapted, env.RoomID)
+			joinErr := h.svc.Join(ctx, adapted, env.RoomID, env.Mode)
 			if joinErr != nil {
 				h.handleJoinError(ctx, conn, adapted, joinErr, &joinedRoomID)
 

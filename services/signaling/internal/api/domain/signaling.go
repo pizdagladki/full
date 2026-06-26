@@ -38,6 +38,14 @@ const (
 	TypeOutcome = "outcome"
 )
 
+// Room mode constants.
+const (
+	// ModeRanked is the mode for ranked (rated) battles.
+	ModeRanked = "ranked"
+	// ModeUnranked is the mode for unranked (casual) battles.
+	ModeUnranked = "unranked"
+)
+
 // InboundEnvelope is parsed only for routing: it reads the type and room_id
 // fields to decide how to dispatch the message. SDP and ICE payloads are
 // forwarded VERBATIM (raw bytes) so the full original message is never
@@ -45,6 +53,7 @@ const (
 type InboundEnvelope struct {
 	Type   string `json:"type"`
 	RoomID string `json:"room_id"`
+	Mode   string `json:"mode,omitempty"`
 }
 
 // peerLeftMsg is the server-to-client notification when the peer disconnects.

@@ -32,12 +32,17 @@ type signalingService struct {
 	afterFunc func(time.Duration, func()) *time.Timer
 
 	confirmationBuffer time.Duration
+	ratingsClient      RatingsClient
 
 	// rooms is the in-process registry: roomID → (userID → Conn).
 	// Single-instance only; K8s scale-out would need a shared pub/sub store.
 	mu           sync.Mutex
 	rooms        map[string]map[int64]Conn
 	arbitrations map[string]*arbitrationState
+	// roomModes stores the mode for each room (set on first join).
+	roomModes map[string]string
+	// battleStart stores the time when a room became full (2 members).
+	battleStart map[string]time.Time
 }
 
 // NewSignalingService constructs a SignalingService.
@@ -49,6 +54,7 @@ func NewSignalingService(
 	now func() time.Time,
 	afterFunc func(time.Duration, func()) *time.Timer,
 	confirmationBuffer time.Duration,
+	ratingsClient RatingsClient,
 ) SignalingService {
 	return &signalingService{
 		logger:             logger,
@@ -56,14 +62,17 @@ func NewSignalingService(
 		now:                now,
 		afterFunc:          afterFunc,
 		confirmationBuffer: confirmationBuffer,
+		ratingsClient:      ratingsClient,
 		rooms:              make(map[string]map[int64]Conn),
 		arbitrations:       make(map[string]*arbitrationState),
+		roomModes:          make(map[string]string),
+		battleStart:        make(map[string]time.Time),
 	}
 }
 
 // Join validates roomID, tries to add the peer to the Redis room, and registers
-// the conn in the in-process hub.
-func (s *signalingService) Join(ctx context.Context, conn Conn, roomID string) error {
+// the conn in the in-process hub. mode is stored on first join.
+func (s *signalingService) Join(ctx context.Context, conn Conn, roomID string, mode string) error {
 	err := domain.ValidateRoomID(roomID)
 	if err != nil {
 		return err
@@ -82,9 +91,19 @@ func (s *signalingService) Join(ctx context.Context, conn Conn, roomID string) e
 	s.mu.Lock()
 	if s.rooms[roomID] == nil {
 		s.rooms[roomID] = make(map[int64]Conn)
+		// Store mode on first join.
+		s.roomModes[roomID] = mode
 	}
 
 	s.rooms[roomID][conn.UserID()] = conn
+
+	// Record battle start time when the room becomes full (2 members).
+	if len(s.rooms[roomID]) == 2 {
+		if _, ok := s.battleStart[roomID]; !ok {
+			s.battleStart[roomID] = s.now()
+		}
+	}
+
 	s.mu.Unlock()
 
 	return nil
@@ -156,6 +175,7 @@ func (s *signalingService) ReportEvent(_ context.Context, conn Conn, roomID stri
 	if arb.firstReport == nil {
 		// First report: store it and start the confirmation-buffer timer.
 		arb.firstReport = &blinkReport{userID: senderID, receivedAt: recv}
+		//nolint:contextcheck // timer callback fires without a request context
 		arb.timer = s.afterFunc(s.confirmationBuffer, func() { s.resolveTimeout(roomID) })
 		s.mu.Unlock()
 
@@ -193,6 +213,8 @@ func (s *signalingService) ReportEvent(_ context.Context, conn Conn, roomID stri
 		_ = c.Send(outcome)
 	}
 
+	s.fireRatingsCall(roomID, winnerID, loserID) //nolint:contextcheck
+
 	return nil
 }
 
@@ -222,6 +244,11 @@ func (s *signalingService) Leave(ctx context.Context, conn Conn, roomID string) 
 	// the leaving peer forfeits: announce outcome before peer_left.
 	var outcomePayload []byte
 
+	var winnerID, loserID int64
+	var forfeitMode string
+	var forfeitStart time.Time
+	shouldFireRatings := false
+
 	if len(peers) > 0 {
 		arb := s.arbitrations[roomID] // may be nil if no blink was ever reported
 		decided := arb != nil && arb.decided
@@ -235,15 +262,21 @@ func (s *signalingService) Leave(ctx context.Context, conn Conn, roomID string) 
 				arb.decided = true
 			}
 
-			loserID := senderID
-			winnerID := peers[0].UserID()
+			loserID = senderID
+			winnerID = peers[0].UserID()
 			outcomePayload = domain.OutcomeBytes(winnerID, loserID)
+			// Capture mode and start before deleting maps.
+			forfeitMode = s.roomModes[roomID]
+			forfeitStart = s.battleStart[roomID]
+			shouldFireRatings = true
 		}
 	}
 
 	// Remove the in-process room entry entirely.
 	delete(s.rooms, roomID)
 	delete(s.arbitrations, roomID)
+	delete(s.roomModes, roomID)
+	delete(s.battleStart, roomID)
 	s.mu.Unlock()
 
 	// Send outcome (forfeit) before peer_left so the peer knows why it won.
@@ -267,6 +300,30 @@ func (s *signalingService) Leave(ctx context.Context, conn Conn, roomID string) 
 		}
 
 		peer.Close("peer disconnected")
+	}
+
+	// Fire ratings call after releasing the lock — using captured values.
+	if shouldFireRatings && forfeitMode == domain.ModeRanked {
+		durationMs := s.now().Sub(forfeitStart).Milliseconds()
+		req := ApplyResultRequest{
+			WinnerID:   winnerID,
+			LoserID:    loserID,
+			Mode:       forfeitMode,
+			DurationMs: durationMs,
+		}
+		go func() { //nolint:contextcheck,gosec // G118: fire-and-forget; background ctx is intentional
+			rCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err := s.ratingsClient.ApplyResult(rCtx, req)
+			if err != nil {
+				s.logger.Error("ratings ApplyResult failed",
+					zap.String("room_id", roomID),
+					zap.Int64("winner_id", winnerID),
+					zap.Int64("loser_id", loserID),
+					zap.Error(err),
+				)
+			}
+		}()
 	}
 
 	// Clean up Redis regardless of whether there was a peer.
@@ -309,6 +366,43 @@ func (s *signalingService) resolveTimeout(roomID string) {
 	for _, c := range peers {
 		_ = c.Send(outcome)
 	}
+
+	s.fireRatingsCall(roomID, winnerID, loserID) //nolint:contextcheck // timer callback has no context
+}
+
+// fireRatingsCall reads the room mode from s.roomModes and fires an async
+// ApplyResult call if the room is ranked. Must be called AFTER releasing s.mu.
+func (s *signalingService) fireRatingsCall(roomID string, winnerID, loserID int64) {
+	s.mu.Lock()
+	mode := s.roomModes[roomID]
+	start := s.battleStart[roomID]
+	s.mu.Unlock()
+
+	if mode != domain.ModeRanked {
+		return
+	}
+
+	req := ApplyResultRequest{
+		WinnerID:   winnerID,
+		LoserID:    loserID,
+		Mode:       mode,
+		DurationMs: s.now().Sub(start).Milliseconds(),
+	}
+
+	go func() { //nolint:contextcheck,gosec // G118: fire-and-forget; timer callbacks carry no request context
+		rCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err := s.ratingsClient.ApplyResult(rCtx, req)
+		if err != nil {
+			s.logger.Error("ratings ApplyResult failed",
+				zap.String("room_id", roomID),
+				zap.Int64("winner_id", winnerID),
+				zap.Int64("loser_id", loserID),
+				zap.Error(err),
+			)
+		}
+	}()
 }
 
 // getOrCreateArbitration returns the arbitrationState for roomID, creating it if absent.
