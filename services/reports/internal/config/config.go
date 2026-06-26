@@ -13,6 +13,14 @@ type Config struct {
 	HTTP     HTTPConfig     `yaml:"http"     validate:"required"`
 	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
 	Redis    RedisConfig    `yaml:"redis"    validate:"required"`
+	Reports  ReportsConfig  `yaml:"reports"`
+}
+
+// ReportsConfig holds feature-specific knobs for the reports service.
+type ReportsConfig struct {
+	// CooldownTTLSeconds is the Redis cooldown TTL in seconds applied when a
+	// reported player reaches the cheat-report threshold. Default: 1800 (30 min).
+	CooldownTTLSeconds int `yaml:"cooldown_ttl_seconds"`
 }
 
 // HTTPConfig holds the HTTP server settings.

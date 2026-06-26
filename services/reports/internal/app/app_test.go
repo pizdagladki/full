@@ -200,11 +200,14 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 
 // newTestApp builds an App wired with the minimum needed to exercise the HTTP
 // worker and router: a no-op logger, the validator, and an HTTP addr.
+// Repositories and services are nil; handlers are initialised with nil deps so
+// routes are registered without panicking at start-up time.
 func newTestApp(addr string) *App {
 	a := New("reports-test")
 	a.logger = zap.NewNop()
 	a.initValidator()
 	a.cfg = &config.Config{HTTP: config.HTTPConfig{Addr: addr}}
+	a.initHandlers()
 
 	return a
 }

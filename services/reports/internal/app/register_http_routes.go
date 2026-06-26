@@ -17,6 +17,9 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 
 	e.GET("/healthz", handleHealthz)
 
+	e.POST("/v1/reports/cheat", a.reportsHandler.PostCheatReport)
+	e.GET("/v1/reports/cooldown/:user_id", a.reportsHandler.GetCooldown)
+
 	return e
 }
 
