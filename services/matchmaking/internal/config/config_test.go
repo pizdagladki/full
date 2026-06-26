@@ -10,7 +10,11 @@ import (
 const (
 	validRedisAddr   = "localhost:6379"
 	validRatingsURL  = "http://ratings:8080"
+	validReportsURL  = "http://reports:8080"
 	ratingsYAMLBlock = "\nratings:\n  base_url: \"" + validRatingsURL + "\"\n"
+	reportsYAMLBlock = "\nreports:\n  base_url: \"" + validReportsURL + "\"\n"
+	// bothServicesYAMLBlock includes both ratings and reports sections.
+	bothServicesYAMLBlock = ratingsYAMLBlock + reportsYAMLBlock
 )
 
 func TestLoad(t *testing.T) {
@@ -25,13 +29,13 @@ func TestLoad(t *testing.T) {
 		{
 			name:     "env mode all set with explicit HTTP_ADDR",
 			isDocker: true,
-			env:      map[string]string{"HTTP_ADDR": ":9090", "REDIS_ADDR": validRedisAddr, "RATINGS_BASE_URL": validRatingsURL},
+			env:      map[string]string{"HTTP_ADDR": ":9090", "REDIS_ADDR": validRedisAddr, "RATINGS_BASE_URL": validRatingsURL, "REPORTS_BASE_URL": validReportsURL},
 			wantAddr: ":9090",
 		},
 		{
 			name:     "env mode default HTTP addr",
 			isDocker: true,
-			env:      map[string]string{"REDIS_ADDR": validRedisAddr, "RATINGS_BASE_URL": validRatingsURL},
+			env:      map[string]string{"REDIS_ADDR": validRedisAddr, "RATINGS_BASE_URL": validRatingsURL, "REPORTS_BASE_URL": validReportsURL},
 			wantAddr: ":8080",
 		},
 		{
@@ -43,14 +47,14 @@ func TestLoad(t *testing.T) {
 		{
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "http:\n  addr: \":7070\"\nredis:\n  addr: \""+validRedisAddr+"\""+ratingsYAMLBlock)
+				return writeTempConfig(t, "http:\n  addr: \":7070\"\nredis:\n  addr: \""+validRedisAddr+"\""+bothServicesYAMLBlock)
 			},
 			wantAddr: ":7070",
 		},
 		{
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "redis:\n  addr: \""+validRedisAddr+"\""+ratingsYAMLBlock)
+				return writeTempConfig(t, "redis:\n  addr: \""+validRedisAddr+"\""+bothServicesYAMLBlock)
 			},
 			wantAddr: ":8080",
 		},
@@ -121,14 +125,14 @@ func TestLoad_MatchmakingConfig_File(t *testing.T) {
 		{
 			name: "full matchmaking section parses correctly",
 			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validRedisAddr + "\"\n" +
-				"matchmaking:\n  level_distance: 5\n  fallback_after: \"10s\"\n  session_cookie: \"tok\"\n" + ratingsYAMLBlock,
+				"matchmaking:\n  level_distance: 5\n  fallback_after: \"10s\"\n  session_cookie: \"tok\"\n" + bothServicesYAMLBlock,
 			wantLevelDist:     5,
 			wantFallbackAfter: 10 * time.Second,
 			wantSessionCookie: "tok",
 		},
 		{
 			name:              "matchmaking section omitted uses defaults",
-			yaml:              "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validRedisAddr + "\"" + ratingsYAMLBlock,
+			yaml:              "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validRedisAddr + "\"" + bothServicesYAMLBlock,
 			wantLevelDist:     defaultLevelDist,
 			wantFallbackAfter: defaultFallbackAfter,
 			wantSessionCookie: defaultSessionCookie,
@@ -136,7 +140,7 @@ func TestLoad_MatchmakingConfig_File(t *testing.T) {
 		{
 			name: "fallback_after string 30s",
 			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validRedisAddr + "\"\n" +
-				"matchmaking:\n  fallback_after: \"30s\"\n" + ratingsYAMLBlock,
+				"matchmaking:\n  fallback_after: \"30s\"\n" + bothServicesYAMLBlock,
 			wantLevelDist:     defaultLevelDist,
 			wantFallbackAfter: 30 * time.Second,
 			wantSessionCookie: defaultSessionCookie,
@@ -190,6 +194,7 @@ func TestLoad_MatchmakingConfig_Env(t *testing.T) {
 			env: map[string]string{
 				"REDIS_ADDR":        validRedisAddr,
 				"RATINGS_BASE_URL":  validRatingsURL,
+				"REPORTS_BASE_URL":  validReportsURL,
 				"MM_LEVEL_DISTANCE": "7",
 				"MM_FALLBACK_AFTER": "20s",
 				"MM_SESSION_COOKIE": "auth",
@@ -203,6 +208,7 @@ func TestLoad_MatchmakingConfig_Env(t *testing.T) {
 			env: map[string]string{
 				"REDIS_ADDR":       validRedisAddr,
 				"RATINGS_BASE_URL": validRatingsURL,
+				"REPORTS_BASE_URL": validReportsURL,
 			},
 			wantLevelDist:     defaultLevelDist,
 			wantFallbackAfter: defaultFallbackAfter,
@@ -213,6 +219,7 @@ func TestLoad_MatchmakingConfig_Env(t *testing.T) {
 			env: map[string]string{
 				"REDIS_ADDR":        validRedisAddr,
 				"RATINGS_BASE_URL":  validRatingsURL,
+				"REPORTS_BASE_URL":  validReportsURL,
 				"MM_LEVEL_DISTANCE": "not-an-int",
 			},
 			wantLevelDist:     defaultLevelDist,
@@ -224,6 +231,7 @@ func TestLoad_MatchmakingConfig_Env(t *testing.T) {
 			env: map[string]string{
 				"REDIS_ADDR":        validRedisAddr,
 				"RATINGS_BASE_URL":  validRatingsURL,
+				"REPORTS_BASE_URL":  validReportsURL,
 				"MM_FALLBACK_AFTER": "not-a-duration",
 			},
 			wantLevelDist:     defaultLevelDist,
@@ -269,6 +277,7 @@ func TestLoad_RatingsConfig_Env(t *testing.T) {
 			env: map[string]string{
 				"REDIS_ADDR":       validRedisAddr,
 				"RATINGS_BASE_URL": "http://ratings:9000",
+				"REPORTS_BASE_URL": validReportsURL,
 			},
 			wantBaseURL: "http://ratings:9000",
 		},
@@ -316,7 +325,7 @@ func TestLoad_RatingsConfig_File(t *testing.T) {
 		{
 			name: "ratings.base_url from file is loaded", // criterion: 3
 			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validRedisAddr + "\"\n" +
-				"ratings:\n  base_url: \"http://ratings:9000\"\n",
+				"ratings:\n  base_url: \"http://ratings:9000\"\n" + reportsYAMLBlock,
 			wantBaseURL: "http://ratings:9000",
 		},
 		{
@@ -342,6 +351,100 @@ func TestLoad_RatingsConfig_File(t *testing.T) {
 			}
 			if cfg.Ratings.BaseURL != tt.wantBaseURL {
 				t.Errorf("Ratings.BaseURL = %q, want %q", cfg.Ratings.BaseURL, tt.wantBaseURL)
+			}
+		})
+	}
+}
+
+// TestLoad_ReportsConfig_Env covers criterion 4: REPORTS_BASE_URL is validated at startup.
+func TestLoad_ReportsConfig_Env(t *testing.T) {
+	tests := []struct {
+		name        string
+		env         map[string]string
+		wantBaseURL string
+		wantErr     bool
+	}{
+		{
+			name: "REPORTS_BASE_URL set is loaded", // criterion: 4
+			env: map[string]string{
+				"REDIS_ADDR":       validRedisAddr,
+				"RATINGS_BASE_URL": validRatingsURL,
+				"REPORTS_BASE_URL": "http://reports:9000",
+			},
+			wantBaseURL: "http://reports:9000",
+		},
+		{
+			name: "missing REPORTS_BASE_URL fails validation", // criterion: 4
+			env: map[string]string{
+				"REDIS_ADDR":       validRedisAddr,
+				"RATINGS_BASE_URL": validRatingsURL,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("IS_DOCKER", "1")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			cfg, err := Load("")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Reports.BaseURL != tt.wantBaseURL {
+				t.Errorf("Reports.BaseURL = %q, want %q", cfg.Reports.BaseURL, tt.wantBaseURL)
+			}
+		})
+	}
+}
+
+// TestLoad_ReportsConfig_File covers criterion 4 for YAML file loading.
+func TestLoad_ReportsConfig_File(t *testing.T) {
+	tests := []struct {
+		name        string
+		yaml        string
+		wantBaseURL string
+		wantErr     bool
+	}{
+		{
+			name: "reports.base_url from file is loaded", // criterion: 4
+			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validRedisAddr + "\"\n" +
+				ratingsYAMLBlock + "reports:\n  base_url: \"http://reports:9000\"\n",
+			wantBaseURL: "http://reports:9000",
+		},
+		{
+			name: "missing reports.base_url fails validation", // criterion: 4
+			yaml: "http:\n  addr: \":8080\"\nredis:\n  addr: \"" + validRedisAddr + "\"\n" +
+				ratingsYAMLBlock,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempConfig(t, tt.yaml)
+
+			cfg, err := Load(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Reports.BaseURL != tt.wantBaseURL {
+				t.Errorf("Reports.BaseURL = %q, want %q", cfg.Reports.BaseURL, tt.wantBaseURL)
 			}
 		})
 	}

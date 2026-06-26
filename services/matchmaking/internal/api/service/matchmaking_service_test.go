@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -106,12 +107,44 @@ func (f *fakeRatingsClient) CallCount() int {
 	return f.calls
 }
 
+// fakeReportsClient is a test double for ReportsClient that returns a
+// preconfigured CooldownStatus or error.
+type fakeReportsClient struct {
+	mu     sync.Mutex
+	status CooldownStatus
+	err    error
+	calls  int
+}
+
+func newFakeReportsClient(status CooldownStatus, err error) *fakeReportsClient {
+	return &fakeReportsClient{status: status, err: err}
+}
+
+// noCooldownReportsClient returns a no-op ReportsClient (no cooldown, no error).
+func noCooldownReportsClient() *fakeReportsClient {
+	return newFakeReportsClient(CooldownStatus{Active: false}, nil)
+}
+
+func (f *fakeReportsClient) GetCooldown(_ context.Context, _ int64) (CooldownStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	return f.status, f.err
+}
+
+func (f *fakeReportsClient) CallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
 // --- helpers ---
 
 type serviceFixture struct {
 	ctrl          *gomock.Controller
 	queueRepo     *rmocks.MockQueueRepository
 	ratingsClient *fakeRatingsClient
+	reports       *fakeReportsClient
 	clock         *fakeClock
 	roomGen       *deterministicRoomIDGen
 	svc           MatchmakingService
@@ -126,13 +159,15 @@ func newFixture(t *testing.T, levelDist int, fallbackAfter time.Duration) *servi
 }
 
 // newFixtureWithRatings creates a fixture where the fake ratings client returns
-// ratingsLevel (and ratingsErr) for every GetLevel call.
+// ratingsLevel (and ratingsErr) for every GetLevel call. The reports client
+// defaults to no-cooldown (fail-open).
 func newFixtureWithRatings(t *testing.T, levelDist int, fallbackAfter time.Duration, ratingsLevel int, ratingsErr error) *serviceFixture {
 	t.Helper()
 
 	ctrl := gomock.NewController(t)
 	queueRepo := rmocks.NewMockQueueRepository(ctrl)
 	rc := newFakeRatingsClient(ratingsLevel, ratingsErr)
+	rpc := noCooldownReportsClient()
 	clock := &fakeClock{now: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
 	roomGen := &deterministicRoomIDGen{id: "room-1"}
 
@@ -144,12 +179,14 @@ func newFixtureWithRatings(t *testing.T, levelDist int, fallbackAfter time.Durat
 		levelDist,
 		fallbackAfter,
 		rc,
+		rpc,
 	)
 
 	return &serviceFixture{
 		ctrl:          ctrl,
 		queueRepo:     queueRepo,
 		ratingsClient: rc,
+		reports:       rpc,
 		clock:         clock,
 		roomGen:       roomGen,
 		svc:           svc,
@@ -345,6 +382,7 @@ func TestMatchmakingService_Tick_FallbackAfterDeadline(t *testing.T) {
 		1, // dist=1 → pA(level=1) and pB(level=6) diff=5 won't match in-distance
 		10*time.Second,
 		rcMulti,
+		noCooldownReportsClient(),
 	)
 
 	ctx := context.Background()
@@ -815,6 +853,7 @@ func TestMatchmakingService_Join_AuthoritativeLevel(t *testing.T) {
 				3,
 				10*time.Second,
 				rc,
+				noCooldownReportsClient(),
 			)
 
 			player := domain.Player{
@@ -846,6 +885,116 @@ func TestMatchmakingService_Join_AuthoritativeLevel(t *testing.T) {
 			// Verify GetLevel was actually called (ratings client was consulted).
 			if rc.CallCount() != 1 {
 				t.Errorf("GetLevel called %d times, want 1", rc.CallCount())
+			}
+		})
+	}
+}
+
+// TestMatchmakingService_Join_Cooldown covers the three reports-cooldown
+// acceptance criteria for the Join path.
+func TestMatchmakingService_Join_Cooldown(t *testing.T) {
+	t.Parallel()
+
+	const playerUserID = int64(99)
+
+	tests := []struct {
+		name             string
+		cooldownStatus   CooldownStatus
+		cooldownErr      error
+		wantEnqueueCalls int  // 0 = Enqueue must NOT be called; 1 = must be called once
+		wantCooldownErr  bool // true → Join must return *domain.CooldownError
+		wantSecondsRem   int  // only checked when wantCooldownErr == true
+		// criterion tag for the auditor
+		criterion string
+	}{
+		{
+			// criterion: 1 — active cooldown → player NOT enqueued, CooldownError returned
+			name:             "active-cooldown-rejected",
+			cooldownStatus:   CooldownStatus{Active: true, SecondsRemaining: 1800},
+			cooldownErr:      nil,
+			wantEnqueueCalls: 0,
+			wantCooldownErr:  true,
+			wantSecondsRem:   1800,
+			criterion:        "1",
+		},
+		{
+			// criterion: 2 — no cooldown → player enqueued normally
+			name:             "no-cooldown-enqueued",
+			cooldownStatus:   CooldownStatus{Active: false},
+			cooldownErr:      nil,
+			wantEnqueueCalls: 1,
+			wantCooldownErr:  false,
+			criterion:        "2",
+		},
+		{
+			// criterion: 3 — lookup error → fail-open (join allowed, Enqueue called)
+			name:             "lookup-error-fail-open",
+			cooldownStatus:   CooldownStatus{},
+			cooldownErr:      fmt.Errorf("transport error"),
+			wantEnqueueCalls: 1,
+			wantCooldownErr:  false,
+			criterion:        "3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			queueRepo := rmocks.NewMockQueueRepository(ctrl)
+			rc := newFakeRatingsClient(5, nil)
+			rpc := newFakeReportsClient(tt.cooldownStatus, tt.cooldownErr)
+			clock := &fakeClock{now: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
+
+			svc := NewMatchmakingService(
+				zap.NewNop(),
+				queueRepo,
+				clock,
+				&deterministicRoomIDGen{id: "room-1"},
+				3,
+				10*time.Second,
+				rc,
+				rpc,
+			)
+
+			player := domain.Player{
+				UserID:     playerUserID,
+				Mode:       "ranked",
+				Level:      5,
+				EnqueuedAt: clock.Now(),
+			}
+			conn := newFakeConn(playerUserID)
+
+			if tt.wantEnqueueCalls > 0 {
+				queueRepo.EXPECT().
+					Enqueue(gomock.Any(), gomock.AssignableToTypeOf(domain.Player{})).
+					Return(nil).
+					Times(tt.wantEnqueueCalls)
+			}
+			// When wantEnqueueCalls == 0, gomock will fail the test if Enqueue
+			// is called unexpectedly — that's the load-bearing check for criterion 1.
+
+			err := svc.Join(context.Background(), conn, player)
+
+			if tt.wantCooldownErr {
+				// criterion: 1 — must return *domain.CooldownError
+				var cooldownErr *domain.CooldownError
+				if !errors.As(err, &cooldownErr) {
+					t.Fatalf("Join() error = %v, want *domain.CooldownError", err)
+				}
+				if cooldownErr.SecondsRemaining != tt.wantSecondsRem {
+					t.Errorf("SecondsRemaining = %d, want %d", cooldownErr.SecondsRemaining, tt.wantSecondsRem)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Join() unexpected error = %v", err)
+				}
+			}
+
+			// Verify GetCooldown was consulted in all cases.
+			if rpc.CallCount() != 1 {
+				t.Errorf("GetCooldown called %d times, want 1", rpc.CallCount())
 			}
 		})
 	}

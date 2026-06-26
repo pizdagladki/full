@@ -4,6 +4,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 )
@@ -14,6 +15,16 @@ var (
 	ErrInvalidMode  = errors.New("mode must match ^[a-z0-9_-]{1,32}$")
 	ErrUnknownType  = errors.New("unknown message type")
 )
+
+// CooldownError is returned by Join when the player is in reports cooldown.
+type CooldownError struct {
+	SecondsRemaining int
+}
+
+// Error implements the error interface.
+func (e *CooldownError) Error() string {
+	return fmt.Sprintf("cooldown: %d seconds remaining", e.SecondsRemaining)
+}
 
 const (
 	minLevel = 1
