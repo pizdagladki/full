@@ -25,16 +25,22 @@ function renderWithAuth(routesList: RouteObject[], path: string, authState: Auth
 // Mock fetch so AuthProvider (used in full App) doesn't blow up
 vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', json: () => Promise.resolve({}) }));
 
+const unauthenticatedState: AuthState = {
+  user: null,
+  loading: false,
+  error: null,
+};
+
 describe('App routes', () => {
   it('renders Login at root /', () => {
-    // criterion: 1 — Login screen renders at the root route
-    renderWithAuth(routes, '/');
+    // criterion: 1 — Login screen renders at the root route for unauthenticated users
+    renderWithAuth(routes, '/', unauthenticatedState);
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
   });
 
   it('renders Login at /auth/callback', () => {
-    // criterion: 2 — callback path also renders Login for code exchange
-    renderWithAuth(routes, '/auth/callback');
+    // criterion: 2 — callback path also renders Login for code exchange (unauthenticated)
+    renderWithAuth(routes, '/auth/callback', unauthenticatedState);
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
   });
 

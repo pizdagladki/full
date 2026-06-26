@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { defaultAuthApi } from '../../api/auth';
 import type { AuthApi } from '../../api/auth';
 import { ApiError } from '../../api/auth';
+import { useAuth } from './AuthContext';
 
-function buildGoogleAuthUrl(): string {
+function generateState(): string {
+  return crypto.randomUUID();
+}
+
+function buildGoogleAuthUrl(): { url: string; state: string } {
   const clientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
   const redirectUri = (import.meta.env.VITE_GOOGLE_REDIRECT_URI as string | undefined) ?? '';
+  const state = generateState();
+  sessionStorage.setItem('oauth_state', state);
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: clientId,
     redirect_uri: redirectUri,
     scope: 'openid email',
+    state,
   });
-  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, state };
 }
 
 interface LoginProps {
@@ -21,6 +29,7 @@ interface LoginProps {
 }
 
 export function Login({ authApi = defaultAuthApi }: LoginProps) {
+  const { user, loading: authLoading } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const code = searchParams.get('code');
@@ -42,6 +51,19 @@ export function Login({ authApi = defaultAuthApi }: LoginProps) {
     let cancelled = false;
 
     const doExchange = async () => {
+      // Validate OAuth state parameter to prevent CSRF attacks
+      const storedState = sessionStorage.getItem('oauth_state');
+      const returnedState = searchParams.get('state');
+      sessionStorage.removeItem('oauth_state');
+
+      if (!storedState || storedState !== returnedState) {
+        if (!cancelled) {
+          setError('Authentication state mismatch. Please try again.');
+          setLoading(false);
+        }
+        return;
+      }
+
       try {
         await authApi.googleLogin(code);
         await authApi.getMe();
@@ -66,13 +88,17 @@ export function Login({ authApi = defaultAuthApi }: LoginProps) {
     return () => {
       cancelled = true;
     };
-  }, [code, authApi, navigate]);
+  }, [code, authApi, navigate, searchParams]);
+
+  // If already authenticated and not in exchange flow, redirect to home
+  if (!code && authLoading) return null;
+  if (!code && user) return <Navigate to="/home" replace />;
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
-  const googleAuthUrl = buildGoogleAuthUrl();
+  const { url: googleAuthUrl } = buildGoogleAuthUrl();
 
   return (
     <div>

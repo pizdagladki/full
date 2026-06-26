@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Login } from './Login';
 import { ProtectedRoute } from './ProtectedRoute';
 import { AuthContext } from './AuthContext';
@@ -73,12 +73,18 @@ describe('Login — URL construction', () => {
 describe('Login — code exchange success', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    window.sessionStorage.clear();
   });
 
   it('criterion-2: exchanges code for session and navigates to /home on success', async () => {
     // criterion: 2 — on 200 from googleLogin + getMe, app routes to /home
+    window.sessionStorage.setItem('oauth_state', 'test-state');
     const api = makeAuthApi();
-    renderLogin({ search: '?code=test_code', authApi: api });
+    renderLogin({ search: '?code=test_code&state=test-state', authApi: api });
 
     // Initially shows loading
     expect(screen.getByText('Loading...')).toBeInTheDocument();
@@ -88,7 +94,7 @@ describe('Login — code exchange success', () => {
     });
 
     expect(api.googleLogin).toHaveBeenCalledWith('test_code');
-    expect(api.getMe).toHaveBeenCalled();
+    expect(api.getMe).toHaveBeenCalledTimes(1);
   });
 
   it('criterion-2 guard: does not navigate when googleLogin is not called', async () => {
@@ -110,14 +116,23 @@ describe('Login — code exchange success', () => {
 // ---------------------------------------------------------------------------
 
 describe('Login — 401 handling', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    window.sessionStorage.clear();
+  });
+
   it('criterion-2-4: shows error and stays unauthenticated on 401 from googleLogin', async () => {
     // criterion: 2+4 — 401 from googleLogin shows an error; user stays on login page
+    window.sessionStorage.setItem('oauth_state', 'test-state');
     const { ApiError } = await import('../../api/auth');
     const api = makeAuthApi({
       googleLogin: vi.fn().mockRejectedValue(new ApiError(401, 'Unauthorized')),
     });
 
-    renderLogin({ search: '?code=bad_code', authApi: api });
+    renderLogin({ search: '?code=bad_code&state=test-state', authApi: api });
 
     expect(screen.getByText('Loading...')).toBeInTheDocument();
 
@@ -132,8 +147,9 @@ describe('Login — 401 handling', () => {
 
   it('criterion-2-4 guard: no error shown on success path', async () => {
     // criterion: 2+4 — on success no error alert is rendered
+    window.sessionStorage.setItem('oauth_state', 'test-state');
     const api = makeAuthApi();
-    renderLogin({ search: '?code=good_code', authApi: api });
+    renderLogin({ search: '?code=good_code&state=test-state', authApi: api });
 
     await waitFor(() => {
       expect(screen.getByText('Home')).toBeInTheDocument();
@@ -229,13 +245,22 @@ describe('ProtectedRoute — redirect', () => {
 // ---------------------------------------------------------------------------
 
 describe('Login — network failure', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    window.sessionStorage.clear();
+  });
+
   it('criterion-4: non-crashing error state on network failure during code exchange', async () => {
     // criterion: 4 — network error during code exchange surfaces a non-crashing error state
+    window.sessionStorage.setItem('oauth_state', 'test-state');
     const api = makeAuthApi({
       googleLogin: vi.fn().mockRejectedValue(new Error('Network Error')),
     });
 
-    renderLogin({ search: '?code=any_code', authApi: api });
+    renderLogin({ search: '?code=any_code&state=test-state', authApi: api });
 
     expect(screen.getByText('Loading...')).toBeInTheDocument();
 
@@ -408,5 +433,121 @@ describe('AuthContext — state population', () => {
     });
 
     expect(screen.queryByText(/error:/)).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// criterion 3: authenticated user visiting Login is redirected to /home
+// ---------------------------------------------------------------------------
+
+describe('Login — redirect authenticated user', () => {
+  it('criterion-3: authenticated user visiting Login (/) is redirected to /home', async () => {
+    // criterion: 3 — already-authenticated user visiting / should see /home, not the login screen
+    const authState: AuthState = { user: { id: '1', email: 'u@u.com' }, loading: false, error: null };
+    const router = createMemoryRouter(
+      [
+        { path: '/', element: <AuthContext.Provider value={authState}><Login /></AuthContext.Provider> },
+        { path: '/home', element: <div>Home</div> },
+      ],
+      { initialEntries: ['/'] },
+    );
+    render(<RouterProvider router={router} />);
+    await waitFor(() => {
+      expect(screen.getByText('Home')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Sign in with Google')).not.toBeInTheDocument();
+  });
+
+  it('criterion-3 guard: unauthenticated user visiting Login (/) sees the login screen', () => {
+    // criterion: 3 guard — unauthenticated user should NOT be redirected away from login
+    const authState: AuthState = { user: null, loading: false, error: null };
+    const router = createMemoryRouter(
+      [
+        { path: '/', element: <AuthContext.Provider value={authState}><Login /></AuthContext.Provider> },
+        { path: '/home', element: <div>Home</div> },
+      ],
+      { initialEntries: ['/'] },
+    );
+    render(<RouterProvider router={router} />);
+    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.queryByText('Home')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// security: OAuth state CSRF protection
+// ---------------------------------------------------------------------------
+
+describe('Login — OAuth state CSRF protection', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('security: state mismatch shows error and does not call googleLogin', async () => {
+    // Simulate callback with mismatched state — CSRF attack scenario
+    window.sessionStorage.setItem('oauth_state', 'expected-state');
+    const api = makeAuthApi();
+
+    const router = createMemoryRouter(
+      [
+        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null }}><Login authApi={api} /></AuthContext.Provider> },
+        { path: '/home', element: <div>Home</div> },
+      ],
+      { initialEntries: ['/?code=mycode&state=wrong-state'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(api.googleLogin).not.toHaveBeenCalled();
+    expect(screen.queryByText('Home')).not.toBeInTheDocument();
+  });
+
+  it('security: matching state allows exchange to proceed', async () => {
+    // Positive baseline — correct state allows the OAuth exchange to go through
+    window.sessionStorage.setItem('oauth_state', 'correct-state');
+    const api = makeAuthApi();
+
+    const router = createMemoryRouter(
+      [
+        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null }}><Login authApi={api} /></AuthContext.Provider> },
+        { path: '/home', element: <div>Home</div> },
+      ],
+      { initialEntries: ['/?code=mycode&state=correct-state'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home')).toBeInTheDocument();
+    });
+
+    expect(api.googleLogin).toHaveBeenCalledWith('mycode');
+  });
+
+  it('security: missing stored state shows error and does not call googleLogin', async () => {
+    // No state in sessionStorage (e.g. user opened callback URL directly) — must reject
+    window.sessionStorage.removeItem('oauth_state');
+    const api = makeAuthApi();
+
+    const router = createMemoryRouter(
+      [
+        { path: '/', element: <AuthContext.Provider value={{ user: null, loading: false, error: null }}><Login authApi={api} /></AuthContext.Provider> },
+        { path: '/home', element: <div>Home</div> },
+      ],
+      { initialEntries: ['/?code=mycode&state=some-state'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(api.googleLogin).not.toHaveBeenCalled();
   });
 });
