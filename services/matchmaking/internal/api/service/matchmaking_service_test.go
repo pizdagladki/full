@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/services/matchmaking/internal/api/domain"
-	"github.com/pizdagladki/full/services/matchmaking/internal/api/repository/mocks"
+	rmocks "github.com/pizdagladki/full/services/matchmaking/internal/api/repository/mocks"
 )
 
 // --- fakes ---
@@ -79,21 +79,60 @@ type deterministicRoomIDGen struct {
 
 func (g *deterministicRoomIDGen) NewRoomID() string { return g.id }
 
+// fakeRatingsClient is a test double for RatingsClient that returns a
+// preconfigured level or error. It records how many times GetLevel was called
+// so tests can assert it was invoked.
+type fakeRatingsClient struct {
+	mu    sync.Mutex
+	level int
+	err   error
+	calls int
+}
+
+func newFakeRatingsClient(level int, err error) *fakeRatingsClient {
+	return &fakeRatingsClient{level: level, err: err}
+}
+
+func (f *fakeRatingsClient) GetLevel(_ context.Context, _ int64) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	return f.level, f.err
+}
+
+func (f *fakeRatingsClient) CallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
 // --- helpers ---
 
 type serviceFixture struct {
-	ctrl      *gomock.Controller
-	queueRepo *mocks.MockQueueRepository
-	clock     *fakeClock
-	roomGen   *deterministicRoomIDGen
-	svc       MatchmakingService
+	ctrl          *gomock.Controller
+	queueRepo     *rmocks.MockQueueRepository
+	ratingsClient *fakeRatingsClient
+	clock         *fakeClock
+	roomGen       *deterministicRoomIDGen
+	svc           MatchmakingService
 }
 
+// newFixture builds a test fixture with a fakeRatingsClient that returns the
+// given level (and no error) by default. Callers that need different rating
+// behaviours should use newFixtureWithRatings.
 func newFixture(t *testing.T, levelDist int, fallbackAfter time.Duration) *serviceFixture {
+	t.Helper()
+	return newFixtureWithRatings(t, levelDist, fallbackAfter, 5, nil)
+}
+
+// newFixtureWithRatings creates a fixture where the fake ratings client returns
+// ratingsLevel (and ratingsErr) for every GetLevel call.
+func newFixtureWithRatings(t *testing.T, levelDist int, fallbackAfter time.Duration, ratingsLevel int, ratingsErr error) *serviceFixture {
 	t.Helper()
 
 	ctrl := gomock.NewController(t)
-	queueRepo := mocks.NewMockQueueRepository(ctrl)
+	queueRepo := rmocks.NewMockQueueRepository(ctrl)
+	rc := newFakeRatingsClient(ratingsLevel, ratingsErr)
 	clock := &fakeClock{now: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
 	roomGen := &deterministicRoomIDGen{id: "room-1"}
 
@@ -104,14 +143,16 @@ func newFixture(t *testing.T, levelDist int, fallbackAfter time.Duration) *servi
 		roomGen,
 		levelDist,
 		fallbackAfter,
+		rc,
 	)
 
 	return &serviceFixture{
-		ctrl:      ctrl,
-		queueRepo: queueRepo,
-		clock:     clock,
-		roomGen:   roomGen,
-		svc:       svc,
+		ctrl:          ctrl,
+		queueRepo:     queueRepo,
+		ratingsClient: rc,
+		clock:         clock,
+		roomGen:       roomGen,
+		svc:           svc,
 	}
 }
 
@@ -121,24 +162,28 @@ func TestMatchmakingService_Join_Validation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		player  domain.Player
-		wantErr error
+		name         string
+		player       domain.Player
+		ratingsLevel int
+		ratingsErr   error
+		wantErr      bool
 	}{
 		{
-			name:    "invalid level zero",
-			player:  domain.Player{UserID: 1, Mode: "ranked", Level: 0},
-			wantErr: domain.ErrInvalidLevel,
+			// The ratings service returns error, so defaultLevel (4) is used;
+			// but mode is empty so validation still fails.
+			name:         "invalid empty mode",
+			player:       domain.Player{UserID: 1, Mode: "", Level: 5},
+			ratingsLevel: 5,
+			ratingsErr:   nil,
+			wantErr:      true,
 		},
 		{
-			name:    "invalid level eleven",
-			player:  domain.Player{UserID: 1, Mode: "ranked", Level: 11},
-			wantErr: domain.ErrInvalidLevel,
-		},
-		{
-			name:    "invalid empty mode",
-			player:  domain.Player{UserID: 1, Mode: "", Level: 5},
-			wantErr: domain.ErrInvalidMode,
+			// Ratings returns level 11 — that is out of range.
+			name:         "invalid level eleven from ratings",
+			player:       domain.Player{UserID: 1, Mode: "ranked", Level: 5},
+			ratingsLevel: 11,
+			ratingsErr:   nil,
+			wantErr:      true,
 		},
 	}
 
@@ -146,12 +191,14 @@ func TestMatchmakingService_Join_Validation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			f := newFixture(t, 3, 10*time.Second)
-			// No repo calls expected — validation fails first.
+			f := newFixtureWithRatings(t, 3, 10*time.Second, tt.ratingsLevel, tt.ratingsErr)
 			conn := newFakeConn(tt.player.UserID)
 			err := f.svc.Join(context.Background(), conn, tt.player)
 
-			if err == nil {
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Join() unexpected error = %v", err)
+			}
+			if tt.wantErr && err == nil {
 				t.Fatal("Join() error = nil, want validation error")
 			}
 		})
@@ -161,7 +208,7 @@ func TestMatchmakingService_Join_Validation(t *testing.T) {
 func TestMatchmakingService_Join_Success(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	player := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: f.clock.Now()}
 	conn := newFakeConn(1)
@@ -177,7 +224,7 @@ func TestMatchmakingService_Join_Success(t *testing.T) {
 func TestMatchmakingService_Join_EnqueueError(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	player := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: f.clock.Now()}
 	conn := newFakeConn(1)
@@ -193,7 +240,7 @@ func TestMatchmakingService_Join_EnqueueError(t *testing.T) {
 func TestMatchmakingService_Leave(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	player := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: f.clock.Now()}
 	conn := newFakeConn(1)
@@ -225,12 +272,13 @@ func TestMatchmakingService_Leave(t *testing.T) {
 func TestMatchmakingService_Tick_InDistanceMatch(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	// Both players at level 5; ratings returns 5 for both. diff=0 ≤ 3.
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
 	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
-	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 7, EnqueuedAt: now} // diff=2 ≤ 3
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 5, EnqueuedAt: now}
 
 	connA := newFakeConn(1)
 	connB := newFakeConn(2)
@@ -280,43 +328,61 @@ func TestMatchmakingService_Tick_InDistanceMatch(t *testing.T) {
 func TestMatchmakingService_Tick_FallbackAfterDeadline(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 1, 10*time.Second) // dist=1 → pA and pB (diff=5) won't match in-distance
+	// We need two different players at different levels (1 and 6) so diff=5 > dist=1.
+	// Use a per-call fake that returns level based on userID.
+	ctrl := gomock.NewController(t)
+	queueRepo := rmocks.NewMockQueueRepository(ctrl)
+	clock := &fakeClock{now: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
+
+	// We build a custom multi-level fake: returns level 1 for userID=1, level 6 for userID=2.
+	rcMulti := &multiLevelRatingsClient{levels: map[int64]int{1: 1, 2: 6}}
+
+	svc := NewMatchmakingService(
+		zap.NewNop(),
+		queueRepo,
+		clock,
+		&deterministicRoomIDGen{id: "room-1"},
+		1, // dist=1 → pA(level=1) and pB(level=6) diff=5 won't match in-distance
+		10*time.Second,
+		rcMulti,
+	)
+
 	ctx := context.Background()
-	now := f.clock.Now()
+	now := clock.Now()
 
 	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 1, EnqueuedAt: now}
-	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now} // diff=5 > 1
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
 
 	connA := newFakeConn(1)
 	connB := newFakeConn(2)
 
-	f.queueRepo.EXPECT().Enqueue(gomock.Any(), pA).Return(nil)
-	f.queueRepo.EXPECT().Enqueue(gomock.Any(), pB).Return(nil)
+	queueRepo.EXPECT().Enqueue(gomock.Any(), pA).Return(nil)
+	queueRepo.EXPECT().Enqueue(gomock.Any(), pB).Return(nil)
 
-	if err := f.svc.Join(ctx, connA, pA); err != nil {
+	if err := svc.Join(ctx, connA, pA); err != nil {
 		t.Fatalf("Join A: %v", err)
 	}
-	if err := f.svc.Join(ctx, connB, pB); err != nil {
+	if err := svc.Join(ctx, connB, pB); err != nil {
 		t.Fatalf("Join B: %v", err)
 	}
 
 	// Tick before deadline — no match expected; both waiters remain so Refresh fires.
-	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
-	f.queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(nil)
-	f.svc.Tick(ctx)
+	queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
+	queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(nil)
+	svc.Tick(ctx)
 
 	if len(connA.Messages()) != 0 {
 		t.Errorf("before deadline: connA got %d messages, want 0", len(connA.Messages()))
 	}
 
 	// Advance clock past the fallback deadline.
-	f.clock.Advance(11 * time.Second)
+	clock.Advance(11 * time.Second)
 
 	// Tick after deadline — fallback match should fire.
-	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
-	f.queueRepo.EXPECT().Pair(gomock.Any(), pA, pB).Return(true, nil)
+	queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
+	queueRepo.EXPECT().Pair(gomock.Any(), pA, pB).Return(true, nil)
 
-	f.svc.Tick(ctx)
+	svc.Tick(ctx)
 
 	msgsA := connA.Messages()
 	msgsB := connB.Messages()
@@ -332,15 +398,27 @@ func TestMatchmakingService_Tick_FallbackAfterDeadline(t *testing.T) {
 	}
 }
 
+// multiLevelRatingsClient returns a per-userID level from a map.
+type multiLevelRatingsClient struct {
+	levels map[int64]int
+}
+
+func (m *multiLevelRatingsClient) GetLevel(_ context.Context, userID int64) (int, error) {
+	if l, ok := m.levels[userID]; ok {
+		return l, nil
+	}
+	return defaultLevel, nil
+}
+
 func TestMatchmakingService_Tick_NoPairingWhenPairReturnsFalse(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
 	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
-	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 5, EnqueuedAt: now}
 
 	connA := newFakeConn(1)
 	connB := newFakeConn(2)
@@ -356,10 +434,6 @@ func TestMatchmakingService_Tick_NoPairingWhenPairReturnsFalse(t *testing.T) {
 	}
 
 	// Pair returns false → lost the race, no messages sent.
-	// Both orderings are acceptable: the service iterates the slice and may try
-	// (pA,pB) first or (pB,pA) first depending on which is the outer candidate.
-	// All Pair calls return false so no match is emitted. Both players remain,
-	// so Refresh must be called.
 	f.queueRepo.EXPECT().ListWaiting(gomock.Any(), "ranked").Return([]domain.Player{pA, pB}, nil)
 	f.queueRepo.EXPECT().Pair(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 	f.queueRepo.EXPECT().Refresh(gomock.Any(), "ranked").Return(nil)
@@ -377,14 +451,14 @@ func TestMatchmakingService_Tick_NoPairingWhenPairReturnsFalse(t *testing.T) {
 func TestMatchmakingService_Tick_NoDoubleMatch(t *testing.T) {
 	t.Parallel()
 
-	// Three players: A, B, C. A-B pair in-distance. C should not be double-matched.
-	f := newFixture(t, 3, 10*time.Second)
+	// Three players all at level 5 (ratings returns 5).
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
 	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
-	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
-	pC := domain.Player{UserID: 3, Mode: "ranked", Level: 7, EnqueuedAt: now}
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 5, EnqueuedAt: now}
+	pC := domain.Player{UserID: 3, Mode: "ranked", Level: 5, EnqueuedAt: now}
 
 	connA := newFakeConn(1)
 	connB := newFakeConn(2)
@@ -426,7 +500,7 @@ func TestMatchmakingService_Tick_NoDoubleMatch(t *testing.T) {
 func TestMatchmakingService_Leave_Disconnect_Cleanup(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
@@ -450,12 +524,12 @@ func TestMatchmakingService_Leave_Disconnect_Cleanup(t *testing.T) {
 func TestMatchmakingService_PairedAway_NeverRematched(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
 	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
-	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 5, EnqueuedAt: now}
 
 	connA := newFakeConn(1)
 	connB := newFakeConn(2)
@@ -489,12 +563,12 @@ func TestMatchmakingService_PairedAway_NeverRematched(t *testing.T) {
 func TestMatchmakingService_Tick_SendError_Continues(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
 	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
-	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 5, EnqueuedAt: now}
 
 	connA := &errConn{fakeConn: fakeConn{userID: 1}}
 	connB := newFakeConn(2)
@@ -519,7 +593,7 @@ func TestMatchmakingService_Tick_SendError_Continues(t *testing.T) {
 func TestMatchmakingService_Tick_ListError(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
@@ -540,14 +614,14 @@ func TestMatchmakingService_Tick_ListError(t *testing.T) {
 func TestMatchmakingService_Tick_MultipleModesIsolated(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
 	pRanked1 := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
-	pRanked2 := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
-	pCasual1 := domain.Player{UserID: 3, Mode: "casual", Level: 3, EnqueuedAt: now}
-	pCasual2 := domain.Player{UserID: 4, Mode: "casual", Level: 4, EnqueuedAt: now}
+	pRanked2 := domain.Player{UserID: 2, Mode: "ranked", Level: 5, EnqueuedAt: now}
+	pCasual1 := domain.Player{UserID: 3, Mode: "casual", Level: 5, EnqueuedAt: now}
+	pCasual2 := domain.Player{UserID: 4, Mode: "casual", Level: 5, EnqueuedAt: now}
 
 	connR1 := newFakeConn(1)
 	connR2 := newFakeConn(2)
@@ -593,7 +667,7 @@ func TestMatchmakingService_Tick_MultipleModesIsolated(t *testing.T) {
 func TestMatchmakingService_Tick_Refresh_SoloWaiter(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
@@ -623,12 +697,12 @@ func TestMatchmakingService_Tick_Refresh_SoloWaiter(t *testing.T) {
 func TestMatchmakingService_Tick_NoRefresh_FullyDrained(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
 	pA := domain.Player{UserID: 1, Mode: "ranked", Level: 5, EnqueuedAt: now}
-	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 6, EnqueuedAt: now}
+	pB := domain.Player{UserID: 2, Mode: "ranked", Level: 5, EnqueuedAt: now}
 
 	connA := newFakeConn(1)
 	connB := newFakeConn(2)
@@ -662,7 +736,7 @@ func TestMatchmakingService_Tick_NoRefresh_FullyDrained(t *testing.T) {
 func TestMatchmakingService_Tick_Refresh_Error(t *testing.T) {
 	t.Parallel()
 
-	f := newFixture(t, 3, 10*time.Second)
+	f := newFixtureWithRatings(t, 3, 10*time.Second, 5, nil)
 	ctx := context.Background()
 	now := f.clock.Now()
 
@@ -679,4 +753,100 @@ func TestMatchmakingService_Tick_Refresh_Error(t *testing.T) {
 
 	// Must not panic.
 	f.svc.Tick(ctx)
+}
+
+// TestMatchmakingService_Join_AuthoritativeLevel covers criteria 1, 2, and 5:
+// authoritative level from ratings is used, and failures fall back to defaultLevel.
+func TestMatchmakingService_Join_AuthoritativeLevel(t *testing.T) {
+	t.Parallel()
+
+	const playerUserID = int64(42)
+
+	tests := []struct {
+		name         string
+		clientLevel  int   // level the client sent in the join message
+		ratingsLevel int   // level returned by ratings service
+		ratingsErr   error // error returned by ratings service (nil = success)
+		wantEnqLevel int   // expected level the player is enqueued at
+		wantJoinErr  bool  // whether Join itself should return an error
+	}{
+		{
+			// criterion: 1 — authoritative level is used over client-supplied value
+			name:         "authoritative level overrides client",
+			clientLevel:  3,
+			ratingsLevel: 8,
+			ratingsErr:   nil,
+			wantEnqLevel: 8,
+		},
+		{
+			// criterion: 2 — transport/non-2xx error → default level L4, no error from Join
+			name:         "fallback to default on error",
+			clientLevel:  7,
+			ratingsLevel: 0,
+			ratingsErr:   fmt.Errorf("connection refused"),
+			wantEnqLevel: defaultLevel,
+			wantJoinErr:  false,
+		},
+		{
+			// criterion: 2 — 404 (unseen user) → default level L4, no error from Join
+			name:         "unseen user gets default",
+			clientLevel:  5,
+			ratingsLevel: 0,
+			ratingsErr:   fmt.Errorf("ratings service returned 404"),
+			wantEnqLevel: defaultLevel,
+			wantJoinErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			queueRepo := rmocks.NewMockQueueRepository(ctrl)
+			rc := newFakeRatingsClient(tt.ratingsLevel, tt.ratingsErr)
+			clock := &fakeClock{now: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
+
+			svc := NewMatchmakingService(
+				zap.NewNop(),
+				queueRepo,
+				clock,
+				&deterministicRoomIDGen{id: "room-1"},
+				3,
+				10*time.Second,
+				rc,
+			)
+
+			player := domain.Player{
+				UserID:     playerUserID,
+				Mode:       "ranked",
+				Level:      tt.clientLevel,
+				EnqueuedAt: clock.Now(),
+			}
+			conn := newFakeConn(playerUserID)
+
+			// Enqueue is called with the authoritative level, not the client level.
+			queueRepo.EXPECT().
+				Enqueue(gomock.Any(), gomock.AssignableToTypeOf(domain.Player{})).
+				DoAndReturn(func(_ context.Context, p domain.Player) error {
+					if p.Level != tt.wantEnqLevel {
+						t.Errorf("Enqueue called with Level=%d, want %d", p.Level, tt.wantEnqLevel)
+					}
+					return nil
+				})
+
+			err := svc.Join(context.Background(), conn, player)
+			if tt.wantJoinErr && err == nil {
+				t.Fatal("Join() error = nil, want error")
+			}
+			if !tt.wantJoinErr && err != nil {
+				t.Fatalf("Join() unexpected error = %v", err)
+			}
+
+			// Verify GetLevel was actually called (ratings client was consulted).
+			if rc.CallCount() != 1 {
+				t.Errorf("GetLevel called %d times, want 1", rc.CallCount())
+			}
+		})
+	}
 }

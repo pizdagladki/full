@@ -19,6 +19,45 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
+// MockRatingsClient is a mock of RatingsClient interface.
+type MockRatingsClient struct {
+	ctrl     *gomock.Controller
+	recorder *MockRatingsClientMockRecorder
+	isgomock struct{}
+}
+
+// MockRatingsClientMockRecorder is the mock recorder for MockRatingsClient.
+type MockRatingsClientMockRecorder struct {
+	mock *MockRatingsClient
+}
+
+// NewMockRatingsClient creates a new mock instance.
+func NewMockRatingsClient(ctrl *gomock.Controller) *MockRatingsClient {
+	mock := &MockRatingsClient{ctrl: ctrl}
+	mock.recorder = &MockRatingsClientMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRatingsClient) EXPECT() *MockRatingsClientMockRecorder {
+	return m.recorder
+}
+
+// GetLevel mocks base method.
+func (m *MockRatingsClient) GetLevel(ctx context.Context, userID int64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLevel", ctx, userID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLevel indicates an expected call of GetLevel.
+func (mr *MockRatingsClientMockRecorder) GetLevel(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLevel", reflect.TypeOf((*MockRatingsClient)(nil).GetLevel), ctx, userID)
+}
+
 // MockMatchmakingService is a mock of MatchmakingService interface.
 type MockMatchmakingService struct {
 	ctrl     *gomock.Controller

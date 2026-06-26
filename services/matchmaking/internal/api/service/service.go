@@ -12,6 +12,12 @@ import (
 //go:generate mockgen -source=service.go -destination=mocks/service_mock.go -package=mocks
 
 type (
+	// RatingsClient fetches authoritative player data from the ratings service.
+	RatingsClient interface {
+		// GetLevel returns the player's current level (1-10).
+		GetLevel(ctx context.Context, userID int64) (int, error)
+	}
+
 	// MatchmakingService is the primary entry-point for the WS handler.
 	MatchmakingService interface {
 		// Join validates the request, enqueues the player, and registers the
