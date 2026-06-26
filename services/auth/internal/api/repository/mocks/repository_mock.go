@@ -70,3 +70,57 @@ func (mr *MockUserRepositoryMockRecorder) UpsertByGoogleSub(ctx, googleSub, emai
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertByGoogleSub", reflect.TypeOf((*MockUserRepository)(nil).UpsertByGoogleSub), ctx, googleSub, email)
 }
+
+// MockConsentRepository is a mock of ConsentRepository interface.
+type MockConsentRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockConsentRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockConsentRepositoryMockRecorder is the mock recorder for MockConsentRepository.
+type MockConsentRepositoryMockRecorder struct {
+	mock *MockConsentRepository
+}
+
+// NewMockConsentRepository creates a new mock instance.
+func NewMockConsentRepository(ctrl *gomock.Controller) *MockConsentRepository {
+	mock := &MockConsentRepository{ctrl: ctrl}
+	mock.recorder = &MockConsentRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockConsentRepository) EXPECT() *MockConsentRepositoryMockRecorder {
+	return m.recorder
+}
+
+// GetByUserID mocks base method.
+func (m *MockConsentRepository) GetByUserID(ctx context.Context, userID int64) (domain.Consent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByUserID", ctx, userID)
+	ret0, _ := ret[0].(domain.Consent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByUserID indicates an expected call of GetByUserID.
+func (mr *MockConsentRepositoryMockRecorder) GetByUserID(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByUserID", reflect.TypeOf((*MockConsentRepository)(nil).GetByUserID), ctx, userID)
+}
+
+// Upsert mocks base method.
+func (m *MockConsentRepository) Upsert(ctx context.Context, userID int64, c domain.Consent) (domain.Consent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Upsert", ctx, userID, c)
+	ret0, _ := ret[0].(domain.Consent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Upsert indicates an expected call of Upsert.
+func (mr *MockConsentRepositoryMockRecorder) Upsert(ctx, userID, c any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Upsert", reflect.TypeOf((*MockConsentRepository)(nil).Upsert), ctx, userID, c)
+}
