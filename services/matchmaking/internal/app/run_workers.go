@@ -12,6 +12,9 @@ type worker func(ctx context.Context, a *App) error
 // blocks until they all finish, returning the first error seen.
 func (a *App) runWorkers(ctx context.Context) error {
 	workers := []worker{workerWS}
+	if a.matchmakingSvc != nil {
+		workers = append(workers, workerMatcher)
+	}
 
 	var (
 		wg       sync.WaitGroup

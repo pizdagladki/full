@@ -14,7 +14,7 @@ import (
 // workerWS runs the net/http server exposing /healthz and /ws, and shuts it
 // down gracefully on ctx.Done().
 func workerWS(ctx context.Context, a *App) error {
-	mux := buildMux(ctx)
+	mux := buildMux(ctx, a)
 
 	srv := &http.Server{
 		Addr:              a.cfg.HTTP.Addr,
@@ -50,12 +50,20 @@ func workerWS(ctx context.Context, a *App) error {
 }
 
 // buildMux constructs the HTTP multiplexer with the /healthz and /ws routes.
-func buildMux(ctx context.Context) *http.ServeMux {
+// When a is non-nil (production) and has a wsHandler wired, /ws uses the
+// authenticated matchmaking handler; otherwise the legacy ping-ack stub is
+// used (kept for the existing app_test.go tests).
+func buildMux(ctx context.Context, a *App) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(ctx, w, r)
-	})
+
+	if a != nil && a.wsHandler != nil {
+		mux.HandleFunc("/ws", a.wsHandler.ServeWS)
+	} else {
+		mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+			handlePingAck(ctx, w, r)
+		})
+	}
 
 	return mux
 }
@@ -67,14 +75,11 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
-// handleWS accepts a WebSocket connection and implements a simple ping-pong
-// application-level acknowledgement: when the client sends "ping", the server
-// replies "pong". The loop exits cleanly when the client closes or the context
-// is canceled.
-func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+// handlePingAck is the legacy ping-ack stub used in tests where no App is
+// fully wired (no session/queue deps).
+func handlePingAck(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	// nil options uses coder/websocket's secure default: same-origin check is enforced and
-	// InsecureSkipVerify is deliberately NOT set. Cross-origin support must be added later via
-	// an explicit AcceptOptions.OriginPatterns allow-list — never by setting InsecureSkipVerify.
+	// InsecureSkipVerify is deliberately NOT set.
 	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
