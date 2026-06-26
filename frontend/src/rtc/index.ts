@@ -76,7 +76,8 @@ export interface PcLike {
 export type WsFactory = (url: string) => WsLike;
 export type PcFactory = () => PcLike;
 
-const DEFAULT_STUN: RTCConfiguration = {
+// Fix 3: export DEFAULT_STUN so tests can assert the STUN configuration
+export const DEFAULT_STUN: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
 
@@ -94,6 +95,8 @@ export interface RtcPeerImplOpts {
   signalingUrl: string;
   room_id: string;
   localStream: MediaStream;
+  // Fix 1: isOfferer controls which peer sends the initial offer
+  isOfferer?: boolean;
   wsFactory?: WsFactory;
   pcFactory?: PcFactory;
 }
@@ -104,12 +107,16 @@ export class RtcPeerImpl {
   private readonly roomId: string;
   private remoteStreamCb: ((stream: MediaStream) => void) | undefined;
   private peerLeftCb: (() => void) | undefined;
+  // Fix 4: ICE candidate queue — hold candidates until remote description is set
+  private pendingCandidates: RTCIceCandidateInit[] = [];
+  private remoteDescriptionSet = false;
 
   constructor(opts: RtcPeerImplOpts) {
     const {
       signalingUrl,
       room_id,
       localStream,
+      isOfferer = false,
       wsFactory = defaultWsFactory,
       pcFactory = defaultPcFactory,
     } = opts;
@@ -122,12 +129,15 @@ export class RtcPeerImpl {
       this.pc.addTrack(track, localStream);
     }
 
-    // Wire negotiation: when PC needs to negotiate, create + send an offer
-    this.pc.onnegotiationneeded = () => {
-      this.handleNegotiationNeeded().catch((err: unknown) => {
-        console.error('[rtc] onnegotiationneeded error', err);
-      });
-    };
+    // Fix 1: only the offerer wires onnegotiationneeded → createOffer.
+    // The callee sets it to null to prevent offer glare.
+    this.pc.onnegotiationneeded = isOfferer
+      ? () => {
+          this.handleNegotiationNeeded().catch((err: unknown) => {
+            console.error('[rtc] onnegotiationneeded error', err);
+          });
+        }
+      : null; // callee never initiates offers
 
     // Relay outgoing ICE candidates over the WS
     this.pc.onicecandidate = (ev) => {
@@ -188,23 +198,42 @@ export class RtcPeerImpl {
     this.ws.send(JSON.stringify(msg));
   }
 
+  // Fix 4: flush all queued ICE candidates now that remote description is set
+  private async flushPendingCandidates(): Promise<void> {
+    for (const c of this.pendingCandidates) {
+      await this.pc.addIceCandidate(c);
+    }
+    this.pendingCandidates = [];
+  }
+
   private async handleSignalingMessage(msg: SignalingMsg): Promise<void> {
     switch (msg.type) {
       case 'sdp': {
         const { description } = msg;
         if (description.type === 'offer') {
           await this.pc.setRemoteDescription(description);
+          // Fix 4: mark remote description set and flush any queued candidates
+          this.remoteDescriptionSet = true;
+          await this.flushPendingCandidates();
           const answer = await this.pc.createAnswer();
           await this.pc.setLocalDescription(answer);
           const reply: SdpMsg = { type: 'sdp', description: answer };
           this.ws.send(JSON.stringify(reply));
         } else if (description.type === 'answer') {
           await this.pc.setRemoteDescription(description);
+          // Fix 4: mark remote description set and flush any queued candidates
+          this.remoteDescriptionSet = true;
+          await this.flushPendingCandidates();
         }
         break;
       }
       case 'ice': {
-        await this.pc.addIceCandidate(msg.candidate);
+        // Fix 4: queue ICE candidates until remote description is established
+        if (this.remoteDescriptionSet) {
+          await this.pc.addIceCandidate(msg.candidate);
+        } else {
+          this.pendingCandidates.push(msg.candidate);
+        }
         break;
       }
       case 'peer_left': {
@@ -236,7 +265,11 @@ export interface RtcHandle {
 // ---------------------------------------------------------------------------
 
 export interface RtcComponentProps {
-  signalingUrl?: string;
+  // Fix 2: signalingUrl is required (was optional, defaulting to '' which
+  // causes new WebSocket('') to throw SyntaxError)
+  signalingUrl: string;
+  // Fix 1: pass isOfferer through to RtcPeerImpl
+  isOfferer?: boolean;
   wsFactory?: WsFactory;
   pcFactory?: PcFactory;
 }
@@ -250,7 +283,8 @@ export const RtcComponent = forwardRef(function RtcComponent(
   ref: ForwardedRef<RtcHandle>,
 ) {
   const peerRef = useRef<RtcPeerImpl | null>(null);
-  const { signalingUrl = '', wsFactory, pcFactory } = props;
+  // Fix 2: no default for signalingUrl — it is required in RtcComponentProps
+  const { signalingUrl, wsFactory, pcFactory } = props;
 
   useImperativeHandle(ref, () => ({
     connect({ room_id, localStream }) {
@@ -261,6 +295,8 @@ export const RtcComponent = forwardRef(function RtcComponent(
         signalingUrl,
         room_id,
         localStream,
+        // Fix 1: pass isOfferer through from props
+        isOfferer: props.isOfferer,
         wsFactory,
         pcFactory,
       });

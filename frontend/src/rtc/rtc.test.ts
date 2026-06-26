@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RtcPeerImpl } from './index';
+import { RtcPeerImpl, DEFAULT_STUN } from './index';
 import type { WsLike, PcLike, WsFactory, PcFactory } from './index';
 
 // ---------------------------------------------------------------------------
@@ -138,11 +138,13 @@ function makePeer(
   wsFactory: WsFactory,
   pcFactory: PcFactory,
   roomId = 'room-1',
+  isOfferer = false,
 ): RtcPeerImpl {
   return new RtcPeerImpl({
     signalingUrl: 'ws://sig.test',
     room_id: roomId,
     localStream: makeStream(),
+    isOfferer,
     wsFactory,
     pcFactory,
   });
@@ -155,6 +157,66 @@ function makePeer(
 describe('RtcPeerImpl', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fix 3: DEFAULT_STUN export — criterion: AC2 STUN server configured
+  // ---------------------------------------------------------------------------
+
+  // criterion: 2 — DEFAULT_STUN is configured with a public STUN server URL
+  it('DEFAULT_STUN is configured with a public STUN server URL', () => {
+    expect(DEFAULT_STUN.iceServers).toBeDefined();
+    expect(DEFAULT_STUN.iceServers).toHaveLength(1);
+    expect((DEFAULT_STUN.iceServers![0] as RTCIceServer).urls).toBe(
+      'stun:stun.l.google.com:19302',
+    );
+  });
+
+  // criterion: 2 — FAILS if STUN iceServers is empty or missing
+  it('DEFAULT_STUN FAILS if iceServers is empty or missing', () => {
+    // Verify it is NOT empty — any regression to [] or undefined fails here
+    expect(DEFAULT_STUN.iceServers).not.toHaveLength(0);
+    expect(DEFAULT_STUN.iceServers).not.toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fix 1: isOfferer role — criterion: AC2 one peer offers, other answers
+  // ---------------------------------------------------------------------------
+
+  // criterion: 2 — isOfferer=true: onnegotiationneeded sends offer
+  it('isOfferer=true: onnegotiationneeded sends offer', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    makePeer(wsFactory, pcFactory, 'room-1', true /* isOfferer */);
+
+    ws.simulateOpen();
+    ws.send.mockClear(); // clear the join message
+
+    pc.simulateNegotiationNeeded();
+    await vi.waitFor(() => expect(ws.send).toHaveBeenCalled());
+
+    const sent = JSON.parse(ws.send.mock.calls[0][0] as string) as unknown;
+    expect(sent).toMatchObject({ type: 'sdp', description: { type: 'offer' } });
+    expect(pc.createOffer).toHaveBeenCalled();
+    expect(pc.setLocalDescription).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'offer' }),
+    );
+  });
+
+  // criterion: 2 — isOfferer=false (default): onnegotiationneeded does NOT send offer
+  it('isOfferer=false (default): onnegotiationneeded does NOT send offer', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    // isOfferer defaults to false
+    makePeer(wsFactory, pcFactory, 'room-1', false);
+
+    ws.simulateOpen();
+    ws.send.mockClear(); // clear the join message
+
+    // Fire negotiationneeded — callee must do nothing
+    pc.simulateNegotiationNeeded();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(pc.createOffer).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
   });
 
   // criterion: 1 — join on open
@@ -177,10 +239,10 @@ describe('RtcPeerImpl', () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
-  // criterion: 2 — offer side: onnegotiationneeded → sends sdp offer
+  // criterion: 2 — offer side (isOfferer=true): onnegotiationneeded → sends sdp offer
   it('offer→answer flow: onnegotiationneeded sends sdp offer over WS', async () => {
     const { ws, pc, wsFactory, pcFactory } = makeFactories();
-    makePeer(wsFactory, pcFactory);
+    makePeer(wsFactory, pcFactory, 'room-1', true /* isOfferer */);
 
     ws.simulateOpen();
     ws.send.mockClear(); // clear the join message
@@ -200,7 +262,8 @@ describe('RtcPeerImpl', () => {
   // criterion: 2 — answer received → setRemoteDescription called
   it('offer→answer flow: receiving sdp answer calls setRemoteDescription', async () => {
     const { ws, pc, wsFactory, pcFactory } = makeFactories();
-    makePeer(wsFactory, pcFactory);
+    // isOfferer=true: sent the offer, now receives the answer
+    makePeer(wsFactory, pcFactory, 'room-1', true);
     ws.simulateOpen();
 
     const answerMsg = JSON.stringify({
@@ -227,9 +290,11 @@ describe('RtcPeerImpl', () => {
   });
 
   // criterion: 2 — answer side (incoming offer): createAnswer + send answer
+  // Works with isOfferer=false (default) — callee always handles incoming offers
   it('answer flow: incoming offer triggers createAnswer and sends sdp answer', async () => {
     const { ws, pc, wsFactory, pcFactory } = makeFactories();
-    makePeer(wsFactory, pcFactory);
+    // isOfferer=false: this peer is the callee; it answers incoming offers
+    makePeer(wsFactory, pcFactory, 'room-1', false);
     ws.simulateOpen();
     ws.send.mockClear();
 
@@ -321,11 +386,20 @@ describe('RtcPeerImpl', () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
-  // criterion: 2 — ICE relay incoming
+  // criterion: 2 — ICE relay incoming (after remote description is set)
   it('ICE relay — incoming: ice message calls pc.addIceCandidate', async () => {
     const { ws, pc, wsFactory, pcFactory } = makeFactories();
     makePeer(wsFactory, pcFactory);
     ws.simulateOpen();
+
+    // First establish the remote description so ICE is not queued
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'sdp',
+        description: { type: 'offer', sdp: 'remote-offer-sdp' },
+      }),
+    );
+    await vi.waitFor(() => expect(pc.setRemoteDescription).toHaveBeenCalled());
 
     const iceMsg = JSON.stringify({
       type: 'ice',
@@ -349,7 +423,7 @@ describe('RtcPeerImpl', () => {
     makePeer(wsFactory, pcFactory);
     ws.simulateOpen();
 
-    // Send an SDP message — addIceCandidate must NOT be called
+    // Send an SDP answer message — addIceCandidate must NOT be called
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
@@ -358,6 +432,88 @@ describe('RtcPeerImpl', () => {
     );
     await new Promise((r) => setTimeout(r, 10));
     expect(pc.addIceCandidate).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fix 4: ICE candidate queue — criterion: AC2 no addIceCandidate before setRemoteDescription
+  // ---------------------------------------------------------------------------
+
+  // criterion: 4 — ICE candidates received before remote description are queued and flushed after sdp answer
+  it('ICE candidates received before remote description are queued and flushed after sdp answer', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    // isOfferer=true peer: sends offer, receives answer, may receive ICE before the answer arrives
+    makePeer(wsFactory, pcFactory, 'room-1', true);
+    ws.simulateOpen();
+    ws.send.mockClear();
+
+    // Receive an ICE candidate BEFORE the remote description (answer) is set
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'ice',
+        candidate: { candidate: 'early-cand', sdpMid: '0', sdpMLineIndex: 0 },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    // addIceCandidate must NOT have been called yet — no remote description
+    expect(pc.addIceCandidate).not.toHaveBeenCalled();
+
+    // Now receive the answer (sets remoteDescription) — queued candidate must be flushed
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'sdp',
+        description: { type: 'answer', sdp: 'answer-sdp' },
+      }),
+    );
+    await vi.waitFor(() => expect(pc.addIceCandidate).toHaveBeenCalled());
+
+    // addIceCandidate must have been called AFTER setRemoteDescription
+    const setRemoteOrder = pc.setRemoteDescription.mock.invocationCallOrder[0];
+    const addIceOrder = pc.addIceCandidate.mock.invocationCallOrder[0];
+    expect(addIceOrder).toBeGreaterThan(setRemoteOrder);
+
+    expect(pc.addIceCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ candidate: 'early-cand' }),
+    );
+  });
+
+  // criterion: 4 — ICE candidates received before remote description are queued and flushed after sdp offer-answer
+  it('ICE candidates received before remote description are queued and flushed after sdp offer-answer', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    // isOfferer=false peer: receives offer and answers; may get ICE before the offer
+    makePeer(wsFactory, pcFactory, 'room-1', false);
+    ws.simulateOpen();
+    ws.send.mockClear();
+
+    // Receive an ICE candidate BEFORE the offer (remote description) arrives
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'ice',
+        candidate: { candidate: 'early-callee-cand', sdpMid: '0', sdpMLineIndex: 0 },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    // addIceCandidate must NOT have been called yet
+    expect(pc.addIceCandidate).not.toHaveBeenCalled();
+
+    // Now receive the offer (sets remoteDescription) — queued candidate must be flushed before answer
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'sdp',
+        description: { type: 'offer', sdp: 'remote-offer-sdp' },
+      }),
+    );
+    await vi.waitFor(() => expect(pc.addIceCandidate).toHaveBeenCalled());
+
+    // addIceCandidate must have been called AFTER setRemoteDescription
+    const setRemoteOrder = pc.setRemoteDescription.mock.invocationCallOrder[0];
+    const addIceOrder = pc.addIceCandidate.mock.invocationCallOrder[0];
+    expect(addIceOrder).toBeGreaterThan(setRemoteOrder);
+
+    expect(pc.addIceCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({ candidate: 'early-callee-cand' }),
+    );
   });
 
   // criterion: 3 — remote-stream callback fires on ontrack
@@ -483,11 +639,11 @@ describe('RtcPeerImpl', () => {
     expect(pc.close).toHaveBeenCalled();
   });
 
-  // criterion: error path — onnegotiationneeded error is caught (line 128)
+  // criterion: error path — onnegotiationneeded error is caught
   it('onnegotiationneeded error is caught and does not throw', async () => {
     const { ws, pc, wsFactory, pcFactory } = makeFactories();
     pc.createOffer = vi.fn().mockRejectedValue(new Error('offer-rejected'));
-    makePeer(wsFactory, pcFactory);
+    makePeer(wsFactory, pcFactory, 'room-1', true /* isOfferer */);
     ws.simulateOpen();
     pc.simulateNegotiationNeeded();
     // Let the async catch run
@@ -496,12 +652,22 @@ describe('RtcPeerImpl', () => {
     expect(pc.createOffer).toHaveBeenCalled();
   });
 
-  // criterion: error path — handleSignalingMessage error is caught (line 165)
+  // criterion: error path — handleSignalingMessage error is caught
   it('handleSignalingMessage error is caught and does not throw', async () => {
     const { ws, pc, wsFactory, pcFactory } = makeFactories();
     pc.addIceCandidate = vi.fn().mockRejectedValue(new Error('ice-rejected'));
     makePeer(wsFactory, pcFactory);
     ws.simulateOpen();
+
+    // First set remote description so ICE is not queued
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'sdp',
+        description: { type: 'offer', sdp: 'offer-sdp' },
+      }),
+    );
+    await vi.waitFor(() => expect(pc.setRemoteDescription).toHaveBeenCalled());
+
     ws.simulateMessage(
       JSON.stringify({
         type: 'ice',

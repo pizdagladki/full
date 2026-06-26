@@ -181,6 +181,7 @@ describe('RtcComponent', () => {
     const { container } = render(
       <RtcComponent
         ref={ref}
+        signalingUrl="ws://sig"
         wsFactory={wsFactory}
         pcFactory={pcFactory}
       />,
