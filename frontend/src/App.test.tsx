@@ -1,49 +1,108 @@
 import { render, screen } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import type { RouteObject } from 'react-router-dom';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { routes } from './App';
+import { AuthContext } from './features';
+import type { AuthState } from './features';
+
+// Provide an authenticated context so ProtectedRoute doesn't redirect
+const authenticatedState: AuthState = {
+  user: { id: '1', email: 'test@test.com' },
+  loading: false,
+  error: null,
+};
+
+function renderWithAuth(routesList: RouteObject[], path: string, authState: AuthState = authenticatedState) {
+  const router = createMemoryRouter(routesList, { initialEntries: [path] });
+  return render(
+    <AuthContext.Provider value={authState}>
+      <RouterProvider router={router} />
+    </AuthContext.Provider>,
+  );
+}
+
+// Mock fetch so AuthProvider (used in full App) doesn't blow up
+vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', json: () => Promise.resolve({}) }));
 
 describe('App routes', () => {
-  // criterion: 2 — App mounts router with a placeholder route for each core screen
-  const cases = [
-    { path: '/', text: 'Landing' },
-    { path: '/register', text: 'Register' },
-    { path: '/home', text: 'Home' },
-    { path: '/search', text: 'Search' },
-    { path: '/battle', text: 'Battle' },
-    { path: '/results', text: 'Results' },
-    { path: '/profile', text: 'Profile' },
-    { path: '/store', text: 'Store' },
-  ];
+  it('renders Login at root /', () => {
+    // criterion: 1 — Login screen renders at the root route
+    renderWithAuth(routes, '/');
+    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+  });
 
-  for (const { path, text } of cases) {
-    it(`renders ${text} placeholder at ${path}`, () => {
-      // criterion: 2 — each placeholder route renders its screen text
-      const router = createMemoryRouter(routes, { initialEntries: [path] });
-      render(<RouterProvider router={router} />);
-      expect(screen.getByText(text)).toBeInTheDocument();
-    });
-  }
+  it('renders Login at /auth/callback', () => {
+    // criterion: 2 — callback path also renders Login for code exchange
+    renderWithAuth(routes, '/auth/callback');
+    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+  });
+
+  it('renders Home placeholder at /home when authenticated', () => {
+    // criterion: 3 — authenticated user can reach protected home route
+    renderWithAuth(routes, '/home');
+    expect(screen.getByText('Home')).toBeInTheDocument();
+  });
+
+  it('renders Search placeholder at /search when authenticated', () => {
+    renderWithAuth(routes, '/search');
+    expect(screen.getByText('Search')).toBeInTheDocument();
+  });
+
+  it('renders Battle placeholder at /battle when authenticated', () => {
+    renderWithAuth(routes, '/battle');
+    expect(screen.getByText('Battle')).toBeInTheDocument();
+  });
+
+  it('renders Results placeholder at /results when authenticated', () => {
+    renderWithAuth(routes, '/results');
+    expect(screen.getByText('Results')).toBeInTheDocument();
+  });
+
+  it('renders Profile placeholder at /profile when authenticated', () => {
+    renderWithAuth(routes, '/profile');
+    expect(screen.getByText('Profile')).toBeInTheDocument();
+  });
+
+  it('renders Store placeholder at /store when authenticated', () => {
+    renderWithAuth(routes, '/store');
+    expect(screen.getByText('Store')).toBeInTheDocument();
+  });
+
+  it('renders Register at /register', () => {
+    renderWithAuth(routes, '/register');
+    expect(screen.getByText('Register')).toBeInTheDocument();
+  });
 
   it('renders layout shell with header for root route', () => {
     // criterion: 4 — base layout/shell with header is present
-    const router = createMemoryRouter(routes, { initialEntries: ['/'] });
-    render(<RouterProvider router={router} />);
+    renderWithAuth(routes, '/');
     expect(screen.getByRole('banner')).toBeInTheDocument();
     expect(screen.getByText('App')).toBeInTheDocument();
   });
 
-  it('fails if Landing route is missing — criterion 2 guard', () => {
-    // criterion: 2 — this test fails if routes array does not include index route
-    const routesWithoutLanding = routes.map((r) => ({
+  it('fails if Login route is missing — criterion 1 guard', () => {
+    // criterion: 1 — this test fails if routes array does not include index route showing Login
+    const routesWithoutLogin = routes.map((r) => ({
       ...r,
       children: r.children?.filter((c) => !('index' in c && c.index)),
     })) as RouteObject[];
-    const router = createMemoryRouter(routesWithoutLanding, {
+    const router = createMemoryRouter(routesWithoutLogin, {
       initialEntries: ['/'],
     });
-    render(<RouterProvider router={router} />);
-    expect(screen.queryByText('Landing')).not.toBeInTheDocument();
+    render(
+      <AuthContext.Provider value={authenticatedState}>
+        <RouterProvider router={router} />
+      </AuthContext.Provider>,
+    );
+    expect(screen.queryByText('Sign in with Google')).not.toBeInTheDocument();
+  });
+
+  it('redirects unauthenticated user from /home to / — criterion 3 guard', () => {
+    // criterion: 3 — unauthenticated user visiting protected route is redirected to login
+    const unauthState: AuthState = { user: null, loading: false, error: null };
+    renderWithAuth(routes, '/home', unauthState);
+    expect(screen.queryByText('Home')).not.toBeInTheDocument();
+    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
   });
 });

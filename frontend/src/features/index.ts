@@ -6,3 +6,5 @@ export { Battle } from './Battle';
 export { Results } from './Results';
 export { Profile } from './Profile';
 export { Store } from './Store';
+export { AuthProvider, AuthContext, useAuth, Login, ProtectedRoute } from './auth';
+export type { AuthState } from './auth';
