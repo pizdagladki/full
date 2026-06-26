@@ -55,3 +55,13 @@ func (s *minioObjectStore) PresignedGetURL(ctx context.Context, key string, ttl 
 func (s *minioObjectStore) Remove(ctx context.Context, key string) error {
 	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
 }
+
+// Get retrieves the object at key and returns a ReadCloser for its content.
+func (s *minioObjectStore) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return obj, nil
+}

@@ -25,6 +25,14 @@ type ObjectStore interface {
 
 	// Remove deletes the object at key.
 	Remove(ctx context.Context, key string) error
+
+	// Get retrieves the object at key and returns a ReadCloser for its content.
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+}
+
+// FFmpegRunner converts a WebM file at inputPath to an MP4 at outputPath.
+type FFmpegRunner interface {
+	Convert(ctx context.Context, inputPath, outputPath string) error
 }
 
 // ClipService is the business-logic contract for win-clip operations.
@@ -39,6 +47,17 @@ type ClipService interface {
 	// DownloadURL returns a pre-signed download URL for clipID owned by userID.
 	// Returns ErrClipNotFound when the clip doesn't exist or belongs to a different user.
 	DownloadURL(ctx context.Context, userID, clipID int64) (string, error)
+
+	// RequestConvert triggers async WebM→MP4 conversion for clipID owned by userID.
+	// Returns the current conversion status ("pending", "done"). Idempotent when
+	// already done. Returns ErrClipNotFound when the clip doesn't exist or belongs
+	// to a different user.
+	RequestConvert(ctx context.Context, userID, clipID int64) (string, error)
+
+	// GetMP4URL returns a presigned download URL for the MP4 of clipID owned by
+	// userID. Returns ErrConversionNotDone when not yet converted,
+	// ErrConversionFailed when ffmpeg previously failed, ErrClipNotFound otherwise.
+	GetMP4URL(ctx context.Context, userID, clipID int64) (string, error)
 }
 
 // SessionService resolves a session cookie value to a user ID.

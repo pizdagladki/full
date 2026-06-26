@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/pizdagladki/full/services/media/internal/api/domain"
 )
@@ -16,6 +17,7 @@ import (
 type clipQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 type clipRepository struct {
@@ -31,7 +33,8 @@ func NewClipRepository(pool clipQuerier) ClipRepository {
 const createClipSQL = `
 INSERT INTO clips (user_id, object_key, mode, result, size_bytes, content_type)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, user_id, object_key, mode, result, size_bytes, content_type, created_at`
+RETURNING id, user_id, object_key, mode, result, size_bytes, content_type,
+          created_at, mp4_object_key, conversion_status`
 
 func (r *clipRepository) Create(ctx context.Context, clip domain.Clip) (domain.Clip, error) {
 	row := r.pool.QueryRow(ctx, createClipSQL,
@@ -49,6 +52,8 @@ func (r *clipRepository) Create(ctx context.Context, clip domain.Clip) (domain.C
 		&created.SizeBytes,
 		&created.ContentType,
 		&created.CreatedAt,
+		&created.MP4ObjectKey,
+		&created.ConversionStatus,
 	)
 	if err != nil {
 		return domain.Clip{}, fmt.Errorf("create clip: %w", err)
@@ -58,7 +63,7 @@ func (r *clipRepository) Create(ctx context.Context, clip domain.Clip) (domain.C
 }
 
 const listByUserSQL = `
-SELECT id, user_id, object_key, mode, result, size_bytes, content_type, created_at
+SELECT id, user_id, object_key, mode, result, size_bytes, content_type, created_at, mp4_object_key, conversion_status
 FROM clips
 WHERE user_id = $1
 ORDER BY created_at DESC, id DESC`
@@ -78,6 +83,7 @@ func (r *clipRepository) ListByUser(ctx context.Context, userID int64) ([]domain
 		err = rows.Scan(
 			&c.ID, &c.UserID, &c.ObjectKey, &c.Mode, &c.Result,
 			&c.SizeBytes, &c.ContentType, &c.CreatedAt,
+			&c.MP4ObjectKey, &c.ConversionStatus,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan clip: %w", err)
@@ -95,7 +101,7 @@ func (r *clipRepository) ListByUser(ctx context.Context, userID int64) ([]domain
 }
 
 const getByIDSQL = `
-SELECT id, user_id, object_key, mode, result, size_bytes, content_type, created_at
+SELECT id, user_id, object_key, mode, result, size_bytes, content_type, created_at, mp4_object_key, conversion_status
 FROM clips
 WHERE id = $1`
 
@@ -107,6 +113,7 @@ func (r *clipRepository) GetByID(ctx context.Context, id int64) (domain.Clip, er
 	err := row.Scan(
 		&c.ID, &c.UserID, &c.ObjectKey, &c.Mode, &c.Result,
 		&c.SizeBytes, &c.ContentType, &c.CreatedAt,
+		&c.MP4ObjectKey, &c.ConversionStatus,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -152,4 +159,30 @@ func (r *clipRepository) DeleteOldestBeyondLimit(ctx context.Context, userID int
 	}
 
 	return keys, nil
+}
+
+const updateConversionSQL = `UPDATE clips SET mp4_object_key = $2, conversion_status = $3 WHERE id = $1`
+
+func (r *clipRepository) UpdateConversion(ctx context.Context, id int64, mp4Key, status string) error {
+	_, err := r.pool.Exec(ctx, updateConversionSQL, id, mp4Key, status)
+	if err != nil {
+		return fmt.Errorf("update conversion: %w", err)
+	}
+
+	return nil
+}
+
+const claimConversionSQL = `
+UPDATE clips
+   SET mp4_object_key = $2, conversion_status = 'pending'
+ WHERE id = $1
+   AND conversion_status IN ('none', 'failed')`
+
+func (r *clipRepository) ClaimConversion(ctx context.Context, id int64, mp4Key string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, claimConversionSQL, id, mp4Key)
+	if err != nil {
+		return false, fmt.Errorf("claim conversion: %w", err)
+	}
+
+	return tag.RowsAffected() == 1, nil
 }

@@ -146,3 +146,65 @@ func (h *clipHandler) Download(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, downloadResponse{DownloadURL: url})
 }
+
+// Convert handles POST /v1/clips/:id/convert.
+func (h *clipHandler) Convert(c echo.Context) error {
+	userID, ok := c.Get(UserIDContextKey).(int64)
+	if !ok || userID == 0 {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	clipID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || clipID <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid clip id"})
+	}
+
+	status, err := h.svc.RequestConvert(c.Request().Context(), userID, clipID)
+	if err != nil {
+		if errors.Is(err, repository.ErrClipNotFound) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
+		h.logger.Warn("request convert", zap.Error(err))
+
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	}
+
+	code := http.StatusAccepted
+	if status == domain.ConversionStatusDone {
+		code = http.StatusOK
+	}
+
+	return c.JSON(code, map[string]string{"status": status})
+}
+
+// GetMP4 handles GET /v1/clips/:id/mp4.
+func (h *clipHandler) GetMP4(c echo.Context) error {
+	userID, ok := c.Get(UserIDContextKey).(int64)
+	if !ok || userID == 0 {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	clipID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || clipID <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid clip id"})
+	}
+
+	url, err := h.svc.GetMP4URL(c.Request().Context(), userID, clipID)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrClipNotFound):
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
+		case errors.Is(err, domain.ErrConversionNotDone):
+			return c.JSON(http.StatusConflict, map[string]string{"error": "conversion not complete"})
+		case errors.Is(err, domain.ErrConversionFailed):
+			return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "conversion failed"})
+		default:
+			h.logger.Warn("get mp4 url", zap.Error(err))
+
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"mp4_url": url})
+}

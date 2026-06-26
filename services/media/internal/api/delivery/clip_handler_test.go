@@ -377,3 +377,250 @@ func TestClipHandler_Download(t *testing.T) {
 		})
 	}
 }
+
+func TestClipHandler_Convert(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		clipIDParam string
+		setUserID   bool
+		setupSvc    func(m *svcmocks.MockClipService)
+		wantStatus  int
+		wantStatus_ string // "status" field in JSON response
+	}{
+		{
+			// criterion: 2 — already converted → 200 with status=done (idempotent)
+			name:        "200 when already done (idempotent re-convert)",
+			clipIDParam: "1",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().RequestConvert(gomock.Any(), testUserID, int64(1)).
+					Return(domain.ConversionStatusDone, nil)
+			},
+			wantStatus:  http.StatusOK,
+			wantStatus_: domain.ConversionStatusDone,
+		},
+		{
+			// criterion: 1, 5 — new conversion triggered → 202 with status=pending
+			name:        "202 when conversion triggered",
+			clipIDParam: "2",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().RequestConvert(gomock.Any(), testUserID, int64(2)).
+					Return(domain.ConversionStatusPending, nil)
+			},
+			wantStatus:  http.StatusAccepted,
+			wantStatus_: domain.ConversionStatusPending,
+		},
+		{
+			// criterion: 2 — owner-only: non-existent or foreign clip → 404
+			name:        "404 when clip not found",
+			clipIDParam: "999",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().RequestConvert(gomock.Any(), testUserID, int64(999)).
+					Return("", repository.ErrClipNotFound)
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:        "400 on bad clip id param",
+			clipIDParam: "notanumber",
+			setUserID:   true,
+			setupSvc:    func(_ *svcmocks.MockClipService) {},
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "400 on zero clip id",
+			clipIDParam: "0",
+			setUserID:   true,
+			setupSvc:    func(_ *svcmocks.MockClipService) {},
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "500 on unexpected service error",
+			clipIDParam: "1",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().RequestConvert(gomock.Any(), gomock.Any(), gomock.Any()).
+					Return("", errors.New("db error"))
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			// criterion: 2 — auth required
+			name:        "401 when user id not in context",
+			clipIDParam: "1",
+			setUserID:   false,
+			setupSvc:    func(_ *svcmocks.MockClipService) {},
+			wantStatus:  http.StatusUnauthorized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			svcMock := svcmocks.NewMockClipService(ctrl)
+			tt.setupSvc(svcMock)
+
+			h := delivery.NewClipHandler(svcMock, testMaxBytes, zap.NewNop())
+
+			e := newEcho()
+			req := httptest.NewRequest(http.MethodPost, "/v1/clips/"+tt.clipIDParam+"/convert", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(tt.clipIDParam)
+
+			if tt.setUserID {
+				ctxWithUser(c, testUserID)
+			}
+
+			_ = h.Convert(c)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantStatus_ != "" {
+				var resp map[string]string
+				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+					t.Fatalf("decode body: %v (body=%q)", err, rec.Body.String())
+				}
+
+				if resp["status"] != tt.wantStatus_ {
+					t.Errorf("status = %q, want %q", resp["status"], tt.wantStatus_)
+				}
+			}
+		})
+	}
+}
+
+func TestClipHandler_GetMP4(t *testing.T) {
+	t.Parallel()
+
+	const testMP4URL = "https://minio.example.com/mp4presigned"
+
+	tests := []struct {
+		name        string
+		clipIDParam string
+		setUserID   bool
+		setupSvc    func(m *svcmocks.MockClipService)
+		wantStatus  int
+		wantURL     string
+	}{
+		{
+			// criterion: 3 — done clip returns presigned MP4 URL
+			name:        "200 with mp4 URL when done",
+			clipIDParam: "1",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().GetMP4URL(gomock.Any(), testUserID, int64(1)).
+					Return(testMP4URL, nil)
+			},
+			wantStatus: http.StatusOK,
+			wantURL:    testMP4URL,
+		},
+		{
+			// criterion: 3 — not-yet-converted clip → 409
+			name:        "409 when conversion not complete",
+			clipIDParam: "2",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().GetMP4URL(gomock.Any(), testUserID, int64(2)).
+					Return("", domain.ErrConversionNotDone)
+			},
+			wantStatus: http.StatusConflict,
+		},
+		{
+			// criterion: 4 — ffmpeg previously failed → 422
+			name:        "422 when conversion failed",
+			clipIDParam: "3",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().GetMP4URL(gomock.Any(), testUserID, int64(3)).
+					Return("", domain.ErrConversionFailed)
+			},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			// criterion: 2 — owner-only: foreign clip → 404
+			name:        "404 when clip not found or foreign",
+			clipIDParam: "999",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().GetMP4URL(gomock.Any(), testUserID, int64(999)).
+					Return("", repository.ErrClipNotFound)
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:        "400 on bad clip id param",
+			clipIDParam: "notanumber",
+			setUserID:   true,
+			setupSvc:    func(_ *svcmocks.MockClipService) {},
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "500 on unexpected service error",
+			clipIDParam: "1",
+			setUserID:   true,
+			setupSvc: func(m *svcmocks.MockClipService) {
+				m.EXPECT().GetMP4URL(gomock.Any(), gomock.Any(), gomock.Any()).
+					Return("", errors.New("store error"))
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			// criterion: 2 — auth required
+			name:        "401 when user id not in context",
+			clipIDParam: "1",
+			setUserID:   false,
+			setupSvc:    func(_ *svcmocks.MockClipService) {},
+			wantStatus:  http.StatusUnauthorized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			svcMock := svcmocks.NewMockClipService(ctrl)
+			tt.setupSvc(svcMock)
+
+			h := delivery.NewClipHandler(svcMock, testMaxBytes, zap.NewNop())
+
+			e := newEcho()
+			req := httptest.NewRequest(http.MethodGet, "/v1/clips/"+tt.clipIDParam+"/mp4", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(tt.clipIDParam)
+
+			if tt.setUserID {
+				ctxWithUser(c, testUserID)
+			}
+
+			_ = h.GetMP4(c)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+
+			if tt.wantURL != "" {
+				var resp map[string]string
+				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+					t.Fatalf("decode body: %v", err)
+				}
+
+				if resp["mp4_url"] != tt.wantURL {
+					t.Errorf("mp4_url = %q, want %q", resp["mp4_url"], tt.wantURL)
+				}
+			}
+		})
+	}
+}

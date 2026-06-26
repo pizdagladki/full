@@ -31,6 +31,8 @@ type noopClipHandler struct{}
 func (noopClipHandler) Upload(c echo.Context) error   { return c.NoContent(http.StatusNotImplemented) }
 func (noopClipHandler) List(c echo.Context) error     { return c.NoContent(http.StatusNotImplemented) }
 func (noopClipHandler) Download(c echo.Context) error { return c.NoContent(http.StatusNotImplemented) }
+func (noopClipHandler) Convert(c echo.Context) error  { return c.NoContent(http.StatusNotImplemented) }
+func (noopClipHandler) GetMP4(c echo.Context) error   { return c.NoContent(http.StatusNotImplemented) }
 
 var _ delivery.ClipHandler = noopClipHandler{}
 
@@ -198,6 +200,70 @@ func TestRun_FailsOnConfig(t *testing.T) {
 	a := New("media")
 	if err := a.Run(context.Background()); err == nil {
 		t.Fatal("Run() error = nil, want a config-load error")
+	}
+}
+
+func TestInitServices_FFmpegNotFound(t *testing.T) {
+	// Note: no t.Parallel() — t.Setenv is incompatible with t.Parallel.
+	// Override PATH to an empty directory so exec.LookPath("ffmpeg") fails.
+	t.Setenv("PATH", t.TempDir())
+
+	a := New("media")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{}
+
+	if err := a.initServices(); err == nil {
+		t.Fatal("initServices() error = nil, want ffmpeg-not-found error")
+	}
+}
+
+func TestInitHandlers_Wires(t *testing.T) {
+	t.Parallel()
+
+	// initHandlers only needs clipSvc and cfg.Clips.MaxUploadBytes set.
+	a := New("media")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{}
+	// clipSvc can stay nil for this wiring test — NewClipHandler stores the
+	// pointer, so the handler will be non-nil even with a nil service.
+	a.initHandlers()
+
+	if a.clipHandler == nil {
+		t.Fatal("clipHandler is nil after initHandlers")
+	}
+}
+
+func TestInitMiddleware_Wires(t *testing.T) {
+	t.Parallel()
+
+	a := New("media")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{Session: config.SessionConfig{CookieName: "sess"}}
+	a.sessionSvc = noopSessionSvc{}
+
+	a.initMiddleware()
+
+	if a.authMiddleware == nil {
+		t.Fatal("authMiddleware is nil after initMiddleware")
+	}
+}
+
+func TestInitRedis_Error(t *testing.T) {
+	t.Parallel()
+
+	a := New("media")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{Redis: config.RedisConfig{Addr: "localhost:65535"}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := a.initRedis(ctx); err == nil {
+		t.Fatal("initRedis() error = nil, want connection error")
+	}
+
+	if a.redisClient != nil {
+		t.Error("redisClient is non-nil after failed initRedis")
 	}
 }
 

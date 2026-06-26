@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,21 +25,24 @@ type ClipServiceConfig struct {
 type clipService struct {
 	repo   repository.ClipRepository
 	store  ObjectStore
+	runner FFmpegRunner
 	cfg    ClipServiceConfig
 	logger *zap.Logger
 }
 
 // NewClipService returns a ClipService wired to the given repository, object
-// store, config, and logger.
+// store, ffmpeg runner, config, and logger.
 func NewClipService(
 	repo repository.ClipRepository,
 	store ObjectStore,
+	runner FFmpegRunner,
 	cfg ClipServiceConfig,
 	logger *zap.Logger,
 ) ClipService {
 	return &clipService{
 		repo:   repo,
 		store:  store,
+		runner: runner,
 		cfg:    cfg,
 		logger: logger,
 	}
@@ -129,4 +134,175 @@ func (s *clipService) DownloadURL(ctx context.Context, userID, clipID int64) (st
 	}
 
 	return url, nil
+}
+
+func (s *clipService) RequestConvert(ctx context.Context, userID, clipID int64) (string, error) {
+	clip, err := s.repo.GetByID(ctx, clipID)
+	if err != nil {
+		if errors.Is(err, repository.ErrClipNotFound) {
+			return "", repository.ErrClipNotFound
+		}
+
+		return "", fmt.Errorf("get clip: %w", err)
+	}
+
+	if clip.UserID != userID {
+		return "", repository.ErrClipNotFound
+	}
+
+	// Idempotent: already done → return immediately without re-encoding.
+	if clip.ConversionStatus == domain.ConversionStatusDone {
+		return domain.ConversionStatusDone, nil
+	}
+
+	// Already in progress → return current status without starting a new goroutine.
+	if clip.ConversionStatus == domain.ConversionStatusPending {
+		return domain.ConversionStatusPending, nil
+	}
+
+	mp4Key := domain.BuildMP4Key(clip.UserID, strconv.FormatInt(clipID, 10))
+
+	claimed, err := s.repo.ClaimConversion(ctx, clipID, mp4Key)
+	if err != nil {
+		return "", fmt.Errorf("claim conversion: %w", err)
+	}
+
+	if !claimed {
+		// Another concurrent request already claimed it.
+		return domain.ConversionStatusPending, nil
+	}
+
+	go s.doConvert(clip.ObjectKey, mp4Key, clipID) //nolint:contextcheck,gosec // intentional: outlives HTTP request
+
+	return domain.ConversionStatusPending, nil
+}
+
+func (s *clipService) GetMP4URL(ctx context.Context, userID, clipID int64) (string, error) {
+	clip, err := s.repo.GetByID(ctx, clipID)
+	if err != nil {
+		if errors.Is(err, repository.ErrClipNotFound) {
+			return "", repository.ErrClipNotFound
+		}
+
+		return "", fmt.Errorf("get clip: %w", err)
+	}
+
+	if clip.UserID != userID {
+		return "", repository.ErrClipNotFound
+	}
+
+	switch clip.ConversionStatus {
+	case domain.ConversionStatusDone:
+		url, err := s.store.PresignedGetURL(ctx, clip.MP4ObjectKey, s.cfg.DownloadURLTTL)
+		if err != nil {
+			return "", fmt.Errorf("presign mp4 url: %w", err)
+		}
+
+		return url, nil
+	case domain.ConversionStatusFailed:
+		return "", domain.ErrConversionFailed
+	default:
+		return "", domain.ErrConversionNotDone
+	}
+}
+
+// recordConvStatus writes a terminal conversion status using a fresh short-lived
+// context so that a canceled encode context (e.g. 30-minute deadline expired)
+// cannot silently prevent the status write from reaching the database.
+func (s *clipService) recordConvStatus(clipID int64, mp4Key string, status string) {
+	recCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := s.repo.UpdateConversion(recCtx, clipID, mp4Key, status)
+	if err != nil {
+		s.logger.Error("record conversion status", zap.String("status", status), zap.Error(err))
+	}
+}
+
+// doConvert runs the WebM→MP4 conversion pipeline in a goroutine. It downloads
+// the WebM from the object store, shells out to ffmpeg, and uploads the MP4.
+// It uses context.Background() so it is not canceled when the HTTP handler
+// returns. A 30-minute deadline bounds the total conversion time so that a
+// malformed WebM cannot hang ffmpeg indefinitely.
+func (s *clipService) doConvert(webmKey, mp4Key string, clipID int64) {
+	const conversionTimeout = 30 * time.Minute
+
+	//nolint:contextcheck // intentional: runs after HTTP handler returns
+	ctx, cancel := context.WithTimeout(context.Background(), conversionTimeout)
+	defer cancel()
+
+	// Download WebM to temp file.
+	rc, err := s.store.Get(ctx, webmKey)
+	if err != nil {
+		s.logger.Error("ffmpeg: download webm", zap.String("key", webmKey), zap.Error(err))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+	defer rc.Close()
+
+	tmpIn, err := os.CreateTemp("", "media-in-*.webm")
+	if err != nil {
+		s.logger.Error("ffmpeg: create temp input", zap.Error(err))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+	defer os.Remove(tmpIn.Name())
+
+	_, copyErr := io.Copy(tmpIn, rc)
+	tmpIn.Close()
+
+	if copyErr != nil {
+		s.logger.Error("ffmpeg: write temp input", zap.Error(copyErr))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+
+	tmpOut, err := os.CreateTemp("", "media-out-*.mp4")
+	if err != nil {
+		s.logger.Error("ffmpeg: create temp output", zap.Error(err))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+	tmpOut.Close()
+	defer os.Remove(tmpOut.Name())
+
+	err = s.runner.Convert(ctx, tmpIn.Name(), tmpOut.Name())
+	if err != nil {
+		s.logger.Error("ffmpeg: convert", zap.Error(err))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+
+	// Upload MP4.
+	f, err := os.Open(tmpOut.Name())
+	if err != nil {
+		s.logger.Error("ffmpeg: open output", zap.Error(err))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		s.logger.Error("ffmpeg: stat output", zap.Error(err))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+
+	err = s.store.Put(ctx, mp4Key, f, info.Size(), domain.ContentTypeMP4)
+	if err != nil {
+		s.logger.Error("ffmpeg: upload mp4", zap.String("key", mp4Key), zap.Error(err))
+		s.recordConvStatus(clipID, "", domain.ConversionStatusFailed)
+
+		return
+	}
+
+	s.recordConvStatus(clipID, mp4Key, domain.ConversionStatusDone)
 }

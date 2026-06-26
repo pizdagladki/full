@@ -39,6 +39,15 @@ type ClipRepository interface {
 	// for userID and returns their object_key values. If the user has at most
 	// limit clips, nothing is deleted and an empty slice is returned.
 	DeleteOldestBeyondLimit(ctx context.Context, userID int64, limit int) ([]string, error)
+
+	// UpdateConversion sets the mp4_object_key and conversion_status for a clip.
+	UpdateConversion(ctx context.Context, id int64, mp4Key, status string) error
+
+	// ClaimConversion atomically transitions a clip from 'none' or 'failed' to
+	// 'pending' with the given mp4Key. Returns true if exactly one row was
+	// claimed (i.e. the status was 'none' or 'failed' before the call). Returns
+	// false without error when another worker already holds the pending state.
+	ClaimConversion(ctx context.Context, id int64, mp4Key string) (bool, error)
 }
 
 // SessionRepository resolves Redis session keys to user IDs.

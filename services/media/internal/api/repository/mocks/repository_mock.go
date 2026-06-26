@@ -41,6 +41,21 @@ func (m *MockClipRepository) EXPECT() *MockClipRepositoryMockRecorder {
 	return m.recorder
 }
 
+// ClaimConversion mocks base method.
+func (m *MockClipRepository) ClaimConversion(ctx context.Context, id int64, mp4Key string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClaimConversion", ctx, id, mp4Key)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ClaimConversion indicates an expected call of ClaimConversion.
+func (mr *MockClipRepositoryMockRecorder) ClaimConversion(ctx, id, mp4Key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClaimConversion", reflect.TypeOf((*MockClipRepository)(nil).ClaimConversion), ctx, id, mp4Key)
+}
+
 // Create mocks base method.
 func (m *MockClipRepository) Create(ctx context.Context, clip domain.Clip) (domain.Clip, error) {
 	m.ctrl.T.Helper()
@@ -99,6 +114,20 @@ func (m *MockClipRepository) ListByUser(ctx context.Context, userID int64) ([]do
 func (mr *MockClipRepositoryMockRecorder) ListByUser(ctx, userID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByUser", reflect.TypeOf((*MockClipRepository)(nil).ListByUser), ctx, userID)
+}
+
+// UpdateConversion mocks base method.
+func (m *MockClipRepository) UpdateConversion(ctx context.Context, id int64, mp4Key, status string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateConversion", ctx, id, mp4Key, status)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateConversion indicates an expected call of UpdateConversion.
+func (mr *MockClipRepositoryMockRecorder) UpdateConversion(ctx, id, mp4Key, status any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateConversion", reflect.TypeOf((*MockClipRepository)(nil).UpdateConversion), ctx, id, mp4Key, status)
 }
 
 // MockSessionRepository is a mock of SessionRepository interface.
