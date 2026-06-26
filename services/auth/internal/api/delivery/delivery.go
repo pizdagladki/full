@@ -12,4 +12,6 @@ type AuthHandler interface {
 	LoginGoogle(c echo.Context) error
 	// GetMe handles GET /v1/auth/me (requires auth middleware).
 	GetMe(c echo.Context) error
+	// SubmitConsent handles POST /v1/auth/consent (requires auth middleware).
+	SubmitConsent(c echo.Context) error
 }
