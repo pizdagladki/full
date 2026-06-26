@@ -5,3 +5,5 @@ postgres:
 redis:
   addr: "localhost:6379"
   password: ""
+session:
+  cookie_name: "session"

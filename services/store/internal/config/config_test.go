@@ -13,24 +13,34 @@ func TestLoad(t *testing.T) {
 	)
 
 	tests := []struct {
-		name     string
-		isDocker bool
-		env      map[string]string
-		setup    func(t *testing.T) string // returns the config path
-		wantAddr string
-		wantErr  bool
+		name           string
+		isDocker       bool
+		env            map[string]string
+		setup          func(t *testing.T) string // returns the config path
+		wantAddr       string
+		wantCookieName string
+		wantErr        bool
 	}{
 		{
-			name:     "env mode all set with explicit HTTP_ADDR",
-			isDocker: true,
-			env:      map[string]string{"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
-			wantAddr: ":9090",
+			name:           "env mode all set with explicit HTTP_ADDR",
+			isDocker:       true,
+			env:            map[string]string{"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			wantAddr:       ":9090",
+			wantCookieName: "session",
 		},
 		{
-			name:     "env mode default HTTP addr",
-			isDocker: true,
-			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
-			wantAddr: ":8083",
+			name:           "env mode default HTTP addr",
+			isDocker:       true,
+			env:            map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			wantAddr:       ":8083",
+			wantCookieName: "session",
+		},
+		{
+			name:           "env mode custom session cookie name",
+			isDocker:       true,
+			env:            map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "SESSION_COOKIE_NAME": "my_session"},
+			wantAddr:       ":8083",
+			wantCookieName: "my_session",
 		},
 		{
 			name:     "env mode missing Postgres DSN fails validation",
@@ -49,14 +59,24 @@ func TestLoad(t *testing.T) {
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
 			},
-			wantAddr: ":7070",
+			wantAddr:       ":7070",
+			wantCookieName: "session",
+		},
+		{
+			name: "file mode reads session cookie name from yaml",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\nsession:\n  cookie_name: custom_cookie\n")
+			},
+			wantAddr:       ":7070",
+			wantCookieName: "custom_cookie",
 		},
 		{
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
 			},
-			wantAddr: ":8083",
+			wantAddr:       ":8083",
+			wantCookieName: "session",
 		},
 		{
 			name: "file mode missing required Postgres fails validation",
@@ -108,6 +128,9 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.HTTP.Addr != tt.wantAddr {
 				t.Errorf("addr = %q, want %q", cfg.HTTP.Addr, tt.wantAddr)
+			}
+			if tt.wantCookieName != "" && cfg.Session.CookieName != tt.wantCookieName {
+				t.Errorf("cookie name = %q, want %q", cfg.Session.CookieName, tt.wantCookieName)
 			}
 		})
 	}

@@ -8,8 +8,12 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 
+	"github.com/pizdagladki/full/services/store/internal/api/delivery"
+	"github.com/pizdagladki/full/services/store/internal/api/middleware"
+	svcmocks "github.com/pizdagladki/full/services/store/internal/api/service/mocks"
 	"github.com/pizdagladki/full/services/store/internal/config"
 )
 
@@ -62,7 +66,7 @@ func TestInitValidator(t *testing.T) {
 func TestRegisterHTTPRoutes_Healthz(t *testing.T) {
 	t.Parallel()
 
-	a := newTestApp("127.0.0.1:0")
+	a := newTestApp(t, "127.0.0.1:0")
 	e := a.registerHTTPRoutes()
 
 	if e.Validator == nil {
@@ -114,10 +118,89 @@ func TestInitRedis_Error(t *testing.T) {
 	}
 }
 
+// TestInitRepositories verifies that initRepositories wires all repos using nil
+// pools — construction must not deref, so nil is safe here.
+func TestInitRepositories(t *testing.T) {
+	t.Parallel()
+
+	a := New("store")
+	// pgxPool and redisClient left nil; constructors only store the dep,
+	// they never dereference it during construction.
+	a.initRepositories()
+
+	if a.catalogRepo == nil {
+		t.Fatal("catalogRepo is nil after initRepositories")
+	}
+	if a.inventoryRepo == nil {
+		t.Fatal("inventoryRepo is nil after initRepositories")
+	}
+	if a.sessionRepo == nil {
+		t.Fatal("sessionRepo is nil after initRepositories")
+	}
+}
+
+// TestInitServices verifies that initServices wires all services from repos.
+func TestInitServices(t *testing.T) {
+	t.Parallel()
+
+	a := New("store")
+	a.initRepositories() // wires repo wrappers around nil pools (nil-safe construction)
+	a.initServices()
+
+	if a.catalogSvc == nil {
+		t.Error("catalogSvc is nil after initServices")
+	}
+	if a.inventorySvc == nil {
+		t.Error("inventorySvc is nil after initServices")
+	}
+	if a.sessionSvc == nil {
+		t.Error("sessionSvc is nil after initServices")
+	}
+}
+
+// TestInitHandlers verifies that initHandlers wires storeHandler.
+func TestInitHandlers(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	catalogMock := svcmocks.NewMockCatalogService(ctrl)
+	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
+
+	a := New("store")
+	a.logger = zap.NewNop()
+	a.catalogSvc = catalogMock
+	a.inventorySvc = inventoryMock
+
+	a.initHandlers()
+
+	if a.storeHandler == nil {
+		t.Fatal("storeHandler is nil after initHandlers")
+	}
+}
+
+// TestInitMiddleware verifies that initMiddleware wires authMiddleware.
+func TestInitMiddleware(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	sessionMock := svcmocks.NewMockSessionService(ctrl)
+
+	a := New("store")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{Session: config.SessionConfig{CookieName: "session"}}
+	a.sessionSvc = sessionMock
+
+	a.initMiddleware()
+
+	if a.authMiddleware == nil {
+		t.Fatal("authMiddleware is nil after initMiddleware")
+	}
+}
+
 func TestRunWorkers_GracefulShutdown(t *testing.T) {
 	t.Parallel()
 
-	a := newTestApp("127.0.0.1:0")
+	a := newTestApp(t, "127.0.0.1:0")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -142,7 +225,7 @@ func TestRunWorkers_WorkerError(t *testing.T) {
 	t.Parallel()
 
 	// A bind address with no port makes e.Start fail, surfacing a worker error.
-	a := newTestApp("not-a-valid-bind-addr")
+	a := newTestApp(t, "not-a-valid-bind-addr")
 
 	if err := a.runWorkers(context.Background()); err == nil {
 		t.Fatal("runWorkers() error = nil, want the worker's start error")
@@ -173,12 +256,27 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 }
 
 // newTestApp builds an App wired with the minimum needed to exercise the HTTP
-// worker and router: a no-op logger, the validator, and an HTTP addr.
-func newTestApp(addr string) *App {
+// worker and router: a no-op logger, the validator, an HTTP addr, and stub
+// handler + middleware so route registration doesn't panic.
+func newTestApp(t *testing.T, addr string) *App {
+	t.Helper()
+
+	ctrl := gomock.NewController(t)
+	catalogMock := svcmocks.NewMockCatalogService(ctrl)
+	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
+	sessionMock := svcmocks.NewMockSessionService(ctrl)
+
 	a := New("store-test")
 	a.logger = zap.NewNop()
 	a.initValidator()
-	a.cfg = &config.Config{HTTP: config.HTTPConfig{Addr: addr}}
+	a.cfg = &config.Config{
+		HTTP:    config.HTTPConfig{Addr: addr},
+		Session: config.SessionConfig{CookieName: "session"},
+	}
+
+	// Wire stub handler and middleware so registerHTTPRoutes works.
+	a.storeHandler = delivery.NewStoreHandler(catalogMock, inventoryMock, zap.NewNop())
+	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
 
 	return a
 }
