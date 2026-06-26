@@ -41,6 +41,7 @@ type matchmakingService struct {
 	levelDist     int
 	fallbackAfter time.Duration
 	ratingsClient RatingsClient
+	reportsClient ReportsClient
 
 	mu    sync.Mutex
 	conns map[int64]Conn   // userID → active connection; single-instance only — K8s scale-out would need a shared store
@@ -56,6 +57,7 @@ func NewMatchmakingService(
 	levelDist int,
 	fallbackAfter time.Duration,
 	ratingsClient RatingsClient,
+	reportsClient ReportsClient,
 ) MatchmakingService {
 	return &matchmakingService{
 		logger:        logger,
@@ -65,6 +67,7 @@ func NewMatchmakingService(
 		levelDist:     levelDist,
 		fallbackAfter: fallbackAfter,
 		ratingsClient: ratingsClient,
+		reportsClient: reportsClient,
 		conns:         make(map[int64]Conn),
 		modes:         make(map[int64]string),
 	}
@@ -85,6 +88,16 @@ func (s *matchmakingService) Join(ctx context.Context, conn Conn, player domain.
 	err = domain.ValidateJoin(player.Mode, player.Level)
 	if err != nil {
 		return err
+	}
+
+	// Check reports cooldown before enqueuing; fail-open on lookup error.
+	cooldown, cdErr := s.reportsClient.GetCooldown(ctx, player.UserID)
+	if cdErr != nil {
+		s.logger.Error("reports cooldown lookup failed, failing open",
+			zap.Int64("user_id", player.UserID),
+			zap.Error(cdErr))
+	} else if cooldown.Active {
+		return &domain.CooldownError{SecondsRemaining: cooldown.SecondsRemaining}
 	}
 
 	enqErr := s.queueRepo.Enqueue(ctx, player)
