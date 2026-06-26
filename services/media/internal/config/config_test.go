@@ -4,14 +4,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
 	const (
-		validDSN      = "postgres://app:app@localhost:5432/app?sslmode=disable"
-		validEndpoint = "localhost:9000"
-		validKey      = "minioadmin"
-		validBucket   = "media"
+		validDSN       = "postgres://app:app@localhost:5432/app?sslmode=disable"
+		validEndpoint  = "localhost:9000"
+		validKey       = "minioadmin"
+		validBucket    = "media"
+		validRedisAddr = "localhost:6379"
 	)
 
 	minioEnv := map[string]string{
@@ -21,32 +23,58 @@ func TestLoad(t *testing.T) {
 		"STORAGE_BUCKET":     validBucket,
 	}
 
-	validYAML := "http:\n  addr: \":7070\"\npostgres:\n  dsn: \"" + validDSN + "\"\nstorage:\n  endpoint: \"" + validEndpoint + "\"\n  access_key: \"" + validKey + "\"\n  secret_key: \"" + validKey + "\"\n  bucket: \"" + validBucket + "\"\n"
+	baseEnv := merge(map[string]string{
+		"POSTGRES_DSN": validDSN,
+		"REDIS_ADDR":   validRedisAddr,
+	}, minioEnv)
+
+	validYAML := "http:\n  addr: \":7070\"\n" +
+		"postgres:\n  dsn: \"" + validDSN + "\"\n" +
+		"storage:\n  endpoint: \"" + validEndpoint + "\"\n  access_key: \"" + validKey + "\"\n  secret_key: \"" + validKey + "\"\n  bucket: \"" + validBucket + "\"\n" +
+		"redis:\n  addr: \"" + validRedisAddr + "\"\n"
 
 	tests := []struct {
-		name     string
-		isDocker bool
-		env      map[string]string
-		setup    func(t *testing.T) string // returns the config path
-		wantAddr string
-		wantErr  bool
+		name           string
+		isDocker       bool
+		env            map[string]string
+		setup          func(t *testing.T) string // returns the config path
+		wantAddr       string
+		wantRedisAddr  string
+		wantCookieName string
+		wantMaxBytes   int64
+		wantTTL        time.Duration
+		wantErr        bool
 	}{
 		{
-			name:     "env mode all set with explicit HTTP_ADDR",
-			isDocker: true,
-			env:      merge(map[string]string{"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN}, minioEnv),
-			wantAddr: ":9090",
+			name:           "env mode all set with explicit HTTP_ADDR",
+			isDocker:       true,
+			env:            merge(map[string]string{"HTTP_ADDR": ":9090"}, baseEnv),
+			wantAddr:       ":9090",
+			wantRedisAddr:  validRedisAddr,
+			wantCookieName: defaultSessionCookieName,
+			wantMaxBytes:   defaultMaxUploadBytes,
+			wantTTL:        15 * time.Minute,
 		},
 		{
-			name:     "env mode default HTTP addr",
-			isDocker: true,
-			env:      merge(map[string]string{"POSTGRES_DSN": validDSN}, minioEnv),
-			wantAddr: ":8082",
+			name:           "env mode default HTTP addr",
+			isDocker:       true,
+			env:            baseEnv,
+			wantAddr:       ":8082",
+			wantRedisAddr:  validRedisAddr,
+			wantCookieName: defaultSessionCookieName,
+			wantMaxBytes:   defaultMaxUploadBytes,
+			wantTTL:        15 * time.Minute,
 		},
 		{
 			name:     "env mode missing Postgres DSN fails validation",
 			isDocker: true,
-			env:      minioEnv,
+			env:      merge(map[string]string{"REDIS_ADDR": validRedisAddr}, minioEnv),
+			wantErr:  true,
+		},
+		{
+			name:     "env mode missing Redis addr fails validation",
+			isDocker: true,
+			env:      merge(map[string]string{"POSTGRES_DSN": validDSN}, minioEnv),
 			wantErr:  true,
 		},
 		{
@@ -54,6 +82,7 @@ func TestLoad(t *testing.T) {
 			isDocker: true,
 			env: map[string]string{
 				"POSTGRES_DSN":       validDSN,
+				"REDIS_ADDR":         validRedisAddr,
 				"STORAGE_ACCESS_KEY": validKey,
 				"STORAGE_SECRET_KEY": validKey,
 				"STORAGE_BUCKET":     validBucket,
@@ -61,63 +90,85 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:     "env mode missing storage access_key fails validation",
+			name:     "env mode invalid download url ttl fails",
 			isDocker: true,
-			env: map[string]string{
-				"POSTGRES_DSN":       validDSN,
-				"STORAGE_ENDPOINT":   validEndpoint,
-				"STORAGE_SECRET_KEY": validKey,
-				"STORAGE_BUCKET":     validBucket,
-			},
+			env: merge(map[string]string{
+				"MEDIA_DOWNLOAD_URL_TTL": "not-a-duration",
+			}, baseEnv),
 			wantErr: true,
 		},
 		{
-			name:     "env mode missing storage secret_key fails validation",
+			name:     "env mode invalid max upload bytes fails",
 			isDocker: true,
-			env: map[string]string{
-				"POSTGRES_DSN":       validDSN,
-				"STORAGE_ENDPOINT":   validEndpoint,
-				"STORAGE_ACCESS_KEY": validKey,
-				"STORAGE_BUCKET":     validBucket,
-			},
+			env: merge(map[string]string{
+				"MEDIA_MAX_UPLOAD_BYTES": "notanumber",
+			}, baseEnv),
 			wantErr: true,
 		},
 		{
-			name:     "env mode missing storage bucket fails validation",
+			name:     "env mode custom cookie name and ttl",
 			isDocker: true,
-			env: map[string]string{
-				"POSTGRES_DSN":       validDSN,
-				"STORAGE_ENDPOINT":   validEndpoint,
-				"STORAGE_ACCESS_KEY": validKey,
-				"STORAGE_SECRET_KEY": validKey,
-			},
-			wantErr: true,
+			env: merge(map[string]string{
+				"SESSION_COOKIE_NAME":    "my_session",
+				"MEDIA_DOWNLOAD_URL_TTL": "30m",
+				"MEDIA_MAX_UPLOAD_BYTES": "1048576",
+			}, baseEnv),
+			wantAddr:       ":8082",
+			wantRedisAddr:  validRedisAddr,
+			wantCookieName: "my_session",
+			wantMaxBytes:   1048576,
+			wantTTL:        30 * time.Minute,
 		},
 		{
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, validYAML)
 			},
-			wantAddr: ":7070",
+			wantAddr:       ":7070",
+			wantRedisAddr:  validRedisAddr,
+			wantCookieName: defaultSessionCookieName,
+			wantMaxBytes:   defaultMaxUploadBytes,
+			wantTTL:        15 * time.Minute,
 		},
 		{
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nstorage:\n  endpoint: \""+validEndpoint+"\"\n  access_key: \""+validKey+"\"\n  secret_key: \""+validKey+"\"\n  bucket: \""+validBucket+"\"\n")
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"storage:\n  endpoint: \""+validEndpoint+"\"\n  access_key: \""+validKey+"\"\n  secret_key: \""+validKey+"\"\n  bucket: \""+validBucket+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n")
 			},
-			wantAddr: ":8082",
+			wantAddr:       ":8082",
+			wantCookieName: defaultSessionCookieName,
+			wantMaxBytes:   defaultMaxUploadBytes,
+			wantTTL:        15 * time.Minute,
 		},
 		{
 			name: "file mode missing required Postgres fails validation",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "storage:\n  endpoint: \""+validEndpoint+"\"\n  access_key: \""+validKey+"\"\n  secret_key: \""+validKey+"\"\n  bucket: \""+validBucket+"\"\n")
+				return writeTempConfig(t,
+					"storage:\n  endpoint: \""+validEndpoint+"\"\n  access_key: \""+validKey+"\"\n  secret_key: \""+validKey+"\"\n  bucket: \""+validBucket+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n")
 			},
 			wantErr: true,
 		},
 		{
-			name: "file mode missing storage endpoint fails validation",
+			name: "file mode missing Redis addr fails validation",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nstorage:\n  access_key: \""+validKey+"\"\n  secret_key: \""+validKey+"\"\n  bucket: \""+validBucket+"\"\n")
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"storage:\n  endpoint: \""+validEndpoint+"\"\n  access_key: \""+validKey+"\"\n  secret_key: \""+validKey+"\"\n  bucket: \""+validBucket+"\"\n")
+			},
+			wantErr: true,
+		},
+		{
+			name: "file mode invalid download_url_ttl fails",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"storage:\n  endpoint: \""+validEndpoint+"\"\n  access_key: \""+validKey+"\"\n  secret_key: \""+validKey+"\"\n  bucket: \""+validBucket+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"clips:\n  download_url_ttl: \"bad-duration\"\n")
 			},
 			wantErr: true,
 		},
@@ -165,6 +216,18 @@ func TestLoad(t *testing.T) {
 			if cfg.HTTP.Addr != tt.wantAddr {
 				t.Errorf("addr = %q, want %q", cfg.HTTP.Addr, tt.wantAddr)
 			}
+			if tt.wantRedisAddr != "" && cfg.Redis.Addr != tt.wantRedisAddr {
+				t.Errorf("redis.addr = %q, want %q", cfg.Redis.Addr, tt.wantRedisAddr)
+			}
+			if tt.wantCookieName != "" && cfg.Session.CookieName != tt.wantCookieName {
+				t.Errorf("session.cookie_name = %q, want %q", cfg.Session.CookieName, tt.wantCookieName)
+			}
+			if tt.wantMaxBytes != 0 && cfg.Clips.MaxUploadBytes != tt.wantMaxBytes {
+				t.Errorf("clips.max_upload_bytes = %d, want %d", cfg.Clips.MaxUploadBytes, tt.wantMaxBytes)
+			}
+			if tt.wantTTL != 0 && cfg.Clips.DownloadURLTTL != tt.wantTTL {
+				t.Errorf("clips.download_url_ttl = %v, want %v", cfg.Clips.DownloadURLTTL, tt.wantTTL)
+			}
 		})
 	}
 }
@@ -185,6 +248,7 @@ func merge(base, extra map[string]string) map[string]string {
 	for k, v := range base {
 		out[k] = v
 	}
+
 	for k, v := range extra {
 		out[k] = v
 	}
