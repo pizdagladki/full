@@ -15,6 +15,12 @@ function makeAuthApi(overrides: Partial<AuthApi> = {}): AuthApi {
   return {
     googleLogin: vi.fn().mockResolvedValue(undefined),
     getMe: vi.fn().mockResolvedValue({ id: '1', email: 'test@test.com' } satisfies User),
+    submitConsent: vi.fn().mockResolvedValue({
+      is_adult: true,
+      consent_recording: true,
+      consent_tos: true,
+      accepted_at: '2026-01-01T00:00:00Z',
+    }),
     ...overrides,
   };
 }
@@ -190,11 +196,20 @@ describe('ProtectedRoute — redirect', () => {
   });
 
   it('criterion-3: authenticated user sees the protected content', () => {
-    // criterion: 3 — authenticated user is NOT redirected
-    const authState: AuthState = { user: { id: '1', email: 'u@u.com' }, loading: false, error: null };
+    // criterion: 3 — authenticated user with consent is NOT redirected
+    const authState: AuthState = {
+      user: {
+        id: '1',
+        email: 'u@u.com',
+        consent: { is_adult: true, consent_recording: true, consent_tos: true, accepted_at: '2026-01-01T00:00:00Z' },
+      },
+      loading: false,
+      error: null,
+    };
     const router = createMemoryRouter(
       [
         { path: '/', element: <div>Login</div> },
+        { path: '/consent', element: <div>Consent</div> },
         {
           path: '/protected',
           element: (

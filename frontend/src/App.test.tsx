@@ -6,9 +6,14 @@ import { routes } from './App';
 import { AuthContext } from './features';
 import type { AuthState } from './features';
 
-// Provide an authenticated context so ProtectedRoute doesn't redirect
+// Provide an authenticated context so ProtectedRoute doesn't redirect.
+// consent must be set so ProtectedRoute does not gate to /consent.
 const authenticatedState: AuthState = {
-  user: { id: '1', email: 'test@test.com' },
+  user: {
+    id: '1',
+    email: 'test@test.com',
+    consent: { is_adult: true, consent_recording: true, consent_tos: true, accepted_at: '2026-01-01T00:00:00Z' },
+  },
   loading: false,
   error: null,
 };
