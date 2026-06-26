@@ -1,6 +1,12 @@
 // Package delivery holds the signaling service WebSocket and HTTP handlers
-// (transport layer: request parse/validate, status codes, serialization). Handler
-// interfaces are added here by downstream resource slices via the new-resource
-// skill; the scaffold ships only the liveness probe and the /ws ping-ack handler
-// wired in the app layer.
+// (transport layer: request parse/validate, status codes, serialization).
 package delivery
+
+import "net/http"
+
+type (
+	// SignalingHandler handles the /ws WebSocket endpoint for SDP/ICE relay.
+	SignalingHandler interface {
+		ServeWS(w http.ResponseWriter, r *http.Request)
+	}
+)

@@ -4,14 +4,16 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the signaling service configuration.
 type Config struct {
-	HTTP  HTTPConfig  `yaml:"http"  validate:"required"`
-	Redis RedisConfig `yaml:"redis" validate:"required"`
+	HTTP      HTTPConfig      `yaml:"http"      validate:"required"`
+	Redis     RedisConfig     `yaml:"redis"     validate:"required"`
+	Signaling SignalingConfig `yaml:"signaling"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -25,7 +27,43 @@ type RedisConfig struct {
 	Password string `yaml:"password"`
 }
 
-const defaultAddr = ":8081"
+// signalingRaw is the YAML-decoded form; duration fields are kept as plain strings
+// so gopkg.in/yaml.v3 can decode "30m" without error (yaml.v3 treats
+// time.Duration as int64, not a duration string).
+type signalingRaw struct {
+	SessionCookie           string `yaml:"session_cookie"`
+	RoomTTLStr              string `yaml:"room_ttl"`
+	KeepaliveIntervalStr    string `yaml:"keepalive_interval"`
+	KeepalivePingTimeoutStr string `yaml:"keepalive_ping_timeout"`
+}
+
+// SignalingConfig holds signaling relay settings.
+type SignalingConfig struct {
+	// SessionCookie is the name of the HTTP cookie that carries the session id.
+	SessionCookie string
+	// RoomTTL is the Redis TTL applied to room member sets on every Join.
+	RoomTTL time.Duration
+	// KeepaliveInterval is how often the server pings each connected peer.
+	// Zero disables keepalives (tests only).
+	KeepaliveInterval time.Duration
+	// KeepalivePingTimeout is the deadline for each individual Ping.
+	KeepalivePingTimeout time.Duration
+}
+
+// rawConfig is the intermediate YAML-decoded config before post-processing.
+type rawConfig struct {
+	HTTP      HTTPConfig   `yaml:"http"      validate:"required"`
+	Redis     RedisConfig  `yaml:"redis"     validate:"required"`
+	Signaling signalingRaw `yaml:"signaling"`
+}
+
+const (
+	defaultAddr                 = ":8081"
+	defaultSessionCookie        = "session"
+	defaultRoomTTL              = 30 * time.Minute
+	defaultKeepaliveInterval    = 30 * time.Second
+	defaultKeepalivePingTimeout = 10 * time.Second
+)
 
 // Load reads the config from environment variables when IS_DOCKER is set,
 // otherwise from the YAML file at path, then validates it.
@@ -44,6 +82,8 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	applySignalingDefaults(&cfg.Signaling)
+
 	err = ValidateConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -53,11 +93,44 @@ func Load(path string) (*Config, error) {
 }
 
 func loadFromEnv() *Config {
+	roomTTL := defaultRoomTTL
+
+	if v := os.Getenv("SIG_ROOM_TTL"); v != "" {
+		d, parseErr := time.ParseDuration(v)
+		if parseErr == nil {
+			roomTTL = d
+		}
+	}
+
+	keepaliveInterval := defaultKeepaliveInterval
+
+	if v := os.Getenv("SIG_KEEPALIVE_INTERVAL"); v != "" {
+		d, parseErr := time.ParseDuration(v)
+		if parseErr == nil {
+			keepaliveInterval = d
+		}
+	}
+
+	keepalivePingTimeout := defaultKeepalivePingTimeout
+
+	if v := os.Getenv("SIG_KEEPALIVE_PING_TIMEOUT"); v != "" {
+		d, parseErr := time.ParseDuration(v)
+		if parseErr == nil {
+			keepalivePingTimeout = d
+		}
+	}
+
 	return &Config{
 		HTTP: HTTPConfig{Addr: getEnv("HTTP_ADDR", defaultAddr)},
 		Redis: RedisConfig{
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
+		},
+		Signaling: SignalingConfig{
+			SessionCookie:        getEnv("SIG_SESSION_COOKIE", defaultSessionCookie),
+			RoomTTL:              roomTTL,
+			KeepaliveInterval:    keepaliveInterval,
+			KeepalivePingTimeout: keepalivePingTimeout,
 		},
 	}
 }
@@ -68,18 +141,73 @@ func loadFromFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config %q: %w", path, err)
 	}
 
-	cfg := &Config{HTTP: HTTPConfig{Addr: defaultAddr}}
+	raw := &rawConfig{HTTP: HTTPConfig{Addr: defaultAddr}}
 
-	err = yaml.Unmarshal(b, cfg)
+	err = yaml.Unmarshal(b, raw)
 	if err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
 
-	if cfg.HTTP.Addr == "" {
-		cfg.HTTP.Addr = defaultAddr
+	if raw.HTTP.Addr == "" {
+		raw.HTTP.Addr = defaultAddr
 	}
 
-	return cfg, nil
+	var roomTTL time.Duration
+
+	if raw.Signaling.RoomTTLStr != "" {
+		roomTTL, err = time.ParseDuration(raw.Signaling.RoomTTLStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse signaling.room_ttl %q: %w", raw.Signaling.RoomTTLStr, err)
+		}
+	}
+
+	var keepaliveInterval time.Duration
+
+	if raw.Signaling.KeepaliveIntervalStr != "" {
+		keepaliveInterval, err = time.ParseDuration(raw.Signaling.KeepaliveIntervalStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse signaling.keepalive_interval %q: %w", raw.Signaling.KeepaliveIntervalStr, err)
+		}
+	}
+
+	var keepalivePingTimeout time.Duration
+
+	if raw.Signaling.KeepalivePingTimeoutStr != "" {
+		keepalivePingTimeout, err = time.ParseDuration(raw.Signaling.KeepalivePingTimeoutStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse signaling.keepalive_ping_timeout %q: %w", raw.Signaling.KeepalivePingTimeoutStr, err)
+		}
+	}
+
+	return &Config{
+		HTTP:  raw.HTTP,
+		Redis: raw.Redis,
+		Signaling: SignalingConfig{
+			SessionCookie:        raw.Signaling.SessionCookie,
+			RoomTTL:              roomTTL,
+			KeepaliveInterval:    keepaliveInterval,
+			KeepalivePingTimeout: keepalivePingTimeout,
+		},
+	}, nil
+}
+
+// applySignalingDefaults fills zero values with sane defaults.
+func applySignalingDefaults(s *SignalingConfig) {
+	if s.SessionCookie == "" {
+		s.SessionCookie = defaultSessionCookie
+	}
+
+	if s.RoomTTL == 0 {
+		s.RoomTTL = defaultRoomTTL
+	}
+
+	if s.KeepaliveInterval == 0 {
+		s.KeepaliveInterval = defaultKeepaliveInterval
+	}
+
+	if s.KeepalivePingTimeout == 0 {
+		s.KeepalivePingTimeout = defaultKeepalivePingTimeout
+	}
 }
 
 func getEnv(key, def string) string {
