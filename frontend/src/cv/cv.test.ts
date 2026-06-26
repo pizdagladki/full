@@ -106,6 +106,14 @@ describe('computeEAR', () => {
     expect(computeEAR(lms, LEFT_EYE_INDICES)).toBe(0);
   });
 
+  it('returns 0 when horizontal distance is zero (divide-by-zero guard)', () => {
+    // criterion: 3 — denom guard: all landmarks at same position → dist(p1,p4)=0 → must return 0, not Infinity
+    // { x:0, y:0, z:0 } is a truthy object so !p1 is false; we reach the denom check.
+    const lms: NormalizedLandmark[] = Array.from({ length: 468 }, () => ({ x: 0, y: 0, z: 0 }));
+    expect(computeEAR(lms, LEFT_EYE_INDICES)).toBe(0);
+    expect(computeEAR(lms, RIGHT_EYE_INDICES)).toBe(0);
+  });
+
   it('fails-on-violation: if EAR formula ignores vertical, blink detection breaks', () => {
     // criterion: 2 — EAR must be < open-eye EAR for a closed eye
     const openLms = makeLandmarks(0.4, 0.4);
@@ -268,7 +276,7 @@ describe('blink detection', () => {
     engine.processFrame(31 * 33);
     expect(onBlink).not.toHaveBeenCalled(); // only 1 frame so far
     engine.processFrame(32 * 33);
-    expect(onBlink).toHaveBeenCalledTimes(2); // left blink + right blink
+    expect(onBlink).toHaveBeenCalledTimes(1); // one physical blink = one onBlink event
   });
 
   it('single-eye blink (left only) triggers onBlink — one-eye rule', () => {

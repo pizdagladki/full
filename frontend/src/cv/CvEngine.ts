@@ -148,31 +148,23 @@ export class CvEngine implements CvHandleRef {
     const leftEar = computeEAR(landmarks, LEFT_EYE_INDICES);
     const rightEar = computeEAR(landmarks, RIGHT_EYE_INDICES);
 
-    this.checkEye(leftEar, this.leftThreshold, 'left');
-    this.checkEye(rightEar, this.rightThreshold, 'right');
-  }
-
-  private checkEye(ear: number, threshold: number, eye: 'left' | 'right'): void {
-    if (eye === 'left') {
-      if (ear < threshold) {
-        this.leftBelow++;
-        if (this.leftBelow === BLINK_FRAMES) {
-          this.callbacks.onBlink?.();
-          this.leftBelow = 0;
-        }
-      } else {
-        this.leftBelow = 0;
-      }
+    // Advance per-eye counters
+    if (leftEar < this.leftThreshold) {
+      this.leftBelow++;
     } else {
-      if (ear < threshold) {
-        this.rightBelow++;
-        if (this.rightBelow === BLINK_FRAMES) {
-          this.callbacks.onBlink?.();
-          this.rightBelow = 0;
-        }
-      } else {
-        this.rightBelow = 0;
-      }
+      this.leftBelow = 0;
+    }
+    if (rightEar < this.rightThreshold) {
+      this.rightBelow++;
+    } else {
+      this.rightBelow = 0;
+    }
+
+    // Fire onBlink once if EITHER eye has held below threshold for BLINK_FRAMES
+    if (this.leftBelow >= BLINK_FRAMES || this.rightBelow >= BLINK_FRAMES) {
+      this.callbacks.onBlink?.();
+      this.leftBelow = 0;
+      this.rightBelow = 0;
     }
   }
 }

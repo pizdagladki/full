@@ -27,5 +27,7 @@ export function computeEAR(
   const p5 = landmarks[i5];
   const p6 = landmarks[i6];
   if (!p1 || !p2 || !p3 || !p4 || !p5 || !p6) return 0;
-  return (dist(p2, p6) + dist(p3, p5)) / (2 * dist(p1, p4));
+  const denom = 2 * dist(p1, p4);
+  if (denom === 0) return 0;
+  return (dist(p2, p6) + dist(p3, p5)) / denom;
 }
