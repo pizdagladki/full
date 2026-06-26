@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom';
 import type { RouteObject } from 'react-router-dom';
 import {
   Landing,
@@ -39,21 +39,8 @@ export const routes: RouteObject[] = [
   },
 ];
 
+const browserRouter = createBrowserRouter(routes);
+
 export function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Landing />} />
-          <Route path="register" element={<Register />} />
-          <Route path="home" element={<Home />} />
-          <Route path="search" element={<Search />} />
-          <Route path="battle" element={<Battle />} />
-          <Route path="results" element={<Results />} />
-          <Route path="profile" element={<Profile />} />
-          <Route path="store" element={<Store />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
-  );
+  return <RouterProvider router={browserRouter} />;
 }

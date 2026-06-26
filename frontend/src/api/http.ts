@@ -8,7 +8,7 @@ export class HttpClient {
   }
 
   async get<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`);
+    const res = await fetch(`${this.baseUrl}${path}`, { method: 'GET' });
     if (!res.ok) {
       throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`);
     }
