@@ -18,6 +18,9 @@ var (
 	// ErrAlreadyInRoom is returned when a peer tries to join a different room while
 	// already in one. A signaling connection belongs to exactly one room for its lifetime.
 	ErrAlreadyInRoom = errors.New("already in a room; join a different room is not allowed")
+	// ErrMatchFinished is returned when a blink/face_lost is reported after an outcome
+	// has already been decided for the room (idempotent guard).
+	ErrMatchFinished = errors.New("match outcome already decided")
 )
 
 const maxRoomIDLen = 128
@@ -27,6 +30,12 @@ const (
 	TypeJoin = "join"
 	TypeSDP  = "sdp"
 	TypeICE  = "ice"
+	// TypeBlink is sent by a client when the user blinks during a battle.
+	TypeBlink = "blink"
+	// TypeFaceLost is sent by a client when face tracking is lost during a battle.
+	TypeFaceLost = "face_lost"
+	// TypeOutcome is sent by the server to announce the battle result.
+	TypeOutcome = "outcome"
 )
 
 // InboundEnvelope is parsed only for routing: it reads the type and room_id
@@ -43,10 +52,28 @@ type peerLeftMsg struct {
 	Type string `json:"type"`
 }
 
+// outcomeMsg is the server-to-client authoritative battle result.
+type outcomeMsg struct {
+	Type     string `json:"type"`
+	WinnerID int64  `json:"winner_id"`
+	LoserID  int64  `json:"loser_id"`
+}
+
 // errMsg is the server-to-client error notification.
 type errMsg struct {
 	Type  string `json:"type"`
 	Error string `json:"error"`
+}
+
+// OutcomeBytes returns the marshaled {"type":"outcome","winner_id":...,"loser_id":...} frame bytes.
+// Panics on marshal failure (struct has only primitive fields — cannot fail).
+func OutcomeBytes(winnerID, loserID int64) []byte {
+	b, err := json.Marshal(outcomeMsg{Type: TypeOutcome, WinnerID: winnerID, LoserID: loserID})
+	if err != nil {
+		panic("domain: marshal outcome: " + err.Error())
+	}
+
+	return b
 }
 
 // PeerLeftBytes returns the marshaled {"type":"peer_left"} frame bytes.

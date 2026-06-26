@@ -35,5 +35,11 @@ type (
 		// removes the sender from the in-process hub, closes the peer connection,
 		// and deletes the room from Redis.
 		Leave(ctx context.Context, conn Conn, roomID string)
+
+		// ReportEvent records a blink/face_lost event from conn in roomID,
+		// stamped with the server receive-time (client-sent timestamps are ignored).
+		// Returns ErrNotMember if conn is not in the room, or ErrMatchFinished if
+		// an outcome was already decided (idempotent).
+		ReportEvent(ctx context.Context, conn Conn, roomID string, eventType string) error
 	}
 )

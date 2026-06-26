@@ -144,3 +144,17 @@ func (mr *MockSignalingServiceMockRecorder) Relay(ctx, conn, roomID, raw any) *g
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Relay", reflect.TypeOf((*MockSignalingService)(nil).Relay), ctx, conn, roomID, raw)
 }
+
+// ReportEvent mocks base method.
+func (m *MockSignalingService) ReportEvent(ctx context.Context, conn service.Conn, roomID, eventType string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReportEvent", ctx, conn, roomID, eventType)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ReportEvent indicates an expected call of ReportEvent.
+func (mr *MockSignalingServiceMockRecorder) ReportEvent(ctx, conn, roomID, eventType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReportEvent", reflect.TypeOf((*MockSignalingService)(nil).ReportEvent), ctx, conn, roomID, eventType)
+}

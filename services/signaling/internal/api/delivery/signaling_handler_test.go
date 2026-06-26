@@ -70,6 +70,29 @@ func readJSON(t *testing.T, c *websocket.Conn) map[string]string {
 	return msg
 }
 
+// readMsgType reads one WS frame and returns the value of the "type" field.
+// Unlike readJSON it tolerates frames with numeric fields (e.g. outcome).
+func readMsgType(t *testing.T, c *websocket.Conn) string {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, raw, err := c.Read(ctx)
+	if err != nil {
+		t.Fatalf("readMsgType: %v", err)
+	}
+
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("readMsgType unmarshal %q: %v", raw, err)
+	}
+
+	return envelope.Type
+}
+
 // readRaw reads one WS frame and returns the raw bytes.
 func readRaw(t *testing.T, c *websocket.Conn) []byte {
 	t.Helper()
@@ -399,7 +422,7 @@ func (r *fakeRoomRepo) RemoveRoom(_ context.Context, roomID string) error {
 func newIntegrationServer(t *testing.T, sessionRepo repository.SessionRepository, roomRepo repository.RoomRepository) *httptest.Server {
 	t.Helper()
 
-	svc := service.NewSignalingService(zap.NewNop(), roomRepo)
+	svc := service.NewSignalingService(zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond)
 	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
 	srv := httptest.NewServer(makeHTTPHandler(handler))
 	t.Cleanup(srv.Close)
@@ -602,10 +625,16 @@ func TestIntegration_PeerLeft(t *testing.T) {
 	// A disconnects abruptly.
 	cA.CloseNow() //nolint:errcheck
 
-	// B should receive peer_left.
-	msg := readJSON(t, cB)
-	if msg["type"] != "peer_left" {
-		t.Errorf("B received %q, want peer_left", msg["type"]) // criterion: 5 — fails if peer_left not sent
+	// B should receive outcome (forfeit) then peer_left.
+	// criterion: 5 — fails if peer_left not sent after forfeit outcome
+	outcomeType := readMsgType(t, cB)
+	if outcomeType != "outcome" {
+		t.Errorf("B first frame type = %q, want outcome", outcomeType)
+	}
+
+	peerLeftType := readMsgType(t, cB)
+	if peerLeftType != "peer_left" {
+		t.Errorf("B second frame type = %q, want peer_left", peerLeftType) // criterion: 5
 	}
 }
 
@@ -723,12 +752,18 @@ func TestIntegration_MultiRoomDisconnectCleansOriginalRoom(t *testing.T) {
 	// Drain the error frame so it does not interfere.
 	readJSON(t, cA)
 
-	// Now A disconnects — B should still get peer_left (room-orig cleanup).
+	// Now A disconnects — B should get outcome (forfeit) then peer_left.
 	cA.CloseNow() //nolint:errcheck
 
-	msg := readJSON(t, cB)
-	if msg["type"] != "peer_left" {
-		t.Errorf("B received %q, want peer_left after A disconnect", msg["type"]) // fix1/5
+	// criterion: fix1/5 — fails if peer_left not sent after A disconnect
+	outcomeType := readMsgType(t, cB)
+	if outcomeType != "outcome" {
+		t.Errorf("B first frame type = %q, want outcome after A disconnect", outcomeType)
+	}
+
+	peerLeftType := readMsgType(t, cB)
+	if peerLeftType != "peer_left" {
+		t.Errorf("B second frame type = %q, want peer_left after A disconnect", peerLeftType) // fix1/5
 	}
 }
 

@@ -17,6 +17,116 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
+// MockPaymentProvider is a mock of PaymentProvider interface.
+type MockPaymentProvider struct {
+	ctrl     *gomock.Controller
+	recorder *MockPaymentProviderMockRecorder
+	isgomock struct{}
+}
+
+// MockPaymentProviderMockRecorder is the mock recorder for MockPaymentProvider.
+type MockPaymentProviderMockRecorder struct {
+	mock *MockPaymentProvider
+}
+
+// NewMockPaymentProvider creates a new mock instance.
+func NewMockPaymentProvider(ctrl *gomock.Controller) *MockPaymentProvider {
+	mock := &MockPaymentProvider{ctrl: ctrl}
+	mock.recorder = &MockPaymentProviderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPaymentProvider) EXPECT() *MockPaymentProviderMockRecorder {
+	return m.recorder
+}
+
+// CreatePaymentIntent mocks base method.
+func (m *MockPaymentProvider) CreatePaymentIntent(ctx context.Context, productID int64, amountCents int) (string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreatePaymentIntent", ctx, productID, amountCents)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// CreatePaymentIntent indicates an expected call of CreatePaymentIntent.
+func (mr *MockPaymentProviderMockRecorder) CreatePaymentIntent(ctx, productID, amountCents any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePaymentIntent", reflect.TypeOf((*MockPaymentProvider)(nil).CreatePaymentIntent), ctx, productID, amountCents)
+}
+
+// VerifyWebhook mocks base method.
+func (m *MockPaymentProvider) VerifyWebhook(payload []byte, sigHeader string) (string, string, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyWebhook", payload, sigHeader)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(bool)
+	ret3, _ := ret[3].(error)
+	return ret0, ret1, ret2, ret3
+}
+
+// VerifyWebhook indicates an expected call of VerifyWebhook.
+func (mr *MockPaymentProviderMockRecorder) VerifyWebhook(payload, sigHeader any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VerifyWebhook", reflect.TypeOf((*MockPaymentProvider)(nil).VerifyWebhook), payload, sigHeader)
+}
+
+// MockPurchaseService is a mock of PurchaseService interface.
+type MockPurchaseService struct {
+	ctrl     *gomock.Controller
+	recorder *MockPurchaseServiceMockRecorder
+	isgomock struct{}
+}
+
+// MockPurchaseServiceMockRecorder is the mock recorder for MockPurchaseService.
+type MockPurchaseServiceMockRecorder struct {
+	mock *MockPurchaseService
+}
+
+// NewMockPurchaseService creates a new mock instance.
+func NewMockPurchaseService(ctrl *gomock.Controller) *MockPurchaseService {
+	mock := &MockPurchaseService{ctrl: ctrl}
+	mock.recorder = &MockPurchaseServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPurchaseService) EXPECT() *MockPurchaseServiceMockRecorder {
+	return m.recorder
+}
+
+// HandleWebhook mocks base method.
+func (m *MockPurchaseService) HandleWebhook(ctx context.Context, payload []byte, sigHeader string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HandleWebhook", ctx, payload, sigHeader)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// HandleWebhook indicates an expected call of HandleWebhook.
+func (mr *MockPurchaseServiceMockRecorder) HandleWebhook(ctx, payload, sigHeader any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HandleWebhook", reflect.TypeOf((*MockPurchaseService)(nil).HandleWebhook), ctx, payload, sigHeader)
+}
+
+// InitiatePurchase mocks base method.
+func (m *MockPurchaseService) InitiatePurchase(ctx context.Context, userID, productID int64) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InitiatePurchase", ctx, userID, productID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InitiatePurchase indicates an expected call of InitiatePurchase.
+func (mr *MockPurchaseServiceMockRecorder) InitiatePurchase(ctx, userID, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InitiatePurchase", reflect.TypeOf((*MockPurchaseService)(nil).InitiatePurchase), ctx, userID, productID)
+}
+
 // MockCatalogService is a mock of CatalogService interface.
 type MockCatalogService struct {
 	ctrl     *gomock.Controller
