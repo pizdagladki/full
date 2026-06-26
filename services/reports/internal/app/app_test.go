@@ -129,6 +129,30 @@ func TestInitRedis_Error(t *testing.T) {
 	}
 }
 
+// TestInitStorage_Error verifies that a bad MinIO endpoint aborts startup.
+// criterion: 4 — failed MinIO connect aborts startup
+func TestInitStorage_Error(t *testing.T) {
+	t.Parallel()
+
+	a := New("reports")
+	a.logger = zap.NewNop()
+	a.cfg = &config.Config{
+		Storage: config.StorageConfig{
+			Endpoint:  "://bad-endpoint",
+			AccessKey: "k",
+			SecretKey: "s",
+			Bucket:    "b",
+		},
+	}
+
+	if err := a.initStorage(context.Background()); err == nil {
+		t.Fatal("initStorage() error = nil, want error for a bad endpoint")
+	}
+	if a.minioClient != nil {
+		t.Error("minioClient is non-nil after a failed connect")
+	}
+}
+
 // TestRunWorkers_GracefulShutdown verifies that runWorkers returns nil when ctx
 // is cancelled (graceful shutdown path).
 // criterion: 5 — e.Shutdown(ctx) runs on context cancel
@@ -191,6 +215,12 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 	t.Setenv("HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("POSTGRES_DSN", "postgres://localhost:not-a-port/db")
 	t.Setenv("REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("MINIO_ENDPOINT", "localhost:9000")
+	t.Setenv("MINIO_ACCESS_KEY", "minioadmin")
+	t.Setenv("MINIO_SECRET_KEY", "minioadmin")
+	t.Setenv("MINIO_BUCKET", "reports")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123:ABC")
+	t.Setenv("TELEGRAM_CHAT_ID", "-100123")
 
 	a := New("reports")
 	if err := a.Run(context.Background()); err == nil {
@@ -200,13 +230,17 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 
 // newTestApp builds an App wired with the minimum needed to exercise the HTTP
 // worker and router: a no-op logger, the validator, and an HTTP addr.
-// Repositories and services are nil; handlers are initialised with nil deps so
-// routes are registered without panicking at start-up time.
+// Repositories and services are nil; handlers and middleware are initialised
+// with nil deps so routes are registered without panicking at start-up time.
 func newTestApp(addr string) *App {
 	a := New("reports-test")
 	a.logger = zap.NewNop()
 	a.initValidator()
 	a.cfg = &config.Config{HTTP: config.HTTPConfig{Addr: addr}}
+
+	// initHandlers calls NewAuthMiddleware(a.sessionSvc, ...) where a.sessionSvc
+	// is nil. That is fine: NewAuthMiddleware just stores the pointer, and the
+	// protected routes are never exercised in these tests.
 	a.initHandlers()
 
 	return a
