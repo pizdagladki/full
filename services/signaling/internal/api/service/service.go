@@ -23,8 +23,10 @@ type (
 	SignalingService interface {
 		// Join validates roomID, adds the peer to the Redis room set, and
 		// registers the connection in the in-process hub.
+		// mode is stored on the first join and used to decide whether to call
+		// the ratings service after the match is decided.
 		// Returns ErrRoomFull when the room already has two members.
-		Join(ctx context.Context, conn Conn, roomID string) error
+		Join(ctx context.Context, conn Conn, roomID string, mode string) error
 
 		// Relay forwards raw bytes verbatim to every other member of roomID.
 		// The sender must be a registered in-process member; if not, returns
@@ -42,4 +44,17 @@ type (
 		// an outcome was already decided (idempotent).
 		ReportEvent(ctx context.Context, conn Conn, roomID string, eventType string) error
 	}
+
+	// RatingsClient posts the decided match result to the ratings service.
+	RatingsClient interface {
+		ApplyResult(ctx context.Context, req ApplyResultRequest) error
+	}
 )
+
+// ApplyResultRequest is the payload for POST /v1/matches/result.
+type ApplyResultRequest struct {
+	WinnerID   int64  `json:"winner_id"`
+	LoserID    int64  `json:"loser_id"`
+	Mode       string `json:"mode"`
+	DurationMs int64  `json:"duration_ms"`
+}

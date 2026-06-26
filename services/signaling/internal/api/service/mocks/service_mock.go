@@ -106,17 +106,17 @@ func (m *MockSignalingService) EXPECT() *MockSignalingServiceMockRecorder {
 }
 
 // Join mocks base method.
-func (m *MockSignalingService) Join(ctx context.Context, conn service.Conn, roomID string) error {
+func (m *MockSignalingService) Join(ctx context.Context, conn service.Conn, roomID, mode string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Join", ctx, conn, roomID)
+	ret := m.ctrl.Call(m, "Join", ctx, conn, roomID, mode)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Join indicates an expected call of Join.
-func (mr *MockSignalingServiceMockRecorder) Join(ctx, conn, roomID any) *gomock.Call {
+func (mr *MockSignalingServiceMockRecorder) Join(ctx, conn, roomID, mode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Join", reflect.TypeOf((*MockSignalingService)(nil).Join), ctx, conn, roomID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Join", reflect.TypeOf((*MockSignalingService)(nil).Join), ctx, conn, roomID, mode)
 }
 
 // Leave mocks base method.
@@ -157,4 +157,42 @@ func (m *MockSignalingService) ReportEvent(ctx context.Context, conn service.Con
 func (mr *MockSignalingServiceMockRecorder) ReportEvent(ctx, conn, roomID, eventType any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReportEvent", reflect.TypeOf((*MockSignalingService)(nil).ReportEvent), ctx, conn, roomID, eventType)
+}
+
+// MockRatingsClient is a mock of RatingsClient interface.
+type MockRatingsClient struct {
+	ctrl     *gomock.Controller
+	recorder *MockRatingsClientMockRecorder
+	isgomock struct{}
+}
+
+// MockRatingsClientMockRecorder is the mock recorder for MockRatingsClient.
+type MockRatingsClientMockRecorder struct {
+	mock *MockRatingsClient
+}
+
+// NewMockRatingsClient creates a new mock instance.
+func NewMockRatingsClient(ctrl *gomock.Controller) *MockRatingsClient {
+	mock := &MockRatingsClient{ctrl: ctrl}
+	mock.recorder = &MockRatingsClientMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRatingsClient) EXPECT() *MockRatingsClientMockRecorder {
+	return m.recorder
+}
+
+// ApplyResult mocks base method.
+func (m *MockRatingsClient) ApplyResult(ctx context.Context, req service.ApplyResultRequest) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ApplyResult", ctx, req)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ApplyResult indicates an expected call of ApplyResult.
+func (mr *MockRatingsClientMockRecorder) ApplyResult(ctx, req any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyResult", reflect.TypeOf((*MockRatingsClient)(nil).ApplyResult), ctx, req)
 }
