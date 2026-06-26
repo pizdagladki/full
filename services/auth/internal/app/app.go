@@ -29,9 +29,11 @@ type App struct {
 	redisClient *redis.Client
 
 	userRepo       repository.UserRepository
+	consentRepo    repository.ConsentRepository
 	oauth          service.OAuthExchanger
 	sessionStore   service.SessionStore
 	authService    service.AuthService
+	consentService service.ConsentService
 	authHandler    delivery.AuthHandler
 	authMiddleware *middleware.AuthMiddleware
 }

@@ -19,6 +19,7 @@ type GoogleLoginRequest struct {
 
 // MeResponse is the JSON body returned by GET /v1/auth/me.
 type MeResponse struct {
-	ID    int64  `json:"id"`
-	Email string `json:"email"`
+	ID      int64        `json:"id"`
+	Email   string       `json:"email"`
+	Consent *ConsentInfo `json:"consent"`
 }
