@@ -25,6 +25,16 @@ function renderWithAuth(routesList: RouteObject[], path: string, authState: Auth
 // Mock fetch so AuthProvider (used in full App) doesn't blow up
 vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', json: () => Promise.resolve({}) }));
 
+// Mock navigator.mediaDevices so Home component doesn't crash in jsdom
+Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+  value: {
+    enumerateDevices: vi.fn().mockResolvedValue([]),
+    getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }),
+  },
+  writable: true,
+  configurable: true,
+});
+
 const unauthenticatedState: AuthState = {
   user: null,
   loading: false,
@@ -44,10 +54,10 @@ describe('App routes', () => {
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
   });
 
-  it('renders Home placeholder at /home when authenticated', () => {
+  it('renders Home screen at /home when authenticated', () => {
     // criterion: 3 — authenticated user can reach protected home route
     renderWithAuth(routes, '/home');
-    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(screen.getByTestId('home-screen')).toBeInTheDocument();
   });
 
   it('renders Search placeholder at /search when authenticated', () => {
@@ -108,7 +118,7 @@ describe('App routes', () => {
     // criterion: 3 — unauthenticated user visiting protected route is redirected to login
     const unauthState: AuthState = { user: null, loading: false, error: null };
     renderWithAuth(routes, '/home', unauthState);
-    expect(screen.queryByText('Home')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('home-screen')).not.toBeInTheDocument();
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
   });
 });
