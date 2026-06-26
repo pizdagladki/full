@@ -1,0 +1,8 @@
+export { Landing } from './Landing';
+export { Register } from './Register';
+export { Home } from './Home';
+export { Search } from './Search';
+export { Battle } from './Battle';
+export { Results } from './Results';
+export { Profile } from './Profile';
+export { Store } from './Store';
