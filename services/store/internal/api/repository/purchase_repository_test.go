@@ -442,6 +442,24 @@ func TestPurchaseRepository_ConfirmAndGrant(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			// criterion: 6 — ConfirmAndGrant is idempotent: when UPDATE affects 0 rows (already processed),
+			// it commits without running the inventory grant.
+			name:        "already processed event skips inventory grant",
+			providerRef: "pi_dup",
+			eventID:     "evt_dup",
+			kind:        domain.KindDistraction,
+			userID:      1,
+			productID:   10,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectExec(`UPDATE purchases`).
+					WithArgs("evt_dup", "pi_dup").
+					WillReturnResult(pgxmock.NewResult("UPDATE", 0)) // 0 rows = already processed
+				m.ExpectCommit()
+				// NOTE: no ExpectExec for inventory — must NOT be called
+			},
+		},
 	}
 
 	for _, tt := range tests {

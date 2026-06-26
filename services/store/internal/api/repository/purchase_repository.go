@@ -122,7 +122,7 @@ func (r *purchaseRepository) FindByProviderRef(ctx context.Context, providerRef 
 }
 
 const confirmPurchaseSQL = `
-UPDATE purchases SET status = 'paid', stripe_event_id = $1 WHERE provider_ref = $2`
+UPDATE purchases SET status = 'paid', stripe_event_id = $1 WHERE provider_ref = $2 AND stripe_event_id IS NULL`
 
 const upsertInventoryDistractionSQL = `
 INSERT INTO inventory (user_id, product_id, quantity)
@@ -151,9 +151,14 @@ func (r *purchaseRepository) ConfirmAndGrant(
 		}
 	}()
 
-	_, err = tx.Exec(ctx, confirmPurchaseSQL, eventID, providerRef)
+	tag, err := tx.Exec(ctx, confirmPurchaseSQL, eventID, providerRef)
 	if err != nil {
 		return fmt.Errorf("confirm purchase: %w", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		// Already processed by a concurrent delivery of the same event.
+		return tx.Commit(ctx)
 	}
 
 	var upsertSQL string
