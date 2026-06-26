@@ -70,3 +70,18 @@ func (mr *MockRatingsServiceMockRecorder) GetRating(ctx, userID any) *gomock.Cal
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRating", reflect.TypeOf((*MockRatingsService)(nil).GetRating), ctx, userID)
 }
+
+// ListMatchHistory mocks base method.
+func (m *MockRatingsService) ListMatchHistory(ctx context.Context, userID int64, limit, offset int) ([]domain.MatchHistoryItem, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListMatchHistory", ctx, userID, limit, offset)
+	ret0, _ := ret[0].([]domain.MatchHistoryItem)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListMatchHistory indicates an expected call of ListMatchHistory.
+func (mr *MockRatingsServiceMockRecorder) ListMatchHistory(ctx, userID, limit, offset any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMatchHistory", reflect.TypeOf((*MockRatingsService)(nil).ListMatchHistory), ctx, userID, limit, offset)
+}

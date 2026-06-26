@@ -16,6 +16,7 @@ import (
 type DB interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 type ratingsRepository struct {
@@ -183,6 +184,61 @@ func execUpdate(ctx context.Context, tx pgx.Tx, r domain.Rating) error {
 	_, err := tx.Exec(ctx, sqlUpdateRating, r.UserID, r.ELO, r.Level, r.GamesPlayed)
 
 	return err
+}
+
+// ─── ListMatchHistory ─────────────────────────────────────────────────────────
+
+const sqlListMatchHistory = `
+	SELECT
+	    id,
+	    CASE WHEN winner_id = $1 THEN loser_id  ELSE winner_id  END AS opponent_id,
+	    CASE WHEN winner_id = $1 THEN 'win'     ELSE 'loss'     END AS result,
+	    mode,
+	    CASE WHEN winner_id = $1 THEN winner_elo_delta ELSE loser_elo_delta END AS elo_delta,
+	    duration_ms,
+	    created_at
+	FROM match_results
+	WHERE winner_id = $1 OR loser_id = $1
+	ORDER BY created_at DESC
+	LIMIT $2 OFFSET $3`
+
+func (r *ratingsRepository) ListMatchHistory(
+	ctx context.Context, userID int64, limit, offset int,
+) ([]domain.MatchHistoryItem, error) {
+	rows, err := r.db.Query(ctx, sqlListMatchHistory, userID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("query match history for %d: %w", userID, err)
+	}
+
+	defer rows.Close()
+
+	items := []domain.MatchHistoryItem{}
+
+	for rows.Next() {
+		var item domain.MatchHistoryItem
+
+		err = rows.Scan(
+			&item.MatchID,
+			&item.OpponentID,
+			&item.Result,
+			&item.Mode,
+			&item.ELODelta,
+			&item.DurationMS,
+			&item.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan match history row: %w", err)
+		}
+
+		items = append(items, item)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate match history rows: %w", err)
+	}
+
+	return items, nil
 }
 
 // ─── GetRating ────────────────────────────────────────────────────────────────

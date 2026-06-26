@@ -49,3 +49,16 @@ func (s *ratingsService) GetRating(ctx context.Context, userID int64) (domain.Ra
 
 	return rating, nil
 }
+
+func (s *ratingsService) ListMatchHistory(
+	ctx context.Context, userID int64, limit, offset int,
+) ([]domain.MatchHistoryItem, error) {
+	items, err := s.repo.ListMatchHistory(ctx, userID, limit, offset)
+	if err != nil {
+		s.logger.Error("list match history", zap.Int64("user_id", userID), zap.Error(err))
+
+		return nil, err
+	}
+
+	return items, nil
+}
