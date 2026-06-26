@@ -35,6 +35,7 @@ type signalingRaw struct {
 	RoomTTLStr              string `yaml:"room_ttl"`
 	KeepaliveIntervalStr    string `yaml:"keepalive_interval"`
 	KeepalivePingTimeoutStr string `yaml:"keepalive_ping_timeout"`
+	ConfirmationBufferStr   string `yaml:"confirmation_buffer"`
 }
 
 // SignalingConfig holds signaling relay settings.
@@ -48,6 +49,10 @@ type SignalingConfig struct {
 	KeepaliveInterval time.Duration
 	// KeepalivePingTimeout is the deadline for each individual Ping.
 	KeepalivePingTimeout time.Duration
+	// ConfirmationBuffer is the wait period after the first blink/face_lost
+	// report before the outcome is finalized. Default 150ms (range 100–200ms).
+	// Env: SIG_CONFIRMATION_BUFFER. YAML: confirmation_buffer.
+	ConfirmationBuffer time.Duration
 }
 
 // rawConfig is the intermediate YAML-decoded config before post-processing.
@@ -63,6 +68,7 @@ const (
 	defaultRoomTTL              = 30 * time.Minute
 	defaultKeepaliveInterval    = 30 * time.Second
 	defaultKeepalivePingTimeout = 10 * time.Second
+	defaultConfirmationBuffer   = 150 * time.Millisecond
 )
 
 // Load reads the config from environment variables when IS_DOCKER is set,
@@ -120,6 +126,15 @@ func loadFromEnv() *Config {
 		}
 	}
 
+	confirmationBuffer := defaultConfirmationBuffer
+
+	if v := os.Getenv("SIG_CONFIRMATION_BUFFER"); v != "" {
+		d, parseErr := time.ParseDuration(v)
+		if parseErr == nil {
+			confirmationBuffer = d
+		}
+	}
+
 	return &Config{
 		HTTP: HTTPConfig{Addr: getEnv("HTTP_ADDR", defaultAddr)},
 		Redis: RedisConfig{
@@ -131,6 +146,7 @@ func loadFromEnv() *Config {
 			RoomTTL:              roomTTL,
 			KeepaliveInterval:    keepaliveInterval,
 			KeepalivePingTimeout: keepalivePingTimeout,
+			ConfirmationBuffer:   confirmationBuffer,
 		},
 	}
 }
@@ -179,6 +195,15 @@ func loadFromFile(path string) (*Config, error) {
 		}
 	}
 
+	var confirmationBuffer time.Duration
+
+	if raw.Signaling.ConfirmationBufferStr != "" {
+		confirmationBuffer, err = time.ParseDuration(raw.Signaling.ConfirmationBufferStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse signaling.confirmation_buffer %q: %w", raw.Signaling.ConfirmationBufferStr, err)
+		}
+	}
+
 	return &Config{
 		HTTP:  raw.HTTP,
 		Redis: raw.Redis,
@@ -187,6 +212,7 @@ func loadFromFile(path string) (*Config, error) {
 			RoomTTL:              roomTTL,
 			KeepaliveInterval:    keepaliveInterval,
 			KeepalivePingTimeout: keepalivePingTimeout,
+			ConfirmationBuffer:   confirmationBuffer,
 		},
 	}, nil
 }
@@ -207,6 +233,10 @@ func applySignalingDefaults(s *SignalingConfig) {
 
 	if s.KeepalivePingTimeout == 0 {
 		s.KeepalivePingTimeout = defaultKeepalivePingTimeout
+	}
+
+	if s.ConfirmationBuffer == 0 {
+		s.ConfirmationBuffer = defaultConfirmationBuffer
 	}
 }
 

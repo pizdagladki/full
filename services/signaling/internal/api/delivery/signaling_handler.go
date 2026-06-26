@@ -156,6 +156,19 @@ func (h *signalingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 				sendErrorFrame(ctx, conn, safeRelayErrMsg(relayErr))
 			}
 
+		case domain.TypeBlink, domain.TypeFaceLost:
+			reportErr := h.svc.ReportEvent(ctx, adapted, env.RoomID, env.Type)
+			if reportErr != nil {
+				h.logger.Debug("report event rejected",
+					zap.Int64("user_id", userID),
+					zap.String("type", env.Type),
+					zap.String("room_id", env.RoomID),
+					zap.Error(reportErr),
+				)
+				// ErrMatchFinished and ErrNotMember: send error frame but keep connection open.
+				sendErrorFrame(ctx, conn, safeReportErrMsg(reportErr))
+			}
+
 		default:
 			sendErrorFrame(ctx, conn, "unknown message type")
 		}
@@ -239,6 +252,18 @@ func safeRelayErrMsg(err error) string {
 	}
 
 	return internalError
+}
+
+// safeReportErrMsg returns a client-safe error string for blink/face_lost report failures.
+func safeReportErrMsg(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrNotMember):
+		return domain.ErrNotMember.Error()
+	case errors.Is(err, domain.ErrMatchFinished):
+		return domain.ErrMatchFinished.Error()
+	default:
+		return internalError
+	}
 }
 
 // sendErrorFrame writes a JSON {"type":"error","error":"<reason>"} frame.

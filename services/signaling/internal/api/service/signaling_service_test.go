@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -74,7 +75,7 @@ func newFixture(t *testing.T) *fixture {
 
 	ctrl := gomock.NewController(t)
 	roomRepo := repomocks.NewMockRoomRepository(ctrl)
-	svc := NewSignalingService(zap.NewNop(), roomRepo).(*signalingService)
+	svc := NewSignalingService(zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond).(*signalingService)
 
 	return &fixture{ctrl: ctrl, roomRepo: roomRepo, svc: svc}
 }
@@ -437,15 +438,26 @@ func TestSignalingService_Leave_SendsPeerLeftAndCleansUp(t *testing.T) {
 
 			f.svc.Leave(ctx, connA, "room-leave")
 
-			// Peer B should have received peer_left.
+			// Peer B should have received outcome (forfeit) then peer_left.
 			sentB := connB.Sent()
-			if len(sentB) == 0 {
-				t.Fatal("peer B received no frames, want peer_left") // criterion: 5
+			if len(sentB) < 2 {
+				t.Fatalf("peer B received %d frames, want at least 2 (outcome + peer_left)", len(sentB)) // criterion: 5
 			}
 
-			msg := parseMsg(t, sentB[0])
+			// First frame must be outcome.
+			var outcomeMsg map[string]interface{}
+			if err := json.Unmarshal(sentB[0], &outcomeMsg); err != nil {
+				t.Fatalf("first frame not valid JSON: %v", err)
+			}
+
+			if outcomeMsg["type"] != "outcome" {
+				t.Errorf("peer B first msg type = %q, want outcome", outcomeMsg["type"]) // criterion: 5
+			}
+
+			// Second frame must be peer_left.
+			msg := parseMsg(t, sentB[1])
 			if msg["type"] != "peer_left" {
-				t.Errorf("peer B msg type = %q, want peer_left", msg["type"]) // criterion: 5
+				t.Errorf("peer B second msg type = %q, want peer_left", msg["type"]) // criterion: 5
 			}
 
 			// Peer B's connection should be closed.
