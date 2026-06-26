@@ -85,7 +85,7 @@ func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mux := buildMux(ctx)
+	mux := buildMux(ctx, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -106,7 +106,7 @@ func TestWS_PingAck(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	mux := buildMux(ctx)
+	mux := buildMux(ctx, nil)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -175,7 +175,7 @@ func TestWS_CtxCancelClosesConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mux := buildMux(ctx)
+	mux := buildMux(ctx, nil)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 

@@ -8,6 +8,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/internal/platform/logger"
+	"github.com/pizdagladki/full/services/matchmaking/internal/api/delivery"
+	"github.com/pizdagladki/full/services/matchmaking/internal/api/repository"
+	"github.com/pizdagladki/full/services/matchmaking/internal/api/service"
 	"github.com/pizdagladki/full/services/matchmaking/internal/config"
 )
 
@@ -19,6 +22,13 @@ type App struct {
 	cfg    *config.Config
 
 	redisClient *redis.Client
+
+	queueRepo   repository.QueueRepository
+	sessionRepo repository.SessionRepository
+
+	matchmakingSvc service.MatchmakingService
+
+	wsHandler delivery.MatchmakingHandler
 }
 
 // New returns an empty App for the given service name.
@@ -48,6 +58,10 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	defer func() { _ = a.redisClient.Close() }()
 
+	a.initRepositories()
+	a.initServices()
+	a.initHandlers()
+
 	return a.runWorkers(ctx)
 }
 
@@ -71,4 +85,29 @@ func (a *App) populateConfig() error {
 	a.cfg = cfg
 
 	return nil
+}
+
+func (a *App) initRepositories() {
+	a.queueRepo = repository.NewQueueRepository(a.redisClient)
+	a.sessionRepo = repository.NewSessionRepository(a.redisClient)
+}
+
+func (a *App) initServices() {
+	a.matchmakingSvc = service.NewMatchmakingService(
+		a.logger,
+		a.queueRepo,
+		service.RealClock,
+		service.UUIDRoomIDGenerator,
+		a.cfg.Matchmaking.LevelDistance,
+		a.cfg.Matchmaking.FallbackAfter,
+	)
+}
+
+func (a *App) initHandlers() {
+	a.wsHandler = delivery.NewMatchmakingHandler(
+		a.logger,
+		a.sessionRepo,
+		a.matchmakingSvc,
+		a.cfg.Matchmaking.SessionCookie,
+	)
 }
