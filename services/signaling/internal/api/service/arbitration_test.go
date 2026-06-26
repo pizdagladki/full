@@ -447,6 +447,97 @@ func TestArbitration_TimeoutSingleReporterLoses(t *testing.T) {
 	}
 }
 
+func TestArbitration_SameMemberDoubleReport(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 2 — same member reporting twice before the opponent must be a no-op;
+	// the match must only be decided when the true opponent submits its report.
+
+	t0 := time.Unix(0, 0)
+	t1 := t0.Add(5 * time.Millisecond)
+	t2 := t0.Add(10 * time.Millisecond)
+	t3 := t0.Add(15 * time.Millisecond)
+
+	tests := []struct {
+		name         string
+		wantWinnerID int64
+		wantLoserID  int64
+	}{
+		{
+			// criterion: 2 — fails if same-member second report decides the match
+			// (winner_id == loser_id) or locks out the true opponent with ErrMatchFinished.
+			name:         "same-member double-report is no-op; opponent report decides correctly",
+			wantWinnerID: 2, // B (later timestamp) wins
+			wantLoserID:  1, // A (earlier timestamp) loses
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// now() sequence: t0 (A first report), t1 (A second report — ignored),
+			// t2 (B report — decides), t3 (unused).
+			f := newArbFixture(t, []time.Time{t0, t1, t2, t3}, 150*time.Millisecond)
+			connA := newFakeConn(1)
+			connB := newFakeConn(2)
+			f.seedRoom("room-double", connA, connB)
+
+			// A reports first.
+			if err := f.svc.ReportEvent(context.Background(), connA, "room-double", domain.TypeBlink); err != nil {
+				t.Fatalf("first ReportEvent (A) error = %v", err)
+			}
+
+			// A reports again (duplicate) — must return nil, not decide the match.
+			err := f.svc.ReportEvent(context.Background(), connA, "room-double", domain.TypeBlink)
+			if err != nil {
+				t.Errorf("same-member second ReportEvent error = %v, want nil", err) // criterion: 2
+			}
+
+			// Match must not be decided yet.
+			f.svc.mu.Lock()
+			arb := f.svc.arbitrations["room-double"]
+			decided := arb != nil && arb.decided
+			f.svc.mu.Unlock()
+
+			if decided {
+				t.Error("arb.decided = true after same-member double report, want false") // criterion: 2
+			}
+
+			// No outcome must have been sent to either member yet.
+			if n := len(connA.Sent()); n != 0 {
+				t.Errorf("connA received %d frames after double report, want 0", n) // criterion: 2
+			}
+
+			if n := len(connB.Sent()); n != 0 {
+				t.Errorf("connB received %d frames after double report, want 0", n) // criterion: 2
+			}
+
+			// Now the true opponent (B) reports — match must be decided with distinct IDs.
+			if err := f.svc.ReportEvent(context.Background(), connB, "room-double", domain.TypeBlink); err != nil {
+				t.Fatalf("opponent ReportEvent (B) error = %v", err)
+			}
+
+			for _, c := range []*fakeConn{connA, connB} {
+				frames := c.Sent()
+				if len(frames) != 1 {
+					t.Fatalf("conn %d received %d frames after opponent report, want 1", c.UserID(), len(frames)) // criterion: 2
+				}
+
+				w, l := parseOutcome(t, frames[0])
+				if w == l {
+					t.Errorf("conn %d: winner_id == loser_id == %d, want distinct IDs", c.UserID(), w) // criterion: 2
+				}
+
+				if w != tt.wantWinnerID || l != tt.wantLoserID {
+					t.Errorf("conn %d: got winner=%d loser=%d, want winner=%d loser=%d", // criterion: 2
+						c.UserID(), w, l, tt.wantWinnerID, tt.wantLoserID)
+				}
+			}
+		})
+	}
+}
+
 func TestArbitration_AlreadyFinishedRoomRejected(t *testing.T) {
 	t.Parallel()
 

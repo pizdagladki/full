@@ -162,6 +162,13 @@ func (s *signalingService) ReportEvent(_ context.Context, conn Conn, roomID stri
 		return nil
 	}
 
+	// Guard: same member re-reporting (e.g. EAR fires on multiple frames). Keep waiting.
+	if senderID == arb.firstReport.userID {
+		s.mu.Unlock()
+
+		return nil
+	}
+
 	// Second report arrived within the buffer — cancel the timer and decide now.
 	if arb.timer != nil {
 		arb.timer.Stop()
