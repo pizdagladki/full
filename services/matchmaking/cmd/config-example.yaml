@@ -3,3 +3,7 @@ http:
 redis:
   addr: "localhost:6379"
   password: ""
+matchmaking:
+  level_distance: 3
+  fallback_after: "10s"
+  session_cookie: "session"
