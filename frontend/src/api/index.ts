@@ -4,3 +4,7 @@ export { AuthApiClient, defaultAuthApi, ApiError } from './auth';
 export type { AuthApi, User, ConsentInfo, ConsentPayload } from './auth';
 export { RatingsApiClient, defaultRatingsApi } from './ratings';
 export type { RatingsApi, RatingData } from './ratings';
+export { MatchHistoryApiClient, defaultMatchHistoryApi } from './matches';
+export type { MatchHistoryApi, MatchEntry } from './matches';
+export { ClipsApiClient, defaultClipsApi } from './clips';
+export type { ClipsApi, Clip } from './clips';
