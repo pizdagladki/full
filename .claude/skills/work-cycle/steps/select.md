@@ -32,8 +32,8 @@ Priority — take the FIRST matching one, in this order (finishing beats startin
    - Claim it **exclusively** (assign + `🤖 [CLAIM]` stamp + 1–3 s + re-read + sole-you check). Lost the race → yield, restart selection.
    - Otherwise → `[PICKED] type=review #<N>`; work type = review, PR = #N.
 
-5. NEW ISSUE. An open issue labeled BOTH `task` AND `owner-agreed`, **claimable** (see above), whose blockers are ALL closed. An issue WITHOUT `owner-agreed` is ignored entirely — the owner has not signed off on it yet.
-   - Find: `mcp__github__list_issues` (labels=["task","owner-agreed"], state=open).
+5. NEW ISSUE. An open issue labeled BOTH `task` AND `owner-agreed`, **NOT labeled `needs-human`** (an escalated issue belongs to the human — re-picking it just re-hits the same blocker and burns tokens until the human removes the label), **claimable** (see above), whose blockers are ALL closed. An issue WITHOUT `owner-agreed` is ignored entirely — the owner has not signed off on it yet.
+   - Find: `mcp__github__list_issues` (labels=["task","owner-agreed"], state=open); EXCLUDE any result carrying `needs-human`.
    - Blockers: parse `Depends on #X` / `Blocked by #X` from the body. For each, `mcp__github__issue_read` (method=get) → if any is open, skip this issue.
    - Claim it **exclusively** (assign + `🤖 [CLAIM]` stamp + 1–3 s + re-read + sole-you check). Lost the race → yield, restart selection. (Assigning yourself fires the `project-in-progress` automation that moves the card to In Progress — do NOT touch the board manually.)
    - Otherwise → `[PICKED] type=implement #<N>`; work type = implement, issue = #N.
