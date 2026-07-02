@@ -11,6 +11,10 @@ import (
 	"github.com/pizdagladki/full/services/koth/internal/app"
 )
 
+// shutdownSignals are the OS signals that trigger a graceful shutdown of the
+// service (cancels the ctx passed to app.Run).
+var shutdownSignals = []os.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP}
+
 func main() {
 	err := run()
 	if err != nil {
@@ -20,8 +24,7 @@ func main() {
 }
 
 func run() error {
-	ctx, stop := signal.NotifyContext(context.Background(),
-		syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals...)
 	defer stop()
 
 	return app.New("koth").Run(ctx)
