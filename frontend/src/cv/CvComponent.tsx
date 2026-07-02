@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { CvEngine } from './CvEngine';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from './types';
 
@@ -25,6 +25,10 @@ export const CvComponent = forwardRef<CvHandleRef, CvComponentProps>(({ runner, 
     stop: () => engineRef.current!.stop(),
     getState: () => engineRef.current!.getState(),
   }));
+
+  // Stop the engine on unmount even if the consumer never called stop() — otherwise the RAF
+  // loop (and the underlying video/CV work) keeps running after the component is gone.
+  useEffect(() => () => engineRef.current?.stop(), []);
 
   return null;
 });

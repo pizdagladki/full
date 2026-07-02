@@ -6,6 +6,13 @@ export interface NormalizedLandmark {
 
 export interface FaceLandmarkResult {
   faceLandmarks: NormalizedLandmark[][];
+  /**
+   * Optional per-face detection confidence, parallel to `faceLandmarks` (index [0] is the
+   * primary/first face). OPTIONAL for backward compatibility: an absent value means "confident" —
+   * every existing result/helper that omits it keeps compiling and behaving exactly as before.
+   * Real runners (FaceLandmarker) populate this from the detection score.
+   */
+  faceConfidences?: number[];
 }
 
 // Injectable runner — production wraps real FaceLandmarker; tests provide mocks

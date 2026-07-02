@@ -7,6 +7,13 @@ const DEFAULT_THRESHOLD = 0.25;
 const THRESHOLD_RATIO = 0.75;
 const BLINK_FRAMES = 2;
 const NO_FACE_WINDOW = 3;
+// A detected face whose confidence is below this is treated as "no reliable data this frame" —
+// skipped entirely (not fed to calibration/blink counters, not face-present/face-absent evidence).
+const CONFIDENCE_THRESHOLD = 0.5;
+// EMA coefficient for temporal EAR smoothing before threshold comparison in doDetection.
+// Fairly fast (favors the latest sample) so a genuine blink still confirms within BLINK_FRAMES,
+// while isolated single/double-frame noise dips get pulled back toward the recent baseline.
+const EAR_SMOOTHING_ALPHA = 0.7;
 
 /**
  * CvEngine drives the per-frame CV loop.
@@ -33,6 +40,11 @@ export class CvEngine implements CvHandleRef {
   // One physical blink = one event: latched on fire, re-armed only after BOTH eyes reopen
   private blinkFired = false;
 
+  // Temporally-smoothed EAR (EMA), seeded lazily from the first running-state frame.
+  // null until the first frame is processed in 'running' state.
+  private leftEarSmoothed: number | null = null;
+  private rightEarSmoothed: number | null = null;
+
   // Face gating
   private facePresent = false;
   private noFaceCount = 0;
@@ -54,6 +66,8 @@ export class CvEngine implements CvHandleRef {
     this.leftBelow = 0;
     this.rightBelow = 0;
     this.blinkFired = false;
+    this.leftEarSmoothed = null;
+    this.rightEarSmoothed = null;
     this.facePresent = false;
     this.noFaceCount = 0;
     this.scheduleFrame();
@@ -90,6 +104,17 @@ export class CvEngine implements CvHandleRef {
     if (faces.length === 0) {
       this.handleNoFace();
       // Re-read state: a callback inside handleNoFace could call stop()
+      if ((this.state as CvState) !== 'idle') this.scheduleFrame();
+      return;
+    }
+
+    // Landmark-confidence gate: a face WAS detected, but if the detector isn't confident about
+    // it, treat the frame as if it never happened for decision purposes — no calibration sample,
+    // no blink-counter advance, no face-present/face-absent evidence. Absent confidence means
+    // "confident" (backward compatible with runners/tests that don't report it). The RAF loop
+    // still reschedules normally.
+    const confidence = result.faceConfidences?.[0];
+    if (confidence !== undefined && confidence < CONFIDENCE_THRESHOLD) {
       if ((this.state as CvState) !== 'idle') this.scheduleFrame();
       return;
     }
@@ -148,8 +173,23 @@ export class CvEngine implements CvHandleRef {
   }
 
   private doDetection(landmarks: NormalizedLandmark[]): void {
-    const leftEar = computeEAR(landmarks, LEFT_EYE_INDICES);
-    const rightEar = computeEAR(landmarks, RIGHT_EYE_INDICES);
+    const leftEarRaw = computeEAR(landmarks, LEFT_EYE_INDICES);
+    const rightEarRaw = computeEAR(landmarks, RIGHT_EYE_INDICES);
+
+    // Temporal smoothing (EMA) BEFORE threshold comparison — smooths out single/double-frame
+    // noise dips while a genuine sustained closure still confirms within BLINK_FRAMES. Seeded
+    // lazily from the first running-state frame (no smoothing lag on frame 1).
+    this.leftEarSmoothed =
+      this.leftEarSmoothed === null
+        ? leftEarRaw
+        : EAR_SMOOTHING_ALPHA * leftEarRaw + (1 - EAR_SMOOTHING_ALPHA) * this.leftEarSmoothed;
+    this.rightEarSmoothed =
+      this.rightEarSmoothed === null
+        ? rightEarRaw
+        : EAR_SMOOTHING_ALPHA * rightEarRaw + (1 - EAR_SMOOTHING_ALPHA) * this.rightEarSmoothed;
+
+    const leftEar = this.leftEarSmoothed;
+    const rightEar = this.rightEarSmoothed;
 
     // Advance per-eye counters
     if (leftEar < this.leftThreshold) {

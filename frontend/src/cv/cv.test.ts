@@ -452,6 +452,152 @@ describe('face gating', () => {
 });
 
 // ---------------------------------------------------------------------------
+// EAR smoothing (criterion 6)
+// ---------------------------------------------------------------------------
+describe('EAR smoothing', () => {
+  /** Helper: get engine past calibration, return it with the blink mock. */
+  function makeRunningEngine(callbacks: CvCallbacks, openEar = 0.4): { engine: CvEngine; runner: { detectForVideo: ReturnType<typeof vi.fn> } } {
+    const runner = makeRunner(faceResult(openEar, openEar));
+    const engine = new CvEngine(runner, callbacks);
+    engine.start(makeFakeVideo());
+    for (let i = 0; i < 30; i++) engine.processFrame(i * 33);
+    return { engine, runner: runner as unknown as { detectForVideo: ReturnType<typeof vi.fn> } };
+  }
+
+  it('criterion 6: two consecutive noisy dips just below the raw threshold are smoothed away — no onBlink', () => {
+    // Calibrated threshold = 0.4 * 0.75 = 0.30. Noise dip = 0.295, which is BELOW the raw
+    // threshold on both frames — on RAW EAR (no smoothing) this would satisfy the 2-consecutive
+    // frame confirmation and fire a blink. With EMA smoothing (seeded from the open baseline on
+    // the frame right before the noise), the smoothed value is pulled back above 0.30 on both
+    // dip frames, so no blink fires. Removing smoothing flips this test to failing.
+    const onBlink = vi.fn();
+    const { engine, runner } = makeRunningEngine({ onBlink });
+
+    // Seed the smoothing baseline with one genuine open-eye running frame.
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.4, 0.4));
+    engine.processFrame(31 * 33);
+    expect(onBlink).not.toHaveBeenCalled();
+
+    // Two consecutive noisy dips — raw EAR below threshold, smoothed EAR stays above it.
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.295, 0.295));
+    engine.processFrame(32 * 33);
+    engine.processFrame(33 * 33);
+    expect(onBlink).not.toHaveBeenCalled();
+
+    // Back to open — confirms no lingering counter was silently building up.
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.4, 0.4));
+    engine.processFrame(34 * 33);
+    expect(onBlink).not.toHaveBeenCalled();
+  });
+
+  it('criterion 6: a genuine deep sustained closure still fires onBlink exactly once through smoothing', () => {
+    // A real blink (deep closure, well below threshold even accounting for EMA lag) must still
+    // fire — smoothing must not suppress genuine blinks, and the blinkFired latch must still
+    // hold so a held-closed eye does not re-fire.
+    const onBlink = vi.fn();
+    const { engine, runner } = makeRunningEngine({ onBlink });
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.05, 0.05));
+    for (let i = 31; i <= 40; i++) engine.processFrame(i * 33); // 10 consecutive deep-closed frames
+    expect(onBlink).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Landmark-confidence gate (criterion 5)
+// ---------------------------------------------------------------------------
+describe('landmark-confidence gate', () => {
+  it('criterion 5: a low-confidence closed-eye sequence fires NO onBlink', () => {
+    // Even many consecutive low-confidence "detected" frames reporting closed eyes must never
+    // fire a blink — they must be skipped entirely (not fed to the blink counters). Without the
+    // gate, 2 consecutive closed-eye frames would satisfy BLINK_FRAMES and fire.
+    const onBlink = vi.fn();
+    const runner = makeRunner(faceResult(0.4, 0.4));
+    const engine = new CvEngine(runner, { onBlink });
+    engine.start(makeFakeVideo());
+    for (let i = 0; i < 30; i++) engine.processFrame(i * 33);
+    expect(engine.getState()).toBe('running');
+
+    const lowConfClosed: FaceLandmarkResult = { faceLandmarks: [makeLandmarks(0.1, 0.1)], faceConfidences: [0.1] };
+    vi.mocked(runner.detectForVideo).mockReturnValue(lowConfClosed);
+    for (let i = 0; i < 10; i++) engine.processFrame((30 + i) * 33);
+    expect(onBlink).not.toHaveBeenCalled();
+  });
+
+  it('criterion 5: interleaved low-confidence detected frames do not disturb the no-face streak', () => {
+    // Low-confidence "detected" frames interleaved between genuine no-face frames must be
+    // skipped entirely — they must neither reset nor advance the no-face streak. If they were
+    // (incorrectly) treated as face-present evidence, the streak would keep getting reset and
+    // onFaceLost would never fire despite 3 genuine no-face frames.
+    const onFaceLost = vi.fn();
+    const runner = makeRunner(faceResult(0.4, 0.4));
+    const engine = new CvEngine(runner, { onFaceLost });
+    engine.start(makeFakeVideo());
+    engine.processFrame(0); // face present
+
+    const lowConfDetected: FaceLandmarkResult = { faceLandmarks: [makeLandmarks(0.4, 0.4)], faceConfidences: [0.1] };
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(noFaceResult);
+    engine.processFrame(33); // genuine no-face #1
+    expect(onFaceLost).not.toHaveBeenCalled();
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(lowConfDetected);
+    engine.processFrame(66); // low-confidence detected — must be skipped, not reset the streak
+    expect(onFaceLost).not.toHaveBeenCalled();
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(noFaceResult);
+    engine.processFrame(99); // genuine no-face #2
+    expect(onFaceLost).not.toHaveBeenCalled();
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(lowConfDetected);
+    engine.processFrame(132); // another low-confidence detected frame — still must not count
+    expect(onFaceLost).not.toHaveBeenCalled();
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(noFaceResult);
+    engine.processFrame(165); // genuine no-face #3 — window reached despite the interleaving
+    expect(onFaceLost).toHaveBeenCalledTimes(1);
+  });
+
+  it('criterion 5: low-confidence frames during calibration do not feed samples or advance calibration', () => {
+    // A face IS detected every frame, but confidence is always low — calibration must never
+    // complete (calibrationFrame frozen), proving the frames were skipped rather than sampled.
+    const lowConfOpen: FaceLandmarkResult = { faceLandmarks: [makeLandmarks(0.4, 0.4)], faceConfidences: [0.1] };
+    const runner = makeRunner(lowConfOpen);
+    const engine = new CvEngine(runner);
+    engine.start(makeFakeVideo());
+    for (let i = 0; i < 40; i++) engine.processFrame(i * 33); // well past CALIBRATION_FRAMES (30)
+    expect(engine.getState()).toBe('calibrating');
+  });
+
+  it('criterion 5: the RAF loop still reschedules normally for a skipped low-confidence frame', () => {
+    const lowConfOpen: FaceLandmarkResult = { faceLandmarks: [makeLandmarks(0.4, 0.4)], faceConfidences: [0.1] };
+    const runner = makeRunner(lowConfOpen);
+    const engine = new CvEngine(runner);
+    engine.start(makeFakeVideo());
+    vi.mocked(requestAnimationFrame).mockClear();
+    engine.processFrame(0);
+    expect(requestAnimationFrame).toHaveBeenCalled();
+  });
+
+  it('fails-on-violation: a low-confidence frame must not be mistaken for a genuine no-face frame', () => {
+    // A face IS detected (faceLandmarks.length > 0) but with low confidence — this must NOT
+    // increment noFaceCount the way a genuine no-face frame (length === 0) would.
+    const onFaceLost = vi.fn();
+    const runner = makeRunner(faceResult(0.4, 0.4));
+    const engine = new CvEngine(runner, { onFaceLost });
+    engine.start(makeFakeVideo());
+    engine.processFrame(0); // face present
+
+    const lowConfDetected: FaceLandmarkResult = { faceLandmarks: [makeLandmarks(0.4, 0.4)], faceConfidences: [0.1] };
+    vi.mocked(runner.detectForVideo).mockReturnValue(lowConfDetected);
+    // Feed far more low-confidence detected frames than NO_FACE_WINDOW — if these counted as
+    // no-face evidence, onFaceLost would fire; they must not, since a face WAS detected.
+    for (let i = 1; i <= 10; i++) engine.processFrame(i * 33);
+    expect(onFaceLost).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Imperative API smoke test (criterion 1 + 5)
 // ---------------------------------------------------------------------------
 describe('imperative API smoke test', () => {
