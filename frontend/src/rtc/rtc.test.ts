@@ -8,7 +8,18 @@ import type { WsLike, PcLike, WsFactory, PcFactory } from './index';
 
 class MockWebSocket implements WsLike {
   readonly url: string;
-  send = vi.fn();
+  // Self-review item 1: models a real WebSocket's CONNECTING state — send()
+  // throws (like the browser's InvalidStateError) until simulateOpen() has
+  // run, so any code path that forgets to buffer is caught here.
+  private opened = false;
+  send = vi.fn<(data: string) => void>(() => {
+    if (!this.opened) {
+      throw new DOMException(
+        "Failed to execute 'send' on 'WebSocket': still in CONNECTING state",
+        'InvalidStateError',
+      );
+    }
+  });
   close = vi.fn();
 
   private _onopen: (() => void) | null = null;
@@ -26,6 +37,9 @@ class MockWebSocket implements WsLike {
   }
 
   simulateOpen(): void {
+    // A real socket's readyState flips to OPEN before onopen fires, so sends
+    // made from within the onopen handler itself are legal.
+    this.opened = true;
     this._onopen?.();
   }
 
@@ -239,6 +253,54 @@ describe('RtcPeerImpl', () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
+  // ---------------------------------------------------------------------------
+  // Self-review item 1: buffer outbound sdp/ice frames until the WS is OPEN,
+  // and send `join` first when it does open.
+  // ---------------------------------------------------------------------------
+
+  // criterion: 1 — outbound sdp/ice frames are buffered while the WS is
+  // connecting, and flushed (in order, after join) once it opens
+  it('buffers outbound sdp/ice frames until WS open; join is sent first, then buffered frames in order', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    // isOfferer=true — onnegotiationneeded fires right after addTrack in the
+    // constructor, in a real browser well BEFORE the WS finishes connecting.
+    makePeer(wsFactory, pcFactory, 'room-1', true);
+
+    // Do NOT call ws.simulateOpen() yet — the socket is still "connecting".
+    // The mock's send() throws (like a real WebSocket's InvalidStateError) if
+    // called in that state, so any code path that forgets to buffer surfaces
+    // here as a call to a throwing send() rather than silently succeeding.
+    pc.simulateNegotiationNeeded();
+    await new Promise((r) => setTimeout(r, 20));
+    // The sdp offer must be buffered, not sent, while still connecting.
+    expect(ws.send).not.toHaveBeenCalled();
+
+    const iceCandidate = {
+      candidate: 'candidate:1 udp 1 1.2.3.4 1 typ host',
+      sdpMid: '0',
+      sdpMLineIndex: 0,
+    } as unknown as RTCIceCandidate;
+    pc.simulateIceCandidate(iceCandidate);
+    // The ice candidate must also be buffered, not sent, while still connecting.
+    expect(ws.send).not.toHaveBeenCalled();
+
+    // Now the socket opens — join must go out first, then the buffered
+    // frames, in the order they were queued.
+    ws.simulateOpen();
+
+    expect(ws.send).toHaveBeenCalledTimes(3);
+    const frames = ws.send.mock.calls.map(
+      (call) => JSON.parse(call[0] as string) as { type: string },
+    );
+    expect(frames[0]).toMatchObject({ type: 'join', room_id: 'room-1' });
+    expect(frames[1]).toMatchObject({
+      type: 'sdp',
+      room_id: 'room-1',
+      sdp: { type: 'offer' },
+    });
+    expect(frames[2]).toMatchObject({ type: 'ice', room_id: 'room-1' });
+  });
+
   // criterion: 2 — offer side (isOfferer=true): onnegotiationneeded → sends sdp offer
   it('offer→answer flow: onnegotiationneeded sends sdp offer over WS', async () => {
     const { ws, pc, wsFactory, pcFactory } = makeFactories();
@@ -268,6 +330,7 @@ describe('RtcPeerImpl', () => {
 
     const answerMsg = JSON.stringify({
       type: 'sdp',
+      room_id: 'room-1', // matches this peer's room — must NOT be filtered out
       sdp: { type: 'answer', sdp: 'remote-answer-sdp' },
     });
     ws.simulateMessage(answerMsg);
@@ -300,6 +363,7 @@ describe('RtcPeerImpl', () => {
 
     const offerMsg = JSON.stringify({
       type: 'sdp',
+      room_id: 'room-1', // matches this peer's room — must NOT be filtered out
       sdp: { type: 'offer', sdp: 'remote-offer-sdp' },
     });
     ws.simulateMessage(offerMsg);
@@ -342,6 +406,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'ice',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         candidate: { candidate: 'c', sdpMid: '0', sdpMLineIndex: 0 },
       }),
     );
@@ -397,6 +462,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         sdp: { type: 'offer', sdp: 'remote-offer-sdp' },
       }),
     );
@@ -404,6 +470,7 @@ describe('RtcPeerImpl', () => {
 
     const iceMsg = JSON.stringify({
       type: 'ice',
+      room_id: 'room-1', // matches this peer's room — must NOT be filtered out
       candidate: {
         candidate: 'candidate:0 1 UDP 12345 192.168.0.1 54321 typ host',
         sdpMid: '0',
@@ -428,6 +495,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         sdp: { type: 'answer', sdp: 'x' },
       }),
     );
@@ -451,6 +519,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'ice',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         candidate: { candidate: 'early-cand', sdpMid: '0', sdpMLineIndex: 0 },
       }),
     );
@@ -463,6 +532,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         sdp: { type: 'answer', sdp: 'answer-sdp' },
       }),
     );
@@ -490,6 +560,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'ice',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         candidate: { candidate: 'early-callee-cand', sdpMid: '0', sdpMLineIndex: 0 },
       }),
     );
@@ -502,6 +573,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         sdp: { type: 'offer', sdp: 'remote-offer-sdp' },
       }),
     );
@@ -572,6 +644,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'ice',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         candidate: { candidate: 'x', sdpMid: '0', sdpMLineIndex: 0 },
       }),
     );
@@ -608,6 +681,85 @@ describe('RtcPeerImpl', () => {
     expect(pc.setRemoteDescription).not.toHaveBeenCalled();
     expect(pc.addIceCandidate).not.toHaveBeenCalled();
     expect(pc.createAnswer).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Self-review item 3 (AC4 gap): sdp/ice messages carrying a FOREIGN room_id
+  // must be ignored, not just messages of an unknown type.
+  // ---------------------------------------------------------------------------
+
+  // criterion: 4 — sdp messages for another room_id are ignored
+  it('room filter FAILS if an sdp message for a foreign room_id is applied', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    makePeer(wsFactory, pcFactory, 'room-1', false);
+    ws.simulateOpen();
+
+    // A valid sdp offer, but for a DIFFERENT room than this peer joined.
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'sdp',
+        room_id: 'some-other-room',
+        sdp: { type: 'offer', sdp: 'foreign-offer-sdp' },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(pc.setRemoteDescription).not.toHaveBeenCalled();
+  });
+
+  // criterion: 4 — ice messages for another room_id are ignored
+  it('room filter FAILS if an ice message for a foreign room_id is applied', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    makePeer(wsFactory, pcFactory, 'room-1', false);
+    ws.simulateOpen();
+
+    // Establish the remote description for OUR room first, so that absent
+    // the room filter the candidate below would be applied immediately
+    // (never queued) — isolating the room_id check.
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'sdp',
+        room_id: 'room-1',
+        sdp: { type: 'offer', sdp: 'remote-offer-sdp' },
+      }),
+    );
+    await vi.waitFor(() => expect(pc.setRemoteDescription).toHaveBeenCalled());
+
+    // A valid ice candidate, but for a DIFFERENT room than this peer joined.
+    ws.simulateMessage(
+      JSON.stringify({
+        type: 'ice',
+        room_id: 'some-other-room',
+        candidate: { candidate: 'foreign-cand', sdpMid: '0', sdpMLineIndex: 0 },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(pc.addIceCandidate).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Self-review item 4: handle server `{type:"error", error}` frames — the
+  // signaling server sends these on a full room / bad frame and closes the
+  // socket right after; the client must tear down and notify the caller
+  // instead of silently running on a dead channel with the camera live.
+  // ---------------------------------------------------------------------------
+
+  // criterion: error frame — closes the peer and notifies the caller via onError
+  it('handles a server error frame: closes ws/pc and notifies the caller via onError', async () => {
+    const { ws, pc, wsFactory, pcFactory } = makeFactories();
+    const peer = makePeer(wsFactory, pcFactory);
+    ws.simulateOpen();
+
+    const errorCb = vi.fn();
+    peer.onError(errorCb);
+
+    ws.simulateMessage(JSON.stringify({ type: 'error', error: 'room is full' }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(ws.close).toHaveBeenCalled();
+    expect(pc.close).toHaveBeenCalled();
+    expect(errorCb).toHaveBeenCalledWith('room is full');
   });
 
   // criterion: 1, 2 — local tracks are added to pc from the localStream
@@ -664,6 +816,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         sdp: { type: 'offer', sdp: 'offer-sdp' },
       }),
     );
@@ -672,6 +825,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'ice',
+        room_id: 'room-1', // matches this peer's room — must NOT be filtered out
         candidate: { candidate: 'c', sdpMid: '0', sdpMLineIndex: 0 },
       }),
     );

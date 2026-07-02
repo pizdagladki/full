@@ -159,15 +159,62 @@ describe('RtcComponent', () => {
     expect(pc2.addTrack).toHaveBeenCalled();
   });
 
-  // criterion: RtcComponent — onRemoteStream/onPeerLeft/close are no-ops when no peer connected
-  it('onRemoteStream, onPeerLeft, and close are no-ops when no peer is connected', () => {
+  // criterion: RtcComponent — onRemoteStream/onPeerLeft/onError/close are no-ops when no peer connected
+  it('onRemoteStream, onPeerLeft, onError, and close are no-ops when no peer is connected', () => {
     const ref = createRef<RtcHandle>();
     render(<RtcComponent ref={ref} signalingUrl="ws://sig" />);
 
     // Should not throw even without a connected peer
     expect(() => ref.current!.onRemoteStream(vi.fn())).not.toThrow();
     expect(() => ref.current!.onPeerLeft(vi.fn())).not.toThrow();
+    expect(() => ref.current!.onError(vi.fn())).not.toThrow();
     expect(() => ref.current!.close()).not.toThrow();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Self-review item 2: RtcComponent must tear down the peer on unmount —
+  // otherwise it leaks the WS + RTCPeerConnection + camera.
+  // ---------------------------------------------------------------------------
+
+  // criterion: RtcComponent — unmounting tears down the connected peer (ws + pc)
+  it('unmounting the component closes the connected peer (ws.close, pc.close)', () => {
+    const ws = new MockWebSocket();
+    const pc = new MockRTCPeerConnection();
+    const wsFactory: WsFactory = (() => ws) as WsFactory;
+    const pcFactory: PcFactory = () => pc;
+
+    const ref = createRef<RtcHandle>();
+    const { unmount } = render(
+      <RtcComponent
+        ref={ref}
+        signalingUrl="ws://sig"
+        wsFactory={wsFactory}
+        pcFactory={pcFactory}
+      />,
+    );
+
+    const stream = new MockMediaStream() as unknown as MediaStream;
+    ref.current!.connect({ room_id: 'r1', localStream: stream });
+
+    // Nothing torn down yet — the peer is still live.
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(pc.close).not.toHaveBeenCalled();
+
+    unmount();
+
+    // Unmounting MUST close the underlying WS and RTCPeerConnection — a
+    // regression that drops the cleanup effect leaves both (and the camera)
+    // running after the component is gone.
+    expect(ws.close).toHaveBeenCalled();
+    expect(pc.close).toHaveBeenCalled();
+  });
+
+  // criterion: RtcComponent — unmounting without a connected peer does not throw
+  it('unmounting without ever calling connect() does not throw', () => {
+    const ref = createRef<RtcHandle>();
+    const { unmount } = render(<RtcComponent ref={ref} signalingUrl="ws://sig" />);
+
+    expect(() => unmount()).not.toThrow();
   });
 
   // criterion: RtcComponent — renders null and exposes a ref handle

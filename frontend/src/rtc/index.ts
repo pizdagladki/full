@@ -3,6 +3,7 @@
 
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
   type ForwardedRef,
@@ -36,7 +37,14 @@ interface PeerLeftMsg {
   type: 'peer_left';
 }
 
-type SignalingMsg = JoinMsg | SdpMsg | IceMsg | PeerLeftMsg;
+// Server → client: sent on validation failure, a full room, or a bad frame
+// type; the server closes the socket right after (services/signaling/CLAUDE.md).
+interface ErrorMsg {
+  type: 'error';
+  error: string;
+}
+
+type SignalingMsg = JoinMsg | SdpMsg | IceMsg | PeerLeftMsg | ErrorMsg;
 
 // ---------------------------------------------------------------------------
 // Minimal WebSocket interface (so tests can inject a mock)
@@ -112,9 +120,19 @@ export class RtcPeerImpl {
   private readonly roomId: string;
   private remoteStreamCb: ((stream: MediaStream) => void) | undefined;
   private peerLeftCb: (() => void) | undefined;
+  private errorCb: ((error: string) => void) | undefined;
   // Fix 4: ICE candidate queue — hold candidates until remote description is set
   private pendingCandidates: RTCIceCandidateInit[] = [];
   private remoteDescriptionSet = false;
+  // Self-review item 1: outbound sdp/ice frames are buffered until the WS is
+  // OPEN. onnegotiationneeded fires right after addTrack (constructor time)
+  // and ICE gathering starts as soon as setLocalDescription runs — both well
+  // BEFORE the WS finishes connecting. A real WebSocket.send() while
+  // CONNECTING throws InvalidStateError, and even a frame that slipped
+  // through would race the `join` frame server-side ("not a member of this
+  // room"). So nothing but `join` itself may hit the wire before onopen.
+  private wsOpen = false;
+  private outboundQueue: string[] = [];
 
   constructor(opts: RtcPeerImplOpts) {
     const {
@@ -144,11 +162,13 @@ export class RtcPeerImpl {
         }
       : null; // callee never initiates offers
 
-    // Relay outgoing ICE candidates over the WS
+    // Relay outgoing ICE candidates over the WS. Fix 1: buffer until OPEN —
+    // gathering starts synchronously off setLocalDescription, well before the
+    // socket is guaranteed to be open.
     this.pc.onicecandidate = (ev) => {
       if (ev.candidate) {
         const msg: IceMsg = { type: 'ice', room_id: this.roomId, candidate: ev.candidate };
-        this.ws.send(JSON.stringify(msg));
+        this.sendOrBuffer(JSON.stringify(msg));
       }
     };
 
@@ -163,8 +183,17 @@ export class RtcPeerImpl {
     this.ws = wsFactory(signalingUrl);
 
     this.ws.onopen = () => {
+      // Fix 1: join MUST be the first frame the server sees (it establishes
+      // room membership) — send it directly, then flush anything buffered
+      // while the socket was still connecting, in the order it was queued.
       const msg: JoinMsg = { type: 'join', room_id: this.roomId };
       this.ws.send(JSON.stringify(msg));
+      this.wsOpen = true;
+      const queued = this.outboundQueue;
+      this.outboundQueue = [];
+      for (const frame of queued) {
+        this.ws.send(frame);
+      }
     };
 
     this.ws.onmessage = (ev) => {
@@ -191,16 +220,30 @@ export class RtcPeerImpl {
     this.peerLeftCb = cb;
   }
 
+  onError(cb: (error: string) => void): void {
+    this.errorCb = cb;
+  }
+
   close(): void {
     this.ws.close();
     this.pc.close();
+  }
+
+  // Fix 1: send immediately once the WS is OPEN; otherwise queue the frame —
+  // it will be flushed (in order) right after `join` in onopen.
+  private sendOrBuffer(data: string): void {
+    if (this.wsOpen) {
+      this.ws.send(data);
+    } else {
+      this.outboundQueue.push(data);
+    }
   }
 
   private async handleNegotiationNeeded(): Promise<void> {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     const msg: SdpMsg = { type: 'sdp', room_id: this.roomId, sdp: offer };
-    this.ws.send(JSON.stringify(msg));
+    this.sendOrBuffer(JSON.stringify(msg));
   }
 
   // Fix 4: flush all queued ICE candidates now that remote description is set
@@ -214,6 +257,12 @@ export class RtcPeerImpl {
   private async handleSignalingMessage(msg: SignalingMsg): Promise<void> {
     switch (msg.type) {
       case 'sdp': {
+        // Self-review item 3 (AC4): the server relays sdp/ice verbatim — never
+        // to other rooms — but defend the client too; ignore anything that
+        // does not carry OUR room_id.
+        if (msg.room_id !== this.roomId) {
+          return;
+        }
         const { sdp: description } = msg;
         if (description.type === 'offer') {
           await this.pc.setRemoteDescription(description);
@@ -233,6 +282,10 @@ export class RtcPeerImpl {
         break;
       }
       case 'ice': {
+        // Self-review item 3 (AC4): ignore ICE candidates for a foreign room_id
+        if (msg.room_id !== this.roomId) {
+          return;
+        }
         // Fix 4: queue ICE candidates until remote description is established
         if (this.remoteDescriptionSet) {
           await this.pc.addIceCandidate(msg.candidate);
@@ -247,8 +300,20 @@ export class RtcPeerImpl {
         this.ws.close();
         break;
       }
+      case 'error': {
+        // Self-review item 4: the server closes the socket right after an
+        // error frame (e.g. a 3rd peer hitting a full room) — mirror that on
+        // the client so we don't keep the camera live against a dead channel.
+        console.error('[rtc] signaling error', msg.error);
+        this.close();
+        this.errorCb?.(msg.error);
+        break;
+      }
       case 'join':
         // Server should not relay join back; ignore
+        break;
+      default:
+        // Unknown/malformed frame type — ignore rather than crash.
         break;
     }
   }
@@ -262,6 +327,9 @@ export interface RtcHandle {
   connect(opts: { room_id: string; localStream: MediaStream }): void;
   onRemoteStream(cb: (stream: MediaStream) => void): void;
   onPeerLeft(cb: () => void): void;
+  // Self-review item 4: surface server `error` frames to the caller, via the
+  // same on<Event>(cb) pattern already used by onRemoteStream/onPeerLeft.
+  onError(cb: (error: string) => void): void;
   close(): void;
 }
 
@@ -291,6 +359,15 @@ export const RtcComponent = forwardRef(function RtcComponent(
   // Fix 2: no default for signalingUrl — it is required in RtcComponentProps
   const { signalingUrl, wsFactory, pcFactory } = props;
 
+  // Self-review item 2: RtcComponent stores a live RtcPeerImpl in peerRef via
+  // connect(), but had no cleanup — leaking the WS + RTCPeerConnection +
+  // camera on unmount. Tear the peer down when the component goes away.
+  useEffect(() => {
+    return () => {
+      peerRef.current?.close();
+    };
+  }, []);
+
   useImperativeHandle(ref, () => ({
     connect({ room_id, localStream }) {
       if (peerRef.current) {
@@ -311,6 +388,9 @@ export const RtcComponent = forwardRef(function RtcComponent(
     },
     onPeerLeft(cb) {
       peerRef.current?.onPeerLeft(cb);
+    },
+    onError(cb) {
+      peerRef.current?.onError(cb);
     },
     close() {
       peerRef.current?.close();
