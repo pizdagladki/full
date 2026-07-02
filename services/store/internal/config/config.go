@@ -15,6 +15,14 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis" validate:"required"`
 	Session  SessionConfig  `yaml:"session"`
 	Stripe   StripeConfig   `yaml:"stripe" validate:"required"`
+	Points   PointsConfig   `yaml:"points"`
+}
+
+// PointsConfig holds the config-driven points-per-reason amounts (e.g.
+// match_win, level_up). These are placeholders — extend the map as new
+// earning reasons are added, without hardcoding amounts in Go.
+type PointsConfig struct {
+	Amounts map[string]int64 `yaml:"amounts"`
 }
 
 // StripeConfig holds Stripe API credentials and webhook settings.
@@ -48,6 +56,17 @@ const (
 	defaultAddr              = ":8083"
 	defaultSessionCookieName = "session"
 )
+
+// defaultPointsAmounts are placeholder points-per-reason amounts used in
+// env mode, since per-reason env vars are not required by the points
+// acceptance criteria. Values are placeholders, tunable via config.yaml
+// locally or a future env-driven scheme.
+func defaultPointsAmounts() map[string]int64 {
+	return map[string]int64{
+		"match_win": 10,
+		"level_up":  25,
+	}
+}
 
 // Load reads the config from environment variables when IS_DOCKER is set,
 // otherwise from the YAML file at path, then validates it.
@@ -90,6 +109,9 @@ func loadFromEnv() *Config {
 		Stripe: StripeConfig{
 			SecretKey:            os.Getenv("STRIPE_SECRET_KEY"),
 			WebhookSigningSecret: os.Getenv("STRIPE_WEBHOOK_SIGNING_SECRET"),
+		},
+		Points: PointsConfig{
+			Amounts: defaultPointsAmounts(),
 		},
 	}
 }

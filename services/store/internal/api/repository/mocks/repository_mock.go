@@ -246,3 +246,126 @@ func (mr *MockSessionRepositoryMockRecorder) UserIDBySession(ctx, sessionID any)
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserIDBySession", reflect.TypeOf((*MockSessionRepository)(nil).UserIDBySession), ctx, sessionID)
 }
+
+// MockPointsRepository is a mock of PointsRepository interface.
+type MockPointsRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockPointsRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockPointsRepositoryMockRecorder is the mock recorder for MockPointsRepository.
+type MockPointsRepositoryMockRecorder struct {
+	mock *MockPointsRepository
+}
+
+// NewMockPointsRepository creates a new mock instance.
+func NewMockPointsRepository(ctrl *gomock.Controller) *MockPointsRepository {
+	mock := &MockPointsRepository{ctrl: ctrl}
+	mock.recorder = &MockPointsRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPointsRepository) EXPECT() *MockPointsRepositoryMockRecorder {
+	return m.recorder
+}
+
+// Credit mocks base method.
+func (m *MockPointsRepository) Credit(ctx context.Context, userID, delta int64, reason, refID string) (int64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Credit", ctx, userID, delta, reason, refID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// Credit indicates an expected call of Credit.
+func (mr *MockPointsRepositoryMockRecorder) Credit(ctx, userID, delta, reason, refID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Credit", reflect.TypeOf((*MockPointsRepository)(nil).Credit), ctx, userID, delta, reason, refID)
+}
+
+// GetBalance mocks base method.
+func (m *MockPointsRepository) GetBalance(ctx context.Context, userID int64) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBalance", ctx, userID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBalance indicates an expected call of GetBalance.
+func (mr *MockPointsRepositoryMockRecorder) GetBalance(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBalance", reflect.TypeOf((*MockPointsRepository)(nil).GetBalance), ctx, userID)
+}
+
+// MockPointsCache is a mock of PointsCache interface.
+type MockPointsCache struct {
+	ctrl     *gomock.Controller
+	recorder *MockPointsCacheMockRecorder
+	isgomock struct{}
+}
+
+// MockPointsCacheMockRecorder is the mock recorder for MockPointsCache.
+type MockPointsCacheMockRecorder struct {
+	mock *MockPointsCache
+}
+
+// NewMockPointsCache creates a new mock instance.
+func NewMockPointsCache(ctrl *gomock.Controller) *MockPointsCache {
+	mock := &MockPointsCache{ctrl: ctrl}
+	mock.recorder = &MockPointsCacheMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPointsCache) EXPECT() *MockPointsCacheMockRecorder {
+	return m.recorder
+}
+
+// DeleteBalance mocks base method.
+func (m *MockPointsCache) DeleteBalance(ctx context.Context, userID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteBalance", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteBalance indicates an expected call of DeleteBalance.
+func (mr *MockPointsCacheMockRecorder) DeleteBalance(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteBalance", reflect.TypeOf((*MockPointsCache)(nil).DeleteBalance), ctx, userID)
+}
+
+// GetBalance mocks base method.
+func (m *MockPointsCache) GetBalance(ctx context.Context, userID int64) (int64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBalance", ctx, userID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetBalance indicates an expected call of GetBalance.
+func (mr *MockPointsCacheMockRecorder) GetBalance(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBalance", reflect.TypeOf((*MockPointsCache)(nil).GetBalance), ctx, userID)
+}
+
+// SetBalance mocks base method.
+func (m *MockPointsCache) SetBalance(ctx context.Context, userID, balance int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetBalance", ctx, userID, balance)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetBalance indicates an expected call of SetBalance.
+func (mr *MockPointsCacheMockRecorder) SetBalance(ctx, userID, balance any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBalance", reflect.TypeOf((*MockPointsCache)(nil).SetBalance), ctx, userID, balance)
+}

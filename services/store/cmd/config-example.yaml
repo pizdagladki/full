@@ -10,3 +10,7 @@ session:
 stripe:
   secret_key: "sk_test_..."
   webhook_signing_secret: "whsec_..."
+points:
+  amounts:
+    match_win: 10
+    level_up: 25

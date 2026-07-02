@@ -56,3 +56,32 @@ type SessionRepository interface {
 	// Returns ErrSessionNotFound when the key is absent or has expired.
 	UserIDBySession(ctx context.Context, sessionID string) (int64, error)
 }
+
+// PointsRepository is the data-access contract for the points ledger and
+// balance tables.
+type PointsRepository interface {
+	// Credit appends a points_ledger row and increments (or materializes at 0
+	// then increments) the user's points_balance, all in a SINGLE transaction.
+	// When refID is non-empty and a ledger row for (userID, reason, refID)
+	// already exists, the credit is a no-op: it returns the EXISTING balance
+	// with credited=false and does NOT append a row or change the balance.
+	// Otherwise it returns the new balance with credited=true.
+	Credit(ctx context.Context, userID, delta int64, reason, refID string) (newBalance int64, credited bool, err error)
+	// GetBalance returns the user's points balance. A user with no
+	// points_balance row yet returns 0, not an error (materialize-at-0 read
+	// semantics).
+	GetBalance(ctx context.Context, userID int64) (int64, error)
+}
+
+// PointsCache is the Redis-backed cache for points balances. A cache miss is
+// reported via found=false, not an error; Postgres (via PointsRepository)
+// remains the source of truth.
+type PointsCache interface {
+	// GetBalance returns the cached balance for userID. found is false on a
+	// cache miss.
+	GetBalance(ctx context.Context, userID int64) (balance int64, found bool, err error)
+	// SetBalance stores/overwrites the cached balance for userID.
+	SetBalance(ctx context.Context, userID, balance int64) error
+	// DeleteBalance invalidates the cached balance for userID.
+	DeleteBalance(ctx context.Context, userID int64) error
+}

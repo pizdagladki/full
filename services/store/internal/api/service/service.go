@@ -61,3 +61,18 @@ type SessionService interface {
 	// Returns the repository.ErrSessionNotFound sentinel when absent/expired.
 	ResolveSession(ctx context.Context, sessionID string) (int64, error)
 }
+
+// PointsService is the business-logic contract for points earn/read
+// operations.
+type PointsService interface {
+	// Credit resolves the earn amount (an explicit positive in.Delta, or the
+	// config-driven amount for in.Reason), then appends a ledger row and
+	// updates the balance atomically. Idempotent by (user_id, reason, ref_id):
+	// a duplicate reference returns the existing balance unchanged. Returns
+	// domain.ErrInvalidCredit when reason is empty or the resolved delta is
+	// not positive.
+	Credit(ctx context.Context, in domain.PointsCredit) (balance int64, err error)
+	// GetBalance returns the user's points balance, preferring the Redis
+	// cache and falling back to Postgres (the source of truth) on a miss.
+	GetBalance(ctx context.Context, userID int64) (int64, error)
+}

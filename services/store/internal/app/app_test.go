@@ -140,6 +140,12 @@ func TestInitRepositories(t *testing.T) {
 	if a.purchaseRepo == nil {
 		t.Fatal("purchaseRepo is nil after initRepositories")
 	}
+	if a.pointsRepo == nil {
+		t.Fatal("pointsRepo is nil after initRepositories")
+	}
+	if a.pointsCache == nil {
+		t.Fatal("pointsCache is nil after initRepositories")
+	}
 }
 
 // TestInitServices verifies that initServices wires all services from repos.
@@ -172,6 +178,9 @@ func TestInitServices(t *testing.T) {
 	if a.paymentProvider == nil {
 		t.Error("paymentProvider is nil after initServices")
 	}
+	if a.pointsSvc == nil {
+		t.Error("pointsSvc is nil after initServices")
+	}
 }
 
 // TestInitHandlers verifies that initHandlers wires storeHandler and purchaseHandler.
@@ -182,12 +191,14 @@ func TestInitHandlers(t *testing.T) {
 	catalogMock := svcmocks.NewMockCatalogService(ctrl)
 	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
 	purchaseMock := svcmocks.NewMockPurchaseService(ctrl)
+	pointsMock := svcmocks.NewMockPointsService(ctrl)
 
 	a := New("store")
 	a.logger = zap.NewNop()
 	a.catalogSvc = catalogMock
 	a.inventorySvc = inventoryMock
 	a.purchaseSvc = purchaseMock
+	a.pointsSvc = pointsMock
 
 	a.initHandlers()
 
@@ -197,6 +208,10 @@ func TestInitHandlers(t *testing.T) {
 
 	if a.purchaseHandler == nil {
 		t.Fatal("purchaseHandler is nil after initHandlers")
+	}
+
+	if a.pointsHandler == nil {
+		t.Fatal("pointsHandler is nil after initHandlers")
 	}
 }
 
@@ -290,6 +305,7 @@ func newTestApp(t *testing.T, addr string) *App {
 	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
 	sessionMock := svcmocks.NewMockSessionService(ctrl)
 	purchaseMock := svcmocks.NewMockPurchaseService(ctrl)
+	pointsMock := svcmocks.NewMockPointsService(ctrl)
 
 	a := New("store-test")
 	a.logger = zap.NewNop()
@@ -302,6 +318,7 @@ func newTestApp(t *testing.T, addr string) *App {
 	// Wire stub handlers and middleware so registerHTTPRoutes works.
 	a.storeHandler = delivery.NewStoreHandler(catalogMock, inventoryMock, zap.NewNop())
 	a.purchaseHandler = delivery.NewPurchaseHandler(purchaseMock, zap.NewNop())
+	a.pointsHandler = delivery.NewPointsHandler(pointsMock, zap.NewNop())
 	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
 
 	return a

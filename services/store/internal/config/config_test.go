@@ -171,6 +171,98 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+func TestLoad_PointsAmounts(t *testing.T) {
+	const (
+		validDSN  = "postgres://app:app@localhost:5432/app?sslmode=disable"
+		validAddr = "localhost:6379"
+	)
+
+	stripeEnv := map[string]string{
+		"STRIPE_SECRET_KEY":             "sk_test_valid",
+		"STRIPE_WEBHOOK_SIGNING_SECRET": "whsec_valid",
+	}
+	stripeYAML := "stripe:\n  secret_key: \"sk_test_valid\"\n  webhook_signing_secret: \"whsec_valid\"\n"
+
+	tests := []struct {
+		name        string
+		isDocker    bool
+		env         map[string]string
+		setup       func(t *testing.T) string
+		wantMatch   int64
+		wantLevel   int64
+		wantMissing bool // reason absent from the map entirely
+	}{
+		{
+			// criterion: points-config — env mode populates placeholder amounts
+			// (match_win, level_up) since per-reason env vars aren't required.
+			name:      "env mode populates placeholder points amounts",
+			isDocker:  true,
+			env:       mergeMaps(map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr}, stripeEnv),
+			wantMatch: 10,
+			wantLevel: 25,
+		},
+		{
+			// criterion: points-config — YAML mode reads points.amounts from the file,
+			// not hardcoded in Go, and honors custom placeholder numbers.
+			name: "file mode reads points amounts from yaml",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n"+
+						stripeYAML+"points:\n  amounts:\n    match_win: 42\n    level_up: 99\n")
+			},
+			wantMatch: 42,
+			wantLevel: 99,
+		},
+		{
+			// criterion: points-config — points section is optional (not validate:"required");
+			// config still loads successfully without it.
+			name: "file mode without points section still loads",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n"+stripeYAML)
+			},
+			wantMissing: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.isDocker {
+				t.Setenv("IS_DOCKER", "1")
+			}
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			path := ""
+			if tt.setup != nil {
+				path = tt.setup(t)
+			}
+
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if tt.wantMissing {
+				if len(cfg.Points.Amounts) != 0 {
+					t.Errorf("Points.Amounts = %v, want empty", cfg.Points.Amounts)
+				}
+
+				return
+			}
+
+			if got := cfg.Points.Amounts["match_win"]; got != tt.wantMatch {
+				t.Errorf("Points.Amounts[match_win] = %d, want %d", got, tt.wantMatch)
+			}
+
+			if got := cfg.Points.Amounts["level_up"]; got != tt.wantLevel {
+				t.Errorf("Points.Amounts[level_up] = %d, want %d", got, tt.wantLevel)
+			}
+		})
+	}
+}
+
 func writeTempConfig(t *testing.T, body string) string {
 	t.Helper()
 
