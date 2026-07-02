@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -129,6 +130,21 @@ function renderSearch(wsClient: WsClientApi, cvRunner: LandmarkRunner) {
         <Route path="/battle" element={<BattleProbe />} />
       </Routes>
     </MemoryRouter>,
+  );
+}
+
+/** Same as renderSearch, but wrapped in React.StrictMode (mount→cleanup→mount in dev). */
+function renderSearchStrict(wsClient: WsClientApi, cvRunner: LandmarkRunner) {
+  return render(
+    <StrictMode>
+      <MemoryRouter initialEntries={['/search']}>
+        <Routes>
+          <Route path="/search" element={<Search wsClient={wsClient} cvRunner={cvRunner} />} />
+          <Route path="/home" element={<div>HOME</div>} />
+          <Route path="/battle" element={<BattleProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </StrictMode>,
   );
 }
 
@@ -279,6 +295,26 @@ describe('Search', () => {
     expect(screen.getByTestId('search-animation')).toBeInTheDocument();
   });
 
+  // criterion: 3 (violation guard) — a {type:'matched'} frame with NO room_id must NOT navigate
+  // to /battle (would otherwise carry roomId: undefined); the player stays on search-animation.
+  it('matched-transitions-to-battle violation guard: a matched frame missing room_id does not navigate', () => {
+    const { ws, fireOpen, fireMessage } = makeMockWs();
+    const { runner, setResult } = makeCvRunner();
+    renderSearch(ws, runner);
+
+    act(() => {
+      fireOpen();
+    });
+    tickFrame(setResult, FACE_FRAME);
+
+    act(() => {
+      fireMessage(JSON.stringify({ type: 'matched', opponent: { id: 'x' } }));
+    });
+
+    expect(screen.queryByTestId('battle-probe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('search-animation')).toBeInTheDocument();
+  });
+
   // criterion: 4 — unmounting (navigating away) sends leave and closes the WS: no ghost search.
   it('leave-on-exit: unmounting sends leave and closes the WS (no ghost search)', () => {
     const { ws, fireOpen } = makeMockWs();
@@ -306,6 +342,32 @@ describe('Search', () => {
     unmount();
 
     expect(sentMessages(ws)).not.toContainEqual({ type: 'leave' });
+    expect(ws.close).toHaveBeenCalled();
+  });
+
+  // criterion: 4 — StrictMode regression: a mount→cleanup→mount cycle (React.StrictMode in dev)
+  // must not permanently latch the teardown guard. Without resetting the gate refs at the top of
+  // the mount effect, the StrictMode-only synthetic cleanup sets teardownRef=true forever, so the
+  // REAL unmount below early-returns and never sends `leave` for the connection that actually
+  // joined — a ghost queue entry. This test FAILS without that reset.
+  it('leave-on-exit: a StrictMode mount-cleanup-mount cycle still sends leave + closes the WS on the real unmount', () => {
+    const { ws, fireOpen } = makeMockWs();
+    const { runner, setResult } = makeCvRunner();
+    const { unmount } = renderSearchStrict(ws, runner);
+
+    // StrictMode double-invokes the mount effect in dev — confirm we actually exercised that path.
+    expect(vi.mocked(ws.connect).mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    act(() => {
+      fireOpen();
+    });
+    tickFrame(setResult, FACE_FRAME); // joins on the settled (second) connection
+
+    expect(sentMessages(ws)).toContainEqual({ type: 'join', mode: 'ranked', level: 1 });
+
+    unmount();
+
+    expect(sentMessages(ws)).toContainEqual({ type: 'leave' });
     expect(ws.close).toHaveBeenCalled();
   });
 

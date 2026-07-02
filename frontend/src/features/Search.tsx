@@ -152,7 +152,10 @@ export function Search({
     (data: string) => {
       try {
         const msg = JSON.parse(data) as UnknownServerMsg;
-        if (msg.type === 'matched') {
+        // Require a real room id before navigating — a malformed {type:'matched'} frame with no
+        // (or empty) room_id must NOT send the player to a battle screen with roomId: undefined;
+        // it's ignored and the player stays on the search-animation placeholder.
+        if (msg.type === 'matched' && typeof msg.room_id === 'string' && msg.room_id) {
           const matched = msg as MatchedMsg;
           teardown(false);
           navigate('/battle', { state: { roomId: matched.room_id, opponent: matched.opponent } });
@@ -164,8 +167,22 @@ export function Search({
     [teardown, navigate],
   );
 
-  // Mount effect — open the matchmaking WS and start the CV loop. Runs exactly once.
+  // Mount effect — open the matchmaking WS and start the CV loop. In production this runs exactly
+  // once; under React.StrictMode (dev) it runs mount → cleanup → mount on the same fiber, so the
+  // per-connection gate refs are reset to a clean slate HERE (not just at declaration) — otherwise
+  // the StrictMode-only cleanup's teardown(true) latches teardownRef=true permanently, and the
+  // REAL later unmount's teardown() early-returns: the second connection's `leave` is never sent
+  // and its socket is never closed (a ghost queue entry — violates criterion 4).
   useEffect(() => {
+    // Reset the gate refs only — NOT the `facePresent` render state. `facePresent` can only ever
+    // flip true via the async, RAF-driven onFacePresent callback, which cannot fire inside this
+    // synchronous mount→cleanup→mount window, so it is still (and can only be) `false` here; no
+    // setState call is needed (or safe to make synchronously inside an effect body).
+    teardownRef.current = false;
+    wsOpenRef.current = false;
+    joinedRef.current = false;
+    facePresentRef.current = false;
+
     const ws = wsRef.current!;
     ws.connect(MATCHMAKING_WS_PATH);
     ws.onOpen(() => {
