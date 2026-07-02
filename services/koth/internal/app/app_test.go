@@ -8,8 +8,12 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 
+	"github.com/pizdagladki/full/services/koth/internal/api/delivery"
+	"github.com/pizdagladki/full/services/koth/internal/api/middleware"
+	svcmocks "github.com/pizdagladki/full/services/koth/internal/api/service/mocks"
 	"github.com/pizdagladki/full/services/koth/internal/config"
 )
 
@@ -193,16 +197,26 @@ func TestRun_FailsOnPostgres(t *testing.T) {
 }
 
 // newTestApp builds an App wired with the minimum needed to exercise the HTTP
-// worker and router: a no-op logger, the validator, and an HTTP addr.
+// worker and router: a no-op logger, the validator, an HTTP addr, and stub
+// handlers/middleware so registerHTTPRoutes works without a live database.
 func newTestApp(t *testing.T, addr string) *App {
 	t.Helper()
+
+	ctrl := gomock.NewController(t)
+	rankMock := svcmocks.NewMockRankService(ctrl)
+	sessionMock := svcmocks.NewMockSessionService(ctrl)
 
 	a := New("koth-test")
 	a.logger = zap.NewNop()
 	a.initValidator()
 	a.cfg = &config.Config{
-		HTTP: config.HTTPConfig{Addr: addr},
+		HTTP:    config.HTTPConfig{Addr: addr},
+		Session: config.SessionConfig{CookieName: "session"},
 	}
+
+	// Wire stub handlers and middleware so registerHTTPRoutes works.
+	a.rankHandler = delivery.NewRankHandler(rankMock, zap.NewNop())
+	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
 
 	return a
 }

@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,6 +15,8 @@ type Config struct {
 	HTTP     HTTPConfig     `yaml:"http"     validate:"required"`
 	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
 	Redis    RedisConfig    `yaml:"redis"    validate:"required"`
+	Session  SessionConfig  `yaml:"session"`
+	Ranked   RankedConfig   `yaml:"ranked"   validate:"required"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -31,7 +35,22 @@ type RedisConfig struct {
 	Password string `yaml:"password"`
 }
 
-const defaultAddr = ":8080"
+// SessionConfig holds session cookie settings.
+type SessionConfig struct {
+	CookieName string `yaml:"cookie_name"`
+}
+
+// RankedConfig holds the ranked-hill hold-time rank thresholds (in
+// milliseconds), config-driven placeholders rather than hardcoded values.
+// Thresholds must be non-empty and strictly ascending — see validate.go.
+type RankedConfig struct {
+	Thresholds []int `yaml:"thresholds" validate:"required,min=1"`
+}
+
+const (
+	defaultAddr              = ":8080"
+	defaultSessionCookieName = "session"
+)
 
 // Load reads the config from environment variables when IS_DOCKER is set,
 // otherwise from the YAML file at path, then validates it.
@@ -68,6 +87,12 @@ func loadFromEnv() *Config {
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
 		},
+		Session: SessionConfig{
+			CookieName: getEnv("SESSION_COOKIE_NAME", defaultSessionCookieName),
+		},
+		Ranked: RankedConfig{
+			Thresholds: parseThresholds(os.Getenv("RANKED_THRESHOLDS_MS")),
+		},
 	}
 }
 
@@ -78,7 +103,8 @@ func loadFromFile(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		HTTP: HTTPConfig{Addr: defaultAddr},
+		HTTP:    HTTPConfig{Addr: defaultAddr},
+		Session: SessionConfig{CookieName: defaultSessionCookieName},
 	}
 
 	err = yaml.Unmarshal(b, cfg)
@@ -88,6 +114,10 @@ func loadFromFile(path string) (*Config, error) {
 
 	if cfg.HTTP.Addr == "" {
 		cfg.HTTP.Addr = defaultAddr
+	}
+
+	if cfg.Session.CookieName == "" {
+		cfg.Session.CookieName = defaultSessionCookieName
 	}
 
 	return cfg, nil
@@ -100,4 +130,33 @@ func getEnv(key, def string) string {
 	}
 
 	return def
+}
+
+// parseThresholds parses a comma-separated list of ascending millisecond
+// thresholds (e.g. "5000,15000,30000"). Malformed or empty entries are
+// skipped; an empty/unset input yields an empty (invalid) slice, which fails
+// ValidateConfig and aborts startup rather than silently hardcoding ranks.
+func parseThresholds(raw string) []int {
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	thresholds := make([]int, 0, len(parts))
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		v, err := strconv.Atoi(p)
+		if err != nil {
+			continue
+		}
+
+		thresholds = append(thresholds, v)
+	}
+
+	return thresholds
 }
