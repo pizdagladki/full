@@ -10,6 +10,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/internal/platform/logger"
+	"github.com/pizdagladki/full/services/koth/internal/api/delivery"
+	"github.com/pizdagladki/full/services/koth/internal/api/middleware"
+	"github.com/pizdagladki/full/services/koth/internal/api/repository"
+	"github.com/pizdagladki/full/services/koth/internal/api/service"
 	"github.com/pizdagladki/full/services/koth/internal/config"
 )
 
@@ -23,6 +27,16 @@ type App struct {
 
 	pgxPool     *pgxpool.Pool
 	redisClient *redis.Client
+
+	rankRepo    repository.RankRepository
+	sessionRepo repository.SessionRepository
+
+	rankSvc    service.RankService
+	sessionSvc service.SessionService
+
+	rankHandler delivery.RankHandler
+
+	authMiddleware *middleware.AuthMiddleware
 }
 
 // New returns an empty App for the given service name.
@@ -59,6 +73,11 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = a.redisClient.Close() }()
+
+	a.initRepositories()
+	a.initServices()
+	a.initHandlers()
+	a.initMiddleware()
 
 	return a.runWorkers(ctx)
 }

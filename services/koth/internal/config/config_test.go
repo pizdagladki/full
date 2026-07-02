@@ -7,15 +7,17 @@ import (
 )
 
 const (
-	validDSN       = "postgres://app:app@localhost:5432/app?sslmode=disable"
-	validRedisAddr = "localhost:6379"
+	validDSN        = "postgres://app:app@localhost:5432/app?sslmode=disable"
+	validRedisAddr  = "localhost:6379"
+	validThresholds = "5000,15000,30000,60000,120000"
 )
 
 // fullEnv returns a map with all required environment variables set to valid values.
 func fullEnv() map[string]string {
 	return map[string]string{
-		"POSTGRES_DSN": validDSN,
-		"REDIS_ADDR":   validRedisAddr,
+		"POSTGRES_DSN":         validDSN,
+		"REDIS_ADDR":           validRedisAddr,
+		"RANKED_THRESHOLDS_MS": validThresholds,
 	}
 }
 
@@ -28,7 +30,8 @@ func fullYAML(httpAddr string) string {
 
 	return "http:\n  addr: \"" + addr + "\"\n" +
 		"postgres:\n  dsn: \"" + validDSN + "\"\n" +
-		"redis:\n  addr: \"" + validRedisAddr + "\"\n"
+		"redis:\n  addr: \"" + validRedisAddr + "\"\n" +
+		"ranked:\n  thresholds: [5000, 15000, 30000, 60000, 120000]\n"
 }
 
 func TestLoad(t *testing.T) {
@@ -58,14 +61,21 @@ func TestLoad(t *testing.T) {
 			// criterion: env mode fails validation when POSTGRES_DSN is missing
 			name:     "env mode missing Postgres DSN fails validation",
 			isDocker: true,
-			env:      map[string]string{"REDIS_ADDR": validRedisAddr},
+			env:      map[string]string{"REDIS_ADDR": validRedisAddr, "RANKED_THRESHOLDS_MS": validThresholds},
 			wantErr:  true,
 		},
 		{
 			// criterion: env mode fails validation when REDIS_ADDR is missing
 			name:     "env mode missing Redis addr fails validation",
 			isDocker: true,
-			env:      map[string]string{"POSTGRES_DSN": validDSN},
+			env:      map[string]string{"POSTGRES_DSN": validDSN, "RANKED_THRESHOLDS_MS": validThresholds},
+			wantErr:  true,
+		},
+		{
+			// criterion: 5 — env mode fails validation when RANKED_THRESHOLDS_MS is unset (no hardcoded fallback)
+			name:     "env mode missing ranked thresholds fails validation",
+			isDocker: true,
+			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validRedisAddr},
 			wantErr:  true,
 		},
 		{
@@ -89,7 +99,8 @@ func TestLoad(t *testing.T) {
 			name: "file mode missing required Postgres fails validation",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
-					"redis:\n  addr: \""+validRedisAddr+"\"\n",
+					"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 15000]\n",
 				)
 			},
 			wantErr: true,
@@ -107,6 +118,29 @@ func TestLoad(t *testing.T) {
 			name: "file mode invalid yaml errors",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, "http: [unterminated\n")
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 5 — file mode fails validation when ranked.thresholds is empty (config-driven, not hardcoded)
+			name: "file mode empty ranked thresholds fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n",
+				)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 5 — file mode fails validation when ranked.thresholds is not strictly ascending
+			name: "file mode non-ascending thresholds fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 3000, 30000]\n",
+				)
 			},
 			wantErr: true,
 		},
@@ -156,6 +190,7 @@ func TestValidateConfig(t *testing.T) {
 				HTTP:     HTTPConfig{Addr: ":8080"},
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000, 15000, 30000}},
 			},
 		},
 		{
@@ -164,6 +199,7 @@ func TestValidateConfig(t *testing.T) {
 			cfg: &Config{
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
 			},
 			wantErr: true,
 		},
@@ -171,8 +207,9 @@ func TestValidateConfig(t *testing.T) {
 			// criterion: PostgresConfig.DSN is required
 			name: "missing postgres dsn fails",
 			cfg: &Config{
-				HTTP:  HTTPConfig{Addr: ":8080"},
-				Redis: RedisConfig{Addr: validRedisAddr},
+				HTTP:   HTTPConfig{Addr: ":8080"},
+				Redis:  RedisConfig{Addr: validRedisAddr},
+				Ranked: RankedConfig{Thresholds: []int{5000}},
 			},
 			wantErr: true,
 		},
@@ -182,6 +219,28 @@ func TestValidateConfig(t *testing.T) {
 			cfg: &Config{
 				HTTP:     HTTPConfig{Addr: ":8080"},
 				Postgres: PostgresConfig{DSN: validDSN},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 5 — Ranked.Thresholds is required (non-empty) — no hardcoded fallback
+			name: "missing ranked thresholds fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 5 — Ranked.Thresholds must be strictly ascending
+			name: "non-ascending thresholds fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000, 5000, 30000}},
 			},
 			wantErr: true,
 		},

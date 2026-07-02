@@ -5,3 +5,7 @@ postgres:
 redis:
   addr: "localhost:6379"
   password: ""
+session:
+  cookie_name: "session"
+ranked:
+  thresholds: [5000, 15000, 30000, 60000, 120000]
