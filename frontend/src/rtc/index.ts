@@ -17,13 +17,18 @@ interface JoinMsg {
   room_id: string;
 }
 
+// Wire contract (services/signaling/CLAUDE.md): sdp/ice REQUIRE room_id —
+// the server routes by env.RoomID and silently drops frames without it —
+// and the SDP payload field is `sdp`, not `description`.
 interface SdpMsg {
   type: 'sdp';
-  description: RTCSessionDescriptionInit;
+  room_id: string;
+  sdp: RTCSessionDescriptionInit;
 }
 
 interface IceMsg {
   type: 'ice';
+  room_id: string;
   candidate: RTCIceCandidateInit;
 }
 
@@ -142,7 +147,7 @@ export class RtcPeerImpl {
     // Relay outgoing ICE candidates over the WS
     this.pc.onicecandidate = (ev) => {
       if (ev.candidate) {
-        const msg: IceMsg = { type: 'ice', candidate: ev.candidate };
+        const msg: IceMsg = { type: 'ice', room_id: this.roomId, candidate: ev.candidate };
         this.ws.send(JSON.stringify(msg));
       }
     };
@@ -194,7 +199,7 @@ export class RtcPeerImpl {
   private async handleNegotiationNeeded(): Promise<void> {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
-    const msg: SdpMsg = { type: 'sdp', description: offer };
+    const msg: SdpMsg = { type: 'sdp', room_id: this.roomId, sdp: offer };
     this.ws.send(JSON.stringify(msg));
   }
 
@@ -209,7 +214,7 @@ export class RtcPeerImpl {
   private async handleSignalingMessage(msg: SignalingMsg): Promise<void> {
     switch (msg.type) {
       case 'sdp': {
-        const { description } = msg;
+        const { sdp: description } = msg;
         if (description.type === 'offer') {
           await this.pc.setRemoteDescription(description);
           // Fix 4: mark remote description set and flush any queued candidates
@@ -217,7 +222,7 @@ export class RtcPeerImpl {
           await this.flushPendingCandidates();
           const answer = await this.pc.createAnswer();
           await this.pc.setLocalDescription(answer);
-          const reply: SdpMsg = { type: 'sdp', description: answer };
+          const reply: SdpMsg = { type: 'sdp', room_id: this.roomId, sdp: answer };
           this.ws.send(JSON.stringify(reply));
         } else if (description.type === 'answer') {
           await this.pc.setRemoteDescription(description);

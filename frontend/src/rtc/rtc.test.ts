@@ -195,7 +195,7 @@ describe('RtcPeerImpl', () => {
     await vi.waitFor(() => expect(ws.send).toHaveBeenCalled());
 
     const sent = JSON.parse(ws.send.mock.calls[0][0] as string) as unknown;
-    expect(sent).toMatchObject({ type: 'sdp', description: { type: 'offer' } });
+    expect(sent).toMatchObject({ type: 'sdp', room_id: 'room-1', sdp: { type: 'offer' } }); // room_id REQUIRED by the wire contract — server drops frames without it
     expect(pc.createOffer).toHaveBeenCalled();
     expect(pc.setLocalDescription).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'offer' }),
@@ -252,7 +252,7 @@ describe('RtcPeerImpl', () => {
     await vi.waitFor(() => expect(ws.send).toHaveBeenCalled());
 
     const sent = JSON.parse(ws.send.mock.calls[0][0] as string) as unknown;
-    expect(sent).toMatchObject({ type: 'sdp', description: { type: 'offer' } });
+    expect(sent).toMatchObject({ type: 'sdp', room_id: 'room-1', sdp: { type: 'offer' } }); // room_id REQUIRED by the wire contract — server drops frames without it
     expect(pc.createOffer).toHaveBeenCalled();
     expect(pc.setLocalDescription).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'offer' }),
@@ -268,7 +268,7 @@ describe('RtcPeerImpl', () => {
 
     const answerMsg = JSON.stringify({
       type: 'sdp',
-      description: { type: 'answer', sdp: 'remote-answer-sdp' },
+      sdp: { type: 'answer', sdp: 'remote-answer-sdp' },
     });
     ws.simulateMessage(answerMsg);
     await vi.waitFor(() => expect(pc.setRemoteDescription).toHaveBeenCalled());
@@ -300,7 +300,7 @@ describe('RtcPeerImpl', () => {
 
     const offerMsg = JSON.stringify({
       type: 'sdp',
-      description: { type: 'offer', sdp: 'remote-offer-sdp' },
+      sdp: { type: 'offer', sdp: 'remote-offer-sdp' },
     });
     ws.simulateMessage(offerMsg);
 
@@ -321,7 +321,8 @@ describe('RtcPeerImpl', () => {
     const sent = JSON.parse(ws.send.mock.calls[0][0] as string) as unknown;
     expect(sent).toMatchObject({
       type: 'sdp',
-      description: { type: 'answer' },
+      room_id: 'room-1', // room_id REQUIRED by the wire contract - server drops frames without it
+      sdp: { type: 'answer' },
     });
   });
 
@@ -370,7 +371,7 @@ describe('RtcPeerImpl', () => {
 
     expect(ws.send).toHaveBeenCalledTimes(1);
     const sent = JSON.parse(ws.send.mock.calls[0][0] as string) as unknown;
-    expect(sent).toMatchObject({ type: 'ice', candidate: expect.anything() });
+    expect(sent).toMatchObject({ type: 'ice', room_id: 'room-1', candidate: expect.anything() }); // room_id REQUIRED by the wire contract
   });
 
   // criterion: 2 — FAILS if outgoing ICE is not relayed
@@ -396,7 +397,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
-        description: { type: 'offer', sdp: 'remote-offer-sdp' },
+        sdp: { type: 'offer', sdp: 'remote-offer-sdp' },
       }),
     );
     await vi.waitFor(() => expect(pc.setRemoteDescription).toHaveBeenCalled());
@@ -427,7 +428,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
-        description: { type: 'answer', sdp: 'x' },
+        sdp: { type: 'answer', sdp: 'x' },
       }),
     );
     await new Promise((r) => setTimeout(r, 10));
@@ -462,7 +463,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
-        description: { type: 'answer', sdp: 'answer-sdp' },
+        sdp: { type: 'answer', sdp: 'answer-sdp' },
       }),
     );
     await vi.waitFor(() => expect(pc.addIceCandidate).toHaveBeenCalled());
@@ -501,7 +502,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
-        description: { type: 'offer', sdp: 'remote-offer-sdp' },
+        sdp: { type: 'offer', sdp: 'remote-offer-sdp' },
       }),
     );
     await vi.waitFor(() => expect(pc.addIceCandidate).toHaveBeenCalled());
@@ -663,7 +664,7 @@ describe('RtcPeerImpl', () => {
     ws.simulateMessage(
       JSON.stringify({
         type: 'sdp',
-        description: { type: 'offer', sdp: 'offer-sdp' },
+        sdp: { type: 'offer', sdp: 'offer-sdp' },
       }),
     );
     await vi.waitFor(() => expect(pc.setRemoteDescription).toHaveBeenCalled());
