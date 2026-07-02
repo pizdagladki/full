@@ -12,14 +12,23 @@ const authenticatedState: AuthState = {
   user: {
     id: '1',
     email: 'test@test.com',
-    consent: { is_adult: true, consent_recording: true, consent_tos: true, accepted_at: '2026-01-01T00:00:00Z' },
+    consent: {
+      is_adult: true,
+      consent_recording: true,
+      consent_tos: true,
+      accepted_at: '2026-01-01T00:00:00Z',
+    },
   },
   loading: false,
   error: null,
   refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
-function renderWithAuth(routesList: RouteObject[], path: string, authState: AuthState = authenticatedState) {
+function renderWithAuth(
+  routesList: RouteObject[],
+  path: string,
+  authState: AuthState = authenticatedState,
+) {
   const router = createMemoryRouter(routesList, { initialEntries: [path] });
   return render(
     <AuthContext.Provider value={authState}>
@@ -29,9 +38,17 @@ function renderWithAuth(routesList: RouteObject[], path: string, authState: Auth
 }
 
 // Mock fetch so AuthProvider (used in full App) doesn't blow up
-vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', json: () => Promise.resolve({}) }));
+vi.stubGlobal(
+  'fetch',
+  vi.fn().mockResolvedValue({
+    ok: false,
+    status: 401,
+    statusText: 'Unauthorized',
+    json: () => Promise.resolve({}),
+  }),
+);
 
-// Mock navigator.mediaDevices so Home component doesn't crash in jsdom
+// Mock navigator.mediaDevices so Home/Search components don't crash in jsdom
 Object.defineProperty(globalThis.navigator, 'mediaDevices', {
   value: {
     enumerateDevices: vi.fn().mockResolvedValue([]),
@@ -40,6 +57,17 @@ Object.defineProperty(globalThis.navigator, 'mediaDevices', {
   writable: true,
   configurable: true,
 });
+
+// Mock WebSocket so Search's real WsClient (no VITE_WS_URL configured in tests) doesn't crash on
+// `new WebSocket('/ws/matchmaking')` (jsdom rejects relative WS URLs).
+class MockWebSocket {
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  send = vi.fn();
+  close = vi.fn();
+}
+vi.stubGlobal('WebSocket', MockWebSocket);
 
 const unauthenticatedState: AuthState = {
   user: null,
@@ -67,9 +95,9 @@ describe('App routes', () => {
     expect(screen.getByTestId('home-screen')).toBeInTheDocument();
   });
 
-  it('renders Search placeholder at /search when authenticated', () => {
+  it('renders Search screen at /search when authenticated', () => {
     renderWithAuth(routes, '/search');
-    expect(screen.getByText('Search')).toBeInTheDocument();
+    expect(screen.getByTestId('search-screen')).toBeInTheDocument();
   });
 
   it('renders Battle placeholder at /battle when authenticated', () => {
@@ -123,7 +151,12 @@ describe('App routes', () => {
 
   it('redirects unauthenticated user from /home to / — criterion 3 guard', () => {
     // criterion: 3 — unauthenticated user visiting protected route is redirected to login
-    const unauthState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
+    const unauthState: AuthState = {
+      user: null,
+      loading: false,
+      error: null,
+      refreshUser: vi.fn().mockResolvedValue(undefined),
+    };
     renderWithAuth(routes, '/home', unauthState);
     expect(screen.queryByTestId('home-screen')).not.toBeInTheDocument();
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();

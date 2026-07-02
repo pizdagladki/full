@@ -21,6 +21,14 @@ class MockWebSocket {
   simulateMessage(data: string) {
     this.onmessage?.({ data } as MessageEvent);
   }
+
+  simulateOpen() {
+    this.onopen?.();
+  }
+
+  simulateClose() {
+    this.onclose?.();
+  }
 }
 
 describe('WsClient', () => {
@@ -88,5 +96,37 @@ describe('WsClient', () => {
   it('onMessage throws if not connected', () => {
     const client = new WsClient(BASE);
     expect(() => client.onMessage(vi.fn())).toThrow();
+  });
+
+  // criterion: ws-onopen — onOpen callback fires when the WebSocket opens
+  it('onOpen callback fires when the WebSocket opens', () => {
+    const client = new WsClient(BASE);
+    client.connect('/chat');
+    const cb = vi.fn();
+    client.onOpen(cb);
+    MockWebSocket.instances[0].simulateOpen();
+    expect(cb).toHaveBeenCalled();
+  });
+
+  // criterion: ws-onopen — fails if onOpen is registered before connect (throws)
+  it('onOpen throws if not connected', () => {
+    const client = new WsClient(BASE);
+    expect(() => client.onOpen(vi.fn())).toThrow();
+  });
+
+  // criterion: ws-onclose — onClose callback fires when the WebSocket closes
+  it('onClose callback fires when the WebSocket closes', () => {
+    const client = new WsClient(BASE);
+    client.connect('/chat');
+    const cb = vi.fn();
+    client.onClose(cb);
+    MockWebSocket.instances[0].simulateClose();
+    expect(cb).toHaveBeenCalled();
+  });
+
+  // criterion: ws-onclose — fails if onClose is registered before connect (throws)
+  it('onClose throws if not connected', () => {
+    const client = new WsClient(BASE);
+    expect(() => client.onClose(vi.fn())).toThrow();
   });
 });
