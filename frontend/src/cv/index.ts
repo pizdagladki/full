@@ -1,3 +1,4 @@
-// cv — MediaPipe FaceLandmarker / EAR per-frame loop.
-// Imperative; accessed via refs. Placeholder — implementation in a future issue.
-export {};
+export type { NormalizedLandmark, FaceLandmarkResult, LandmarkRunner, CvState, CvCallbacks, CvHandleRef } from './types';
+export { computeEAR, LEFT_EYE_INDICES, RIGHT_EYE_INDICES } from './ear';
+export { CvEngine } from './CvEngine';
+export { CvComponent } from './CvComponent';
