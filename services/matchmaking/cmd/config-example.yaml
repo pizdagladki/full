@@ -9,3 +9,5 @@ matchmaking:
   session_cookie: "session"
 ratings:
   base_url: "http://ratings:8080"
+reports:
+  base_url: "http://reports:8080"

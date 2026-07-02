@@ -13,5 +13,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (!user) return <Navigate to="/" replace />;
 
+  if (user.consent == null) return <Navigate to="/consent" replace />;
+
   return <>{children}</>;
 }

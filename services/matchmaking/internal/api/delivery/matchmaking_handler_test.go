@@ -362,3 +362,66 @@ func TestMatchmakingHandler_Disconnect_Cleanup(t *testing.T) {
 		t.Fatal("Leave not called within 2s after disconnect")
 	}
 }
+
+// TestMatchmakingHandler_Join_CooldownError verifies that when the service
+// returns a *domain.CooldownError the handler sends the structured cooldown
+// envelope (type=error, reason=cooldown, seconds_remaining=N) to the client
+// and does NOT forward it as a generic "internal error".
+// criterion: 1 (active-cooldown player receives the cooldown envelope)
+func TestMatchmakingHandler_Join_CooldownError(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockMatchmakingService(ctrl)
+
+	sessionRepo.EXPECT().
+		UserIDBySession(gomock.Any(), "valid-token").
+		Return(int64(42), nil)
+
+	// Service returns a CooldownError — player is in reports cooldown.
+	svc.EXPECT().
+		Join(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&domain.CooldownError{SecondsRemaining: 1800})
+
+	handler := NewMatchmakingHandler(zap.NewNop(), sessionRepo, svc, "session")
+
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	ctx := context.Background()
+	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: map[string][]string{"Cookie": {"session=valid-token"}},
+	})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.CloseNow() //nolint:errcheck // best-effort
+
+	if writeErr := wsjson.Write(ctx, c, domain.InboundMessage{Type: "join", Mode: "ranked", Level: 5}); writeErr != nil {
+		t.Fatalf("Write: %v", writeErr)
+	}
+
+	// Expect the cooldown envelope: {type:"error", reason:"cooldown", seconds_remaining:N}
+	var resp map[string]interface{}
+	if readErr := wsjson.Read(ctx, c, &resp); readErr != nil {
+		t.Fatalf("Read cooldown response: %v", readErr)
+	}
+	if resp["type"] != "error" {
+		t.Errorf("type = %q, want \"error\"", resp["type"])
+	}
+	if resp["reason"] != "cooldown" {
+		t.Errorf("reason = %q, want \"cooldown\"", resp["reason"])
+	}
+	// JSON numbers unmarshal as float64.
+	secsRem, ok := resp["seconds_remaining"].(float64)
+	if !ok || int(secsRem) != 1800 {
+		t.Errorf("seconds_remaining = %v, want 1800", resp["seconds_remaining"])
+	}
+	// Crucially, a generic "error" field must NOT be present (it's not a generic error).
+	if _, hasErr := resp["error"]; hasErr {
+		t.Errorf("response should not have 'error' key for cooldown, got: %v", resp)
+	}
+}

@@ -281,6 +281,31 @@ func TestNearestRegardless(t *testing.T) {
 	}
 }
 
+// TestCooldownError_Error verifies that CooldownError.Error() formats correctly.
+// criterion: 1 (CooldownError is the type returned for active cooldown)
+func TestCooldownError_Error(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		secs    int
+		wantMsg string
+	}{
+		{"zero seconds", 0, "cooldown: 0 seconds remaining"},
+		{"1800 seconds", 1800, "cooldown: 1800 seconds remaining"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := &CooldownError{SecondsRemaining: tt.secs}
+			if got := e.Error(); got != tt.wantMsg {
+				t.Errorf("CooldownError.Error() = %q, want %q", got, tt.wantMsg)
+			}
+		})
+	}
+}
+
 func TestPastFallbackDeadline(t *testing.T) {
 	t.Parallel()
 

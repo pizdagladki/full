@@ -8,9 +8,50 @@ import (
 
 func TestLoad(t *testing.T) {
 	const (
-		validDSN  = "postgres://app:app@localhost:5432/app?sslmode=disable"
-		validAddr = "localhost:6379"
+		validDSN      = "postgres://app:app@localhost:5432/app?sslmode=disable"
+		validAddr     = "localhost:6379"
+		validEndpoint = "localhost:9000"
+		validKey      = "minioadmin"
+		validSecret   = "minioadmin"
+		validBucket   = "reports"
+		validToken    = "123456:ABC-DEF"
+		validChatID   = "-1001234567890"
 	)
+
+	// fullEnv is a helper that returns a map with all required env vars set.
+	fullEnv := func(overrides map[string]string) map[string]string {
+		base := map[string]string{
+			"POSTGRES_DSN":       validDSN,
+			"REDIS_ADDR":         validAddr,
+			"MINIO_ENDPOINT":     validEndpoint,
+			"MINIO_ACCESS_KEY":   validKey,
+			"MINIO_SECRET_KEY":   validSecret,
+			"MINIO_BUCKET":       validBucket,
+			"TELEGRAM_BOT_TOKEN": validToken,
+			"TELEGRAM_CHAT_ID":   validChatID,
+		}
+		for k, v := range overrides {
+			if v == "" {
+				delete(base, k)
+			} else {
+				base[k] = v
+			}
+		}
+		return base
+	}
+
+	// fullYAML returns a YAML string with all required sections set.
+	fullYAML := func(httpAddr string) string {
+		return "http:\n  addr: \"" + httpAddr + "\"\n" +
+			"postgres:\n  dsn: \"" + validDSN + "\"\n" +
+			"redis:\n  addr: \"" + validAddr + "\"\n" +
+			"storage:\n  endpoint: \"" + validEndpoint + "\"\n" +
+			"  access_key: \"" + validKey + "\"\n" +
+			"  secret_key: \"" + validSecret + "\"\n" +
+			"  bucket: \"" + validBucket + "\"\n" +
+			"telegram:\n  bot_token: \"" + validToken + "\"\n" +
+			"  chat_id: \"" + validChatID + "\"\n"
+	}
 
 	tests := []struct {
 		name     string
@@ -24,35 +65,56 @@ func TestLoad(t *testing.T) {
 			// criterion: 3 — env mode, all required fields set
 			name:     "env mode all set with explicit HTTP_ADDR",
 			isDocker: true,
-			env:      map[string]string{"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			env:      fullEnv(map[string]string{"HTTP_ADDR": ":9090"}),
 			wantAddr: ":9090",
 		},
 		{
 			// criterion: 3 — env mode, default HTTP addr applied
 			name:     "env mode default HTTP addr",
 			isDocker: true,
-			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			env:      fullEnv(nil),
 			wantAddr: ":8080",
 		},
 		{
 			// criterion: 3 — ValidateConfig fails when Postgres DSN is unset
 			name:     "env mode missing Postgres DSN fails validation",
 			isDocker: true,
-			env:      map[string]string{"REDIS_ADDR": validAddr},
+			env:      fullEnv(map[string]string{"POSTGRES_DSN": ""}),
 			wantErr:  true,
 		},
 		{
 			// criterion: 3 — ValidateConfig fails when Redis addr is unset
 			name:     "env mode missing Redis addr fails validation",
 			isDocker: true,
-			env:      map[string]string{"POSTGRES_DSN": validDSN},
+			env:      fullEnv(map[string]string{"REDIS_ADDR": ""}),
+			wantErr:  true,
+		},
+		{
+			// criterion: 3 — ValidateConfig fails when Storage endpoint is unset
+			name:     "env mode missing storage endpoint fails validation",
+			isDocker: true,
+			env:      fullEnv(map[string]string{"MINIO_ENDPOINT": ""}),
+			wantErr:  true,
+		},
+		{
+			// criterion: 3 — ValidateConfig fails when Telegram bot token is unset
+			name:     "env mode missing telegram token fails validation",
+			isDocker: true,
+			env:      fullEnv(map[string]string{"TELEGRAM_BOT_TOKEN": ""}),
+			wantErr:  true,
+		},
+		{
+			// criterion: 3 — ValidateConfig fails when Telegram chat_id is unset
+			name:     "env mode missing telegram chat_id fails validation",
+			isDocker: true,
+			env:      fullEnv(map[string]string{"TELEGRAM_CHAT_ID": ""}),
 			wantErr:  true,
 		},
 		{
 			// criterion: 3 — file mode reads full yaml
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, fullYAML(":7070"))
 			},
 			wantAddr: ":7070",
 		},
@@ -60,7 +122,16 @@ func TestLoad(t *testing.T) {
 			// criterion: 3 — file mode empty addr falls back to default
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validAddr+"\"\n"+
+						"storage:\n  endpoint: \""+validEndpoint+"\"\n"+
+						"  access_key: \""+validKey+"\"\n"+
+						"  secret_key: \""+validSecret+"\"\n"+
+						"  bucket: \""+validBucket+"\"\n"+
+						"telegram:\n  bot_token: \""+validToken+"\"\n"+
+						"  chat_id: \""+validChatID+"\"\n",
+				)
 			},
 			wantAddr: ":8080",
 		},

@@ -6,11 +6,17 @@ import { routes } from './App';
 import { AuthContext } from './features';
 import type { AuthState } from './features';
 
-// Provide an authenticated context so ProtectedRoute doesn't redirect
+// Provide an authenticated context so ProtectedRoute doesn't redirect.
+// consent must be set so ProtectedRoute does not gate to /consent.
 const authenticatedState: AuthState = {
-  user: { id: '1', email: 'test@test.com' },
+  user: {
+    id: '1',
+    email: 'test@test.com',
+    consent: { is_adult: true, consent_recording: true, consent_tos: true, accepted_at: '2026-01-01T00:00:00Z' },
+  },
   loading: false,
   error: null,
+  refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
 function renderWithAuth(routesList: RouteObject[], path: string, authState: AuthState = authenticatedState) {
@@ -25,10 +31,21 @@ function renderWithAuth(routesList: RouteObject[], path: string, authState: Auth
 // Mock fetch so AuthProvider (used in full App) doesn't blow up
 vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized', json: () => Promise.resolve({}) }));
 
+// Mock navigator.mediaDevices so Home component doesn't crash in jsdom
+Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+  value: {
+    enumerateDevices: vi.fn().mockResolvedValue([]),
+    getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }),
+  },
+  writable: true,
+  configurable: true,
+});
+
 const unauthenticatedState: AuthState = {
   user: null,
   loading: false,
   error: null,
+  refreshUser: vi.fn().mockResolvedValue(undefined),
 };
 
 describe('App routes', () => {
@@ -44,10 +61,10 @@ describe('App routes', () => {
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
   });
 
-  it('renders Home placeholder at /home when authenticated', () => {
+  it('renders Home screen at /home when authenticated', () => {
     // criterion: 3 — authenticated user can reach protected home route
     renderWithAuth(routes, '/home');
-    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(screen.getByTestId('home-screen')).toBeInTheDocument();
   });
 
   it('renders Search placeholder at /search when authenticated', () => {
@@ -106,9 +123,9 @@ describe('App routes', () => {
 
   it('redirects unauthenticated user from /home to / — criterion 3 guard', () => {
     // criterion: 3 — unauthenticated user visiting protected route is redirected to login
-    const unauthState: AuthState = { user: null, loading: false, error: null };
+    const unauthState: AuthState = { user: null, loading: false, error: null, refreshUser: vi.fn().mockResolvedValue(undefined) };
     renderWithAuth(routes, '/home', unauthState);
-    expect(screen.queryByText('Home')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('home-screen')).not.toBeInTheDocument();
     expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
   });
 });

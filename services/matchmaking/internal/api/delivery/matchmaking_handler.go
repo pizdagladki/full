@@ -122,7 +122,12 @@ func (h *matchmakingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 			joinErr := h.svc.Join(ctx, adapted, player)
 			if joinErr != nil {
-				sendErrMsg(ctx, conn, safeErrMsg(joinErr))
+				var cooldownErr *domain.CooldownError
+				if errors.As(joinErr, &cooldownErr) {
+					sendCooldownMsg(ctx, conn, cooldownErr.SecondsRemaining)
+				} else {
+					sendErrMsg(ctx, conn, safeErrMsg(joinErr))
+				}
 
 				continue
 			}
@@ -163,6 +168,22 @@ func safeErrMsg(err error) string {
 	}
 
 	return "internal error"
+}
+
+// sendCooldownMsg writes a JSON cooldown error envelope to the client. Best-effort.
+func sendCooldownMsg(ctx context.Context, conn *websocket.Conn, secondsRemaining int) {
+	msg := struct {
+		Type             string `json:"type"`
+		Reason           string `json:"reason"`
+		SecondsRemaining int    `json:"seconds_remaining"`
+	}{Type: "error", Reason: "cooldown", SecondsRemaining: secondsRemaining}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	_ = conn.Write(ctx, websocket.MessageText, data)
 }
 
 // sendErrMsg writes a JSON error envelope to the client. Best-effort.
