@@ -1,5 +1,6 @@
 export { HttpClient } from './http';
 export { WsClient } from './ws';
+export type { WsClientApi } from './ws';
 export { AuthApiClient, defaultAuthApi, ApiError } from './auth';
 export type { AuthApi, User, ConsentInfo, ConsentPayload } from './auth';
 export { RatingsApiClient, defaultRatingsApi } from './ratings';

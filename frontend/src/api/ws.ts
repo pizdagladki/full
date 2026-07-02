@@ -1,6 +1,17 @@
 const DEFAULT_WS_URL = (import.meta.env?.VITE_WS_URL as string | undefined) ?? '';
 
-export class WsClient {
+// Injectable WS client contract — production wraps the native WebSocket (WsClient); tests provide
+// a plain mock object implementing the same surface.
+export interface WsClientApi {
+  connect(path: string): void;
+  send(data: string): void;
+  close(): void;
+  onMessage(cb: (data: string) => void): void;
+  onOpen(cb: () => void): void;
+  onClose(cb: () => void): void;
+}
+
+export class WsClient implements WsClientApi {
   private readonly baseUrl: string;
   private socket: WebSocket | null = null;
 
@@ -35,6 +46,24 @@ export class WsClient {
     }
     this.socket.onmessage = (event: MessageEvent<string>) => {
       cb(event.data);
+    };
+  }
+
+  onOpen(cb: () => void): void {
+    if (!this.socket) {
+      throw new Error('WsClient: not connected');
+    }
+    this.socket.onopen = () => {
+      cb();
+    };
+  }
+
+  onClose(cb: () => void): void {
+    if (!this.socket) {
+      throw new Error('WsClient: not connected');
+    }
+    this.socket.onclose = () => {
+      cb();
     };
   }
 }
