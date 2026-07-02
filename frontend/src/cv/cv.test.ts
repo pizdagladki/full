@@ -331,6 +331,35 @@ describe('blink detection', () => {
     engine.processFrame(33 * 33); // 1st frame after reset — no new blink yet
     expect(onBlink).toHaveBeenCalledTimes(1);
   });
+
+  it('fails-on-violation: sustained closure fires onBlink exactly once, not per BLINK_FRAMES window', () => {
+    // criterion: 2 — one physical blink = one event; a held-closed eye must not re-fire
+    const onBlink = vi.fn();
+    const { engine, runner } = makeRunningEngine({ onBlink });
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.1, 0.4)); // left held closed
+    for (let i = 31; i <= 36; i++) engine.processFrame(i * 33); // 6 consecutive closed frames
+    expect(onBlink).toHaveBeenCalledTimes(1); // NOT 3 (would re-fire every 2 frames without the latch)
+  });
+
+  it('re-arms after both eyes reopen: a second distinct blink fires a second event', () => {
+    // criterion: 2 — the latch must not swallow the NEXT real blink
+    const onBlink = vi.fn();
+    const { engine, runner } = makeRunningEngine({ onBlink });
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.1, 0.1));
+    engine.processFrame(31 * 33);
+    engine.processFrame(32 * 33); // blink #1
+    expect(onBlink).toHaveBeenCalledTimes(1);
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.4, 0.4));
+    engine.processFrame(33 * 33); // both eyes reopen → re-arm
+
+    vi.mocked(runner.detectForVideo).mockReturnValue(faceResult(0.1, 0.1));
+    engine.processFrame(34 * 33);
+    engine.processFrame(35 * 33); // blink #2
+    expect(onBlink).toHaveBeenCalledTimes(2);
+  });
 });
 
 // ---------------------------------------------------------------------------

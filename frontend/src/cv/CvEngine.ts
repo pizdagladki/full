@@ -30,6 +30,8 @@ export class CvEngine implements CvHandleRef {
   // Blink detection (consecutive below-threshold frame counters)
   private leftBelow = 0;
   private rightBelow = 0;
+  // One physical blink = one event: latched on fire, re-armed only after BOTH eyes reopen
+  private blinkFired = false;
 
   // Face gating
   private facePresent = false;
@@ -51,6 +53,7 @@ export class CvEngine implements CvHandleRef {
     this.rightThreshold = DEFAULT_THRESHOLD;
     this.leftBelow = 0;
     this.rightBelow = 0;
+    this.blinkFired = false;
     this.facePresent = false;
     this.noFaceCount = 0;
     this.scheduleFrame();
@@ -160,11 +163,16 @@ export class CvEngine implements CvHandleRef {
       this.rightBelow = 0;
     }
 
+    // Re-arm only once BOTH eyes are back above threshold — a sustained closure
+    // must not re-fire (one physical blink = one event).
+    if (this.leftBelow === 0 && this.rightBelow === 0) {
+      this.blinkFired = false;
+    }
+
     // Fire onBlink once if EITHER eye has held below threshold for BLINK_FRAMES
-    if (this.leftBelow >= BLINK_FRAMES || this.rightBelow >= BLINK_FRAMES) {
+    if (!this.blinkFired && (this.leftBelow >= BLINK_FRAMES || this.rightBelow >= BLINK_FRAMES)) {
+      this.blinkFired = true;
       this.callbacks.onBlink?.();
-      this.leftBelow = 0;
-      this.rightBelow = 0;
     }
   }
 }
