@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const validRatingsURL = "http://localhost:8082"
+
 func TestLoad(t *testing.T) {
 	const validAddr = "localhost:6379"
 
@@ -20,28 +22,38 @@ func TestLoad(t *testing.T) {
 		wantRoomTTL           time.Duration
 		wantKeepaliveInterval time.Duration
 		wantKeepalivePingTO   time.Duration
+		wantRatingsURL        string
 		wantErr               bool
 	}{
 		{
-			name:        "env mode all set with explicit HTTP_ADDR",
-			isDocker:    true,
-			env:         map[string]string{"HTTP_ADDR": ":9090", "REDIS_ADDR": validAddr},
-			wantAddr:    ":9090",
-			wantCookie:  defaultSessionCookie,
-			wantRoomTTL: defaultRoomTTL,
+			name:           "env mode all set with explicit HTTP_ADDR",
+			isDocker:       true,
+			env:            map[string]string{"HTTP_ADDR": ":9090", "REDIS_ADDR": validAddr, "RATINGS_BASE_URL": validRatingsURL},
+			wantAddr:       ":9090",
+			wantCookie:     defaultSessionCookie,
+			wantRoomTTL:    defaultRoomTTL,
+			wantRatingsURL: validRatingsURL,
 		},
 		{
-			name:        "env mode default HTTP addr",
-			isDocker:    true,
-			env:         map[string]string{"REDIS_ADDR": validAddr},
-			wantAddr:    ":8081",
-			wantCookie:  defaultSessionCookie,
-			wantRoomTTL: defaultRoomTTL,
+			name:           "env mode default HTTP addr",
+			isDocker:       true,
+			env:            map[string]string{"REDIS_ADDR": validAddr, "RATINGS_BASE_URL": validRatingsURL},
+			wantAddr:       ":8081",
+			wantCookie:     defaultSessionCookie,
+			wantRoomTTL:    defaultRoomTTL,
+			wantRatingsURL: validRatingsURL,
 		},
 		{
 			name:     "env mode missing Redis addr fails validation",
 			isDocker: true,
 			env:      map[string]string{},
+			wantErr:  true,
+		},
+		{
+			// criterion: ratings-1 — fails if missing RATINGS_BASE_URL does not fail validation
+			name:     "env mode missing RATINGS_BASE_URL fails validation",
+			isDocker: true,
+			env:      map[string]string{"REDIS_ADDR": validAddr},
 			wantErr:  true,
 		},
 		{
@@ -51,6 +63,7 @@ func TestLoad(t *testing.T) {
 				"REDIS_ADDR":         validAddr,
 				"SIG_SESSION_COOKIE": "my_session",
 				"SIG_ROOM_TTL":       "1h",
+				"RATINGS_BASE_URL":   validRatingsURL,
 			},
 			wantAddr:    defaultAddr,
 			wantCookie:  "my_session",
@@ -63,6 +76,7 @@ func TestLoad(t *testing.T) {
 				"REDIS_ADDR":                 validAddr,
 				"SIG_KEEPALIVE_INTERVAL":     "45s",
 				"SIG_KEEPALIVE_PING_TIMEOUT": "15s",
+				"RATINGS_BASE_URL":           validRatingsURL,
 			},
 			wantAddr:              defaultAddr,
 			wantCookie:            defaultSessionCookie,
@@ -73,17 +87,18 @@ func TestLoad(t *testing.T) {
 		{
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "http:\n  addr: \":7070\"\nredis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "http:\n  addr: \":7070\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\n")
 			},
-			wantAddr:    ":7070",
-			wantCookie:  defaultSessionCookie,
-			wantRoomTTL: defaultRoomTTL,
+			wantAddr:       ":7070",
+			wantCookie:     defaultSessionCookie,
+			wantRoomTTL:    defaultRoomTTL,
+			wantRatingsURL: validRatingsURL,
 		},
 		{
 			name: "file mode reads signaling section",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
-					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nsignaling:\n  session_cookie: custom\n  room_ttl: \"15m\"\n",
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  session_cookie: custom\n  room_ttl: \"15m\"\n",
 				)
 			},
 			wantAddr:    ":8081",
@@ -93,7 +108,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\n")
 			},
 			wantAddr:    ":8081",
 			wantCookie:  defaultSessionCookie,
@@ -102,7 +117,15 @@ func TestLoad(t *testing.T) {
 		{
 			name: "file mode missing required Redis fails validation",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "http:\n  addr: \":8081\"\n")
+				return writeTempConfig(t, "http:\n  addr: \":8081\"\nratings_base_url: \""+validRatingsURL+"\"\n")
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: ratings-1 — fails if missing ratings_base_url in file does not fail validation
+			name: "file mode missing ratings_base_url fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, "http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\n")
 			},
 			wantErr: true,
 		},
@@ -124,7 +147,7 @@ func TestLoad(t *testing.T) {
 			name: "file mode invalid room_ttl duration errors",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
-					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nsignaling:\n  room_ttl: \"not-a-duration\"\n",
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  room_ttl: \"not-a-duration\"\n",
 				)
 			},
 			wantErr: true,
@@ -133,7 +156,7 @@ func TestLoad(t *testing.T) {
 			name: "file mode reads keepalive settings",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
-					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nsignaling:\n  keepalive_interval: \"45s\"\n  keepalive_ping_timeout: \"15s\"\n",
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  keepalive_interval: \"45s\"\n  keepalive_ping_timeout: \"15s\"\n",
 				)
 			},
 			wantAddr:              ":8081",
@@ -146,7 +169,7 @@ func TestLoad(t *testing.T) {
 			name: "file mode invalid keepalive_interval errors",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
-					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nsignaling:\n  keepalive_interval: \"bad\"\n",
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  keepalive_interval: \"bad\"\n",
 				)
 			},
 			wantErr: true,
@@ -155,10 +178,36 @@ func TestLoad(t *testing.T) {
 			name: "file mode invalid keepalive_ping_timeout errors",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
-					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nsignaling:\n  keepalive_ping_timeout: \"bad\"\n",
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  keepalive_ping_timeout: \"bad\"\n",
 				)
 			},
 			wantErr: true,
+		},
+		{
+			// criterion: ratings-1 — RATINGS_BASE_URL loaded correctly from env
+			name:     "env mode RATINGS_BASE_URL loaded",
+			isDocker: true,
+			env: map[string]string{
+				"REDIS_ADDR":       validAddr,
+				"RATINGS_BASE_URL": "http://ratings:9000",
+			},
+			wantAddr:       defaultAddr,
+			wantCookie:     defaultSessionCookie,
+			wantRoomTTL:    defaultRoomTTL,
+			wantRatingsURL: "http://ratings:9000",
+		},
+		{
+			// criterion: ratings-1 — ratings_base_url loaded correctly from file
+			name: "file mode ratings_base_url loaded",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \"http://ratings:9000\"\n",
+				)
+			},
+			wantAddr:       ":8081",
+			wantCookie:     defaultSessionCookie,
+			wantRoomTTL:    defaultRoomTTL,
+			wantRatingsURL: "http://ratings:9000",
 		},
 	}
 
@@ -208,6 +257,10 @@ func TestLoad(t *testing.T) {
 
 			if tt.wantKeepalivePingTO != 0 && cfg.Signaling.KeepalivePingTimeout != tt.wantKeepalivePingTO {
 				t.Errorf("keepalive_ping_timeout = %v, want %v", cfg.Signaling.KeepalivePingTimeout, tt.wantKeepalivePingTO)
+			}
+
+			if tt.wantRatingsURL != "" && cfg.RatingsBaseURL != tt.wantRatingsURL {
+				t.Errorf("ratings_base_url = %q, want %q", cfg.RatingsBaseURL, tt.wantRatingsURL)
 			}
 		})
 	}

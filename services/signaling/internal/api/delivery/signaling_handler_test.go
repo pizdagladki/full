@@ -241,7 +241,7 @@ func TestSignalingHandler_Join_RoomFull_ErrorAndClose(t *testing.T) {
 	svc := svcmocks.NewMockSignalingService(ctrl)
 
 	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(3), nil)
-	svc.EXPECT().Join(gomock.Any(), gomock.Any(), "room-full").Return(domain.ErrRoomFull)
+	svc.EXPECT().Join(gomock.Any(), gomock.Any(), "room-full", gomock.Any()).Return(domain.ErrRoomFull)
 
 	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
 	srv := httptest.NewServer(makeHTTPHandler(handler))
@@ -300,8 +300,8 @@ func TestSignalingHandler_Disconnect_TriggersLeave(t *testing.T) {
 
 	joinDone := make(chan struct{})
 	svc.EXPECT().
-		Join(gomock.Any(), gomock.Any(), "room-dc").
-		DoAndReturn(func(_ context.Context, _ service.Conn, _ string) error {
+		Join(gomock.Any(), gomock.Any(), "room-dc", gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ service.Conn, _ string, _ string) error {
 			close(joinDone)
 
 			return nil
@@ -417,12 +417,19 @@ func (r *fakeRoomRepo) RemoveRoom(_ context.Context, roomID string) error {
 	return nil
 }
 
+// nopRatingsClient is a no-op RatingsClient for integration tests.
+type nopRatingsClient struct{}
+
+func (n *nopRatingsClient) ApplyResult(_ context.Context, _ service.ApplyResultRequest) error {
+	return nil
+}
+
 // newIntegrationServer wires a real SignalingService + fake repos into an httptest.Server.
 // Keepalive is disabled (interval=0) to keep integration tests deterministic.
 func newIntegrationServer(t *testing.T, sessionRepo repository.SessionRepository, roomRepo repository.RoomRepository) *httptest.Server {
 	t.Helper()
 
-	svc := service.NewSignalingService(zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond)
+	svc := service.NewSignalingService(zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond, &nopRatingsClient{})
 	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
 	srv := httptest.NewServer(makeHTTPHandler(handler))
 	t.Cleanup(srv.Close)
@@ -783,8 +790,8 @@ func TestSignalingHandler_Keepalive_ClosesDeadConn(t *testing.T) {
 
 	joinDone := make(chan struct{})
 	svc.EXPECT().
-		Join(gomock.Any(), gomock.Any(), "room-ka").
-		DoAndReturn(func(_ context.Context, _ service.Conn, _ string) error {
+		Join(gomock.Any(), gomock.Any(), "room-ka", gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ service.Conn, _ string, _ string) error {
 			close(joinDone)
 			return nil
 		})

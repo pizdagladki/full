@@ -83,7 +83,7 @@ func newArbFixture(t *testing.T, times []time.Time, confirmBuf time.Duration) *a
 	ct := &capturedTimer{}
 	af := fakeAfterFunc(ct)
 
-	svc := NewSignalingService(zap.NewNop(), roomRepo, nowFunc, af, confirmBuf).(*signalingService)
+	svc := NewSignalingService(zap.NewNop(), roomRepo, nowFunc, af, confirmBuf, &nopRatingsClient{}).(*signalingService)
 
 	return &arbFixture{ctrl: ctrl, roomRepo: roomRepo, svc: svc, ct: ct}
 }

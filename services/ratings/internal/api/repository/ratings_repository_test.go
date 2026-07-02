@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
@@ -23,6 +24,186 @@ func newMock(t *testing.T) (pgxmock.PgxPoolIface, RatingsRepository) {
 	repo := NewRatingsRepositoryFromDB(mock)
 
 	return mock, repo
+}
+
+// ─── ListMatchHistory ─────────────────────────────────────────────────────────
+
+func TestListMatchHistory(t *testing.T) {
+	t.Parallel()
+
+	dur := 5000
+	now := time.Now().UTC().Truncate(time.Second)
+	earlier := now.Add(-time.Hour)
+
+	tests := []struct {
+		name    string
+		userID  int64
+		limit   int
+		offset  int
+		setup   func(mock pgxmock.PgxPoolIface)
+		want    []domain.MatchHistoryItem
+		wantErr bool
+	}{
+		{
+			// criterion: 1 — returns matches where user is winner OR loser, newest first
+			// criterion: 2 — result and elo_delta derived correctly for winner perspective
+			name:   "winner perspective: result=win, own elo_delta=winner_elo_delta",
+			userID: 1,
+			limit:  10,
+			offset: 0,
+			setup: func(mock pgxmock.PgxPoolIface) {
+				rows := mock.NewRows([]string{"id", "opponent_id", "result", "mode", "elo_delta", "duration_ms", "created_at"}).
+					AddRow(int64(42), int64(2), "win", "classic", 32, &dur, now)
+				mock.ExpectQuery(`SELECT`).
+					WithArgs(int64(1), 10, 0).
+					WillReturnRows(rows)
+			},
+			want: []domain.MatchHistoryItem{
+				{MatchID: 42, OpponentID: 2, Result: "win", Mode: "classic", ELODelta: 32, DurationMS: &dur, CreatedAt: now},
+			},
+		},
+		{
+			// criterion: 2 — result and elo_delta derived correctly for loser perspective
+			name:   "loser perspective: result=loss, own elo_delta=loser_elo_delta",
+			userID: 2,
+			limit:  10,
+			offset: 0,
+			setup: func(mock pgxmock.PgxPoolIface) {
+				rows := mock.NewRows([]string{"id", "opponent_id", "result", "mode", "elo_delta", "duration_ms", "created_at"}).
+					AddRow(int64(42), int64(1), "loss", "classic", -26, &dur, now)
+				mock.ExpectQuery(`SELECT`).
+					WithArgs(int64(2), 10, 0).
+					WillReturnRows(rows)
+			},
+			want: []domain.MatchHistoryItem{
+				{MatchID: 42, OpponentID: 1, Result: "loss", Mode: "classic", ELODelta: -26, DurationMS: &dur, CreatedAt: now},
+			},
+		},
+		{
+			// criterion: 1 — newest first ordering (two rows, descending created_at)
+			name:   "newest-first ordering: two rows returned in DESC created_at order",
+			userID: 1,
+			limit:  10,
+			offset: 0,
+			setup: func(mock pgxmock.PgxPoolIface) {
+				rows := mock.NewRows([]string{"id", "opponent_id", "result", "mode", "elo_delta", "duration_ms", "created_at"}).
+					AddRow(int64(100), int64(3), "win", "ranked", 16, nil, now).
+					AddRow(int64(99), int64(2), "loss", "classic", -13, &dur, earlier)
+				mock.ExpectQuery(`SELECT`).
+					WithArgs(int64(1), 10, 0).
+					WillReturnRows(rows)
+			},
+			want: []domain.MatchHistoryItem{
+				{MatchID: 100, OpponentID: 3, Result: "win", Mode: "ranked", ELODelta: 16, DurationMS: nil, CreatedAt: now},
+				{MatchID: 99, OpponentID: 2, Result: "loss", Mode: "classic", ELODelta: -13, DurationMS: &dur, CreatedAt: earlier},
+			},
+		},
+		{
+			// criterion: 3 — pagination: limit/offset passed through to query
+			name:   "pagination: limit and offset passed to query",
+			userID: 1,
+			limit:  2,
+			offset: 5,
+			setup: func(mock pgxmock.PgxPoolIface) {
+				rows := mock.NewRows([]string{"id", "opponent_id", "result", "mode", "elo_delta", "duration_ms", "created_at"}).
+					AddRow(int64(10), int64(9), "win", "classic", 20, nil, now)
+				mock.ExpectQuery(`SELECT`).
+					WithArgs(int64(1), 2, 5).
+					WillReturnRows(rows)
+			},
+			want: []domain.MatchHistoryItem{
+				{MatchID: 10, OpponentID: 9, Result: "win", Mode: "classic", ELODelta: 20, DurationMS: nil, CreatedAt: now},
+			},
+		},
+		{
+			// criterion: 4 — user with no matches returns empty slice, not nil
+			name:   "empty result returns empty slice not nil",
+			userID: 99,
+			limit:  20,
+			offset: 0,
+			setup: func(mock pgxmock.PgxPoolIface) {
+				rows := mock.NewRows([]string{"id", "opponent_id", "result", "mode", "elo_delta", "duration_ms", "created_at"})
+				mock.ExpectQuery(`SELECT`).
+					WithArgs(int64(99), 20, 0).
+					WillReturnRows(rows)
+			},
+			want: []domain.MatchHistoryItem{},
+		},
+		{
+			name:   "db query error is propagated",
+			userID: 1,
+			limit:  10,
+			offset: 0,
+			setup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectQuery(`SELECT`).
+					WithArgs(int64(1), 10, 0).
+					WillReturnError(errors.New("connection reset"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock, repo := newMock(t)
+			tt.setup(mock)
+
+			got, err := repo.ListMatchHistory(context.Background(), tt.userID, tt.limit, tt.offset)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ListMatchHistory() error = nil, want error")
+				}
+
+				if metErr := mock.ExpectationsWereMet(); metErr != nil {
+					t.Errorf("unmet expectations on error path: %v", metErr)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ListMatchHistory() unexpected error = %v", err)
+			}
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("ListMatchHistory() len = %d, want %d; got %+v", len(got), len(tt.want), got)
+			}
+
+			for i, item := range got {
+				w := tt.want[i]
+				if item.MatchID != w.MatchID {
+					t.Errorf("[%d] MatchID = %d, want %d", i, item.MatchID, w.MatchID)
+				}
+
+				if item.OpponentID != w.OpponentID {
+					t.Errorf("[%d] OpponentID = %d, want %d", i, item.OpponentID, w.OpponentID)
+				}
+
+				if item.Result != w.Result {
+					t.Errorf("[%d] Result = %q, want %q", i, item.Result, w.Result)
+				}
+
+				if item.ELODelta != w.ELODelta {
+					t.Errorf("[%d] ELODelta = %d, want %d", i, item.ELODelta, w.ELODelta)
+				}
+
+				if item.Mode != w.Mode {
+					t.Errorf("[%d] Mode = %q, want %q", i, item.Mode, w.Mode)
+				}
+
+				if !item.CreatedAt.Equal(w.CreatedAt) {
+					t.Errorf("[%d] CreatedAt = %v, want %v", i, item.CreatedAt, w.CreatedAt)
+				}
+			}
+
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unmet expectations: %v", err)
+			}
+		})
+	}
 }
 
 // ─── GetRating ────────────────────────────────────────────────────────────────

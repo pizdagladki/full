@@ -15,6 +15,18 @@ type Config struct {
 	HTTP        HTTPConfig        `yaml:"http"        validate:"required"`
 	Redis       RedisConfig       `yaml:"redis"       validate:"required"`
 	Matchmaking MatchmakingConfig `yaml:"matchmaking"`
+	Ratings     RatingsConfig     `yaml:"ratings"     validate:"required"`
+	Reports     ReportsConfig     `yaml:"reports"     validate:"required"`
+}
+
+// RatingsConfig holds the ratings service connection settings.
+type RatingsConfig struct {
+	BaseURL string `yaml:"base_url" validate:"required"`
+}
+
+// ReportsConfig holds the reports service connection settings.
+type ReportsConfig struct {
+	BaseURL string `yaml:"base_url" validate:"required"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -55,6 +67,8 @@ type rawConfig struct {
 	HTTP        HTTPConfig     `yaml:"http"        validate:"required"`
 	Redis       RedisConfig    `yaml:"redis"       validate:"required"`
 	Matchmaking matchmakingRaw `yaml:"matchmaking"`
+	Ratings     RatingsConfig  `yaml:"ratings"`
+	Reports     ReportsConfig  `yaml:"reports"`
 }
 
 const (
@@ -121,6 +135,8 @@ func loadFromEnv() *Config {
 			FallbackAfter: fallbackAfter,
 			SessionCookie: sessionCookie,
 		},
+		Ratings: RatingsConfig{BaseURL: os.Getenv("RATINGS_BASE_URL")},
+		Reports: ReportsConfig{BaseURL: os.Getenv("REPORTS_BASE_URL")},
 	}
 }
 
@@ -158,6 +174,8 @@ func loadFromFile(path string) (*Config, error) {
 			FallbackAfter: fallbackAfter,
 			SessionCookie: raw.Matchmaking.SessionCookie,
 		},
+		Ratings: raw.Ratings,
+		Reports: raw.Reports,
 	}, nil
 }
 

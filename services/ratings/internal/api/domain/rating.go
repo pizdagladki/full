@@ -1,7 +1,10 @@
 // Package domain holds the ratings service domain models, DTOs, and pure ELO math.
 package domain
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 // Default ELO / level / games constants for a player with no history.
 const (
@@ -33,6 +36,17 @@ type MatchResult struct {
 	Loser       Rating
 	WinnerDelta int
 	LoserDelta  int
+}
+
+// MatchHistoryItem is one entry in a player's match history.
+type MatchHistoryItem struct {
+	MatchID    int64
+	OpponentID int64
+	Result     string // "win" or "loss"
+	Mode       string
+	ELODelta   int
+	DurationMS *int
+	CreatedAt  time.Time
 }
 
 // ─── ELO math ────────────────────────────────────────────────────────────────

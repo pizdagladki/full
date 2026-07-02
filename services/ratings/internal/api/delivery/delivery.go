@@ -11,5 +11,7 @@ type (
 		PostMatchResult(c echo.Context) error
 		// GetRating handles GET /v1/ratings/:user_id.
 		GetRating(c echo.Context) error
+		// GetMatchHistory handles GET /v1/matches/history.
+		GetMatchHistory(c echo.Context) error
 	}
 )

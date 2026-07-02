@@ -25,6 +25,7 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	if a.ratingsHandler != nil {
 		e.POST("/v1/matches/result", a.ratingsHandler.PostMatchResult)
 		e.GET("/v1/ratings/:user_id", a.ratingsHandler.GetRating)
+		e.GET("/v1/matches/history", a.ratingsHandler.GetMatchHistory)
 	}
 
 	return e

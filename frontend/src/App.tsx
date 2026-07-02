@@ -1,4 +1,5 @@
-import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Outlet, Navigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import type { RouteObject } from 'react-router-dom';
 import {
   Landing,
@@ -9,7 +10,20 @@ import {
   Results,
   Profile,
   Store,
+  AuthProvider,
+  Login,
+  ProtectedRoute,
+  useAuth,
 } from './features';
+import { Consent } from './features/Consent';
+
+// AuthRoute: checks auth (loading/user) but does NOT check consent (avoids /consent → /consent loop)
+function AuthRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  if (!user) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 
 function Layout() {
   return (
@@ -27,14 +41,67 @@ export const routes: RouteObject[] = [
     path: '/',
     element: <Layout />,
     children: [
-      { index: true, element: <Landing /> },
+      { index: true, element: <Login /> },
+      { path: 'auth/callback', element: <Login /> },
+      { path: 'landing', element: <Landing /> },
       { path: 'register', element: <Register /> },
-      { path: 'home', element: <Home /> },
-      { path: 'search', element: <Search /> },
-      { path: 'battle', element: <Battle /> },
-      { path: 'results', element: <Results /> },
-      { path: 'profile', element: <Profile /> },
-      { path: 'store', element: <Store /> },
+      {
+        path: 'consent',
+        element: (
+          <AuthRoute>
+            <Consent />
+          </AuthRoute>
+        ),
+      },
+      {
+        path: 'home',
+        element: (
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'search',
+        element: (
+          <ProtectedRoute>
+            <Search />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'battle',
+        element: (
+          <ProtectedRoute>
+            <Battle />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'results',
+        element: (
+          <ProtectedRoute>
+            <Results />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'profile',
+        element: (
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'store',
+        element: (
+          <ProtectedRoute>
+            <Store />
+          </ProtectedRoute>
+        ),
+      },
+      { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
 ];
@@ -42,5 +109,9 @@ export const routes: RouteObject[] = [
 const browserRouter = createBrowserRouter(routes);
 
 export function App() {
-  return <RouterProvider router={browserRouter} />;
+  return (
+    <AuthProvider>
+      <RouterProvider router={browserRouter} />
+    </AuthProvider>
+  );
 }

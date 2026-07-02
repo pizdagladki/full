@@ -10,9 +10,21 @@ import (
 
 // Config is the reports service configuration.
 type Config struct {
-	HTTP     HTTPConfig     `yaml:"http"     validate:"required"`
-	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
-	Redis    RedisConfig    `yaml:"redis"    validate:"required"`
+	HTTP      HTTPConfig      `yaml:"http"      validate:"required"`
+	Postgres  PostgresConfig  `yaml:"postgres"  validate:"required"`
+	Redis     RedisConfig     `yaml:"redis"     validate:"required"`
+	Storage   StorageConfig   `yaml:"storage"   validate:"required"`
+	Telegram  TelegramConfig  `yaml:"telegram"  validate:"required"`
+	Session   SessionConfig   `yaml:"session"`
+	BugReport BugReportConfig `yaml:"bug_report"`
+	Reports   ReportsConfig   `yaml:"reports"`
+}
+
+// ReportsConfig holds feature-specific knobs for the reports service.
+type ReportsConfig struct {
+	// CooldownTTLSeconds is the Redis cooldown TTL in seconds applied when a
+	// reported player reaches the cheat-report threshold. Default: 1800 (30 min).
+	CooldownTTLSeconds int `yaml:"cooldown_ttl_seconds"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -29,6 +41,37 @@ type PostgresConfig struct {
 type RedisConfig struct {
 	Addr     string `yaml:"addr" validate:"required"`
 	Password string `yaml:"password"`
+}
+
+// StorageConfig holds the MinIO (object storage) connection settings.
+type StorageConfig struct {
+	Endpoint  string `yaml:"endpoint"   validate:"required"`
+	AccessKey string `yaml:"access_key" validate:"required"`
+	SecretKey string `yaml:"secret_key" validate:"required"`
+	Bucket    string `yaml:"bucket"     validate:"required"`
+	UseSSL    bool   `yaml:"use_ssl"`
+}
+
+// TelegramConfig holds the Telegram Bot API settings.
+type TelegramConfig struct {
+	BotToken string `yaml:"bot_token" validate:"required"`
+	ChatID   string `yaml:"chat_id"   validate:"required"`
+}
+
+// SessionConfig holds cookie/session settings.
+type SessionConfig struct {
+	// CookieName is the name of the session cookie. Defaults to "session" in app.
+	CookieName string `yaml:"cookie_name"`
+}
+
+// BugReportConfig holds bug-report feature knobs.
+type BugReportConfig struct {
+	// MaxUploadBytes is the maximum allowed recording size in bytes. Defaults to
+	// 500 MiB in the app layer when zero.
+	MaxUploadBytes int64 `yaml:"max_upload_bytes"`
+	// ReportsKeyPrefix is the object-key prefix for bug recordings. Defaults to
+	// "bug-reports/" in the app layer when empty.
+	ReportsKeyPrefix string `yaml:"reports_key_prefix"`
 }
 
 const defaultAddr = ":8080"
@@ -67,6 +110,16 @@ func loadFromEnv() *Config {
 		Redis: RedisConfig{
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
+		},
+		Storage: StorageConfig{
+			Endpoint:  os.Getenv("MINIO_ENDPOINT"),
+			AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+			SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+			Bucket:    os.Getenv("MINIO_BUCKET"),
+		},
+		Telegram: TelegramConfig{
+			BotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+			ChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
 		},
 	}
 }

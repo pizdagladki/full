@@ -20,5 +20,9 @@ type (
 		// GetRating returns the stored rating for userID, or the defaults when
 		// the player has no history yet.
 		GetRating(ctx context.Context, userID int64) (domain.Rating, error)
+
+		// ListMatchHistory returns the player's match history, newest first,
+		// paginated by limit and offset.
+		ListMatchHistory(ctx context.Context, userID int64, limit, offset int) ([]domain.MatchHistoryItem, error)
 	}
 )

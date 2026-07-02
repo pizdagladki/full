@@ -11,9 +11,10 @@ import (
 
 // Config is the signaling service configuration.
 type Config struct {
-	HTTP      HTTPConfig      `yaml:"http"      validate:"required"`
-	Redis     RedisConfig     `yaml:"redis"     validate:"required"`
-	Signaling SignalingConfig `yaml:"signaling"`
+	HTTP           HTTPConfig      `yaml:"http"             validate:"required"`
+	Redis          RedisConfig     `yaml:"redis"            validate:"required"`
+	Signaling      SignalingConfig `yaml:"signaling"`
+	RatingsBaseURL string          `yaml:"ratings_base_url" validate:"required"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -57,9 +58,10 @@ type SignalingConfig struct {
 
 // rawConfig is the intermediate YAML-decoded config before post-processing.
 type rawConfig struct {
-	HTTP      HTTPConfig   `yaml:"http"      validate:"required"`
-	Redis     RedisConfig  `yaml:"redis"     validate:"required"`
-	Signaling signalingRaw `yaml:"signaling"`
+	HTTP           HTTPConfig   `yaml:"http"             validate:"required"`
+	Redis          RedisConfig  `yaml:"redis"            validate:"required"`
+	Signaling      signalingRaw `yaml:"signaling"`
+	RatingsBaseURL string       `yaml:"ratings_base_url"`
 }
 
 const (
@@ -148,6 +150,7 @@ func loadFromEnv() *Config {
 			KeepalivePingTimeout: keepalivePingTimeout,
 			ConfirmationBuffer:   confirmationBuffer,
 		},
+		RatingsBaseURL: os.Getenv("RATINGS_BASE_URL"),
 	}
 }
 
@@ -214,6 +217,7 @@ func loadFromFile(path string) (*Config, error) {
 			KeepalivePingTimeout: keepalivePingTimeout,
 			ConfirmationBuffer:   confirmationBuffer,
 		},
+		RatingsBaseURL: raw.RatingsBaseURL,
 	}, nil
 }
 

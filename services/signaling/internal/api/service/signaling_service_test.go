@@ -70,12 +70,19 @@ type fixture struct {
 	svc      *signalingService
 }
 
+// nopRatingsClient is a no-op RatingsClient for tests that don't care about ratings calls.
+type nopRatingsClient struct{}
+
+func (n *nopRatingsClient) ApplyResult(_ context.Context, _ ApplyResultRequest) error {
+	return nil
+}
+
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 
 	ctrl := gomock.NewController(t)
 	roomRepo := repomocks.NewMockRoomRepository(ctrl)
-	svc := NewSignalingService(zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond).(*signalingService)
+	svc := NewSignalingService(zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond, &nopRatingsClient{}).(*signalingService)
 
 	return &fixture{ctrl: ctrl, roomRepo: roomRepo, svc: svc}
 }
@@ -127,7 +134,7 @@ func TestSignalingService_Join_Admitted(t *testing.T) {
 				Join(gomock.Any(), "room-1", int64(1)).
 				Return(tt.repoResult, nil)
 
-			err := f.svc.Join(context.Background(), conn, "room-1")
+			err := f.svc.Join(context.Background(), conn, "room-1", "")
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Join() error = %v, want %v", err, tt.wantErr)
 			}
@@ -156,7 +163,7 @@ func TestSignalingService_Join_ThirdPeerRejected(t *testing.T) {
 				Join(gomock.Any(), "room-full", int64(3)).
 				Return(repository.JoinResultFull, nil)
 
-			err := f.svc.Join(context.Background(), conn, "room-full")
+			err := f.svc.Join(context.Background(), conn, "room-full", "")
 			if !errors.Is(err, domain.ErrRoomFull) {
 				t.Errorf("Join() error = %v, want ErrRoomFull", err) // criterion: 1
 			}
@@ -191,7 +198,7 @@ func TestSignalingService_Join_InvalidRoomID(t *testing.T) {
 			conn := newFakeConn(1)
 			// No repo call expected — validation fails first.
 
-			err := f.svc.Join(context.Background(), conn, tt.roomID)
+			err := f.svc.Join(context.Background(), conn, tt.roomID, "")
 			if !errors.Is(err, domain.ErrInvalidRoomID) {
 				t.Errorf("Join() error = %v, want ErrInvalidRoomID", err)
 			}
@@ -209,7 +216,7 @@ func TestSignalingService_Join_RepoError(t *testing.T) {
 		Join(gomock.Any(), "room-err", int64(1)).
 		Return(repository.JoinResult(0), errors.New("redis down"))
 
-	err := f.svc.Join(context.Background(), conn, "room-err")
+	err := f.svc.Join(context.Background(), conn, "room-err", "")
 	if err == nil {
 		t.Fatal("Join() error = nil, want error from repo")
 	}

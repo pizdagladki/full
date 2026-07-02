@@ -3,14 +3,27 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+	"github.com/minio/minio-go/v7"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/internal/platform/logger"
+	"github.com/pizdagladki/full/services/reports/internal/api/delivery"
+	appmiddleware "github.com/pizdagladki/full/services/reports/internal/api/middleware"
+	"github.com/pizdagladki/full/services/reports/internal/api/repository"
+	"github.com/pizdagladki/full/services/reports/internal/api/service"
 	"github.com/pizdagladki/full/services/reports/internal/config"
+)
+
+const (
+	defaultCooldownTTL       = 1800 * time.Second
+	defaultBugReportPrefix   = "bug-reports/"
+	defaultMaxUploadBytes    = 500 * 1024 * 1024
+	defaultSessionCookieName = "session"
 )
 
 // App holds the service dependencies and drives its lifecycle.
@@ -23,6 +36,21 @@ type App struct {
 
 	pgxPool     *pgxpool.Pool
 	redisClient *redis.Client
+	minioClient *minio.Client
+
+	cheatRepo     repository.CheatReportsRepository
+	cooldownStore repository.CooldownStore
+	sessionRepo   repository.SessionRepository
+	bugRepo       repository.BugReportsRepository
+	bugStorage    repository.BugRecordingStorage
+
+	reportsService service.ReportsService
+	sessionSvc     service.SessionService
+	bugSvc         service.BugReportService
+	telegramNotify service.TelegramNotifier
+
+	reportsHandler delivery.ReportsHandler
+	authMiddleware *appmiddleware.AuthMiddleware
 }
 
 // New returns an empty App for the given service name.
@@ -48,6 +76,13 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Fail fast if Telegram is not configured (AC4).
+	if a.cfg.Telegram.BotToken == "" || a.cfg.Telegram.ChatID == "" {
+		a.logger.Error("telegram config missing: bot_token and chat_id are required")
+
+		return errMissingTelegramConfig
+	}
+
 	err = a.initPostgres(ctx)
 	if err != nil {
 		return err
@@ -60,11 +95,25 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	defer func() { _ = a.redisClient.Close() }()
 
+	err = a.initStorage(ctx)
+	if err != nil {
+		return err
+	}
+
 	a.initRepositories()
 	a.initServices()
 	a.initHandlers()
 
 	return a.runWorkers(ctx)
+}
+
+// errMissingTelegramConfig is returned when Telegram credentials are absent.
+var errMissingTelegramConfig = &missingTelegramConfigError{}
+
+type missingTelegramConfigError struct{}
+
+func (e *missingTelegramConfigError) Error() string {
+	return "telegram config missing: bot_token and chat_id are required"
 }
 
 func (a *App) initLogger() error {
@@ -90,16 +139,49 @@ func (a *App) populateConfig() error {
 }
 
 func (a *App) initRepositories() {
-	// No repositories yet; resources are added by downstream slices via the
-	// new-resource skill.
+	a.cheatRepo = repository.NewCheatReportsRepository(a.pgxPool)
+	a.cooldownStore = repository.NewCooldownStore(a.redisClient)
+	a.sessionRepo = repository.NewSessionRepository(a.redisClient)
+	a.bugRepo = repository.NewBugReportsRepository(a.pgxPool)
+
+	prefix := a.cfg.BugReport.ReportsKeyPrefix
+	if prefix == "" {
+		prefix = defaultBugReportPrefix
+	}
+
+	a.bugStorage = repository.NewBugRecordingStorage(a.minioClient, a.cfg.Storage.Bucket, prefix)
 }
 
 func (a *App) initServices() {
-	// No services yet; resources are added by downstream slices via the
-	// new-resource skill.
+	ttl := defaultCooldownTTL
+	if a.cfg.Reports.CooldownTTLSeconds > 0 {
+		ttl = time.Duration(a.cfg.Reports.CooldownTTLSeconds) * time.Second
+	}
+
+	a.reportsService = service.NewReportsService(a.cheatRepo, a.cooldownStore, a.logger, ttl)
+	a.sessionSvc = service.NewSessionService(a.sessionRepo)
+	a.telegramNotify = service.NewTelegramNotifier(a.cfg.Telegram.BotToken, a.cfg.Telegram.ChatID, a.logger)
+
+	prefix := a.cfg.BugReport.ReportsKeyPrefix
+	if prefix == "" {
+		prefix = defaultBugReportPrefix
+	}
+
+	a.bugSvc = service.NewBugReportService(a.bugRepo, a.bugStorage, a.telegramNotify, a.logger, prefix)
 }
 
 func (a *App) initHandlers() {
-	// No handlers yet; resources are added by downstream slices via the
-	// new-resource skill.
+	cookieName := a.cfg.Session.CookieName
+	if cookieName == "" {
+		cookieName = defaultSessionCookieName
+	}
+
+	a.authMiddleware = appmiddleware.NewAuthMiddleware(a.sessionSvc, cookieName, a.logger)
+
+	maxBytes := a.cfg.BugReport.MaxUploadBytes
+	if maxBytes == 0 {
+		maxBytes = defaultMaxUploadBytes
+	}
+
+	a.reportsHandler = delivery.NewReportsHandler(a.reportsService, a.bugSvc, maxBytes, a.logger)
 }
