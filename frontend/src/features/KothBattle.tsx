@@ -40,7 +40,7 @@ type Phase = 'sanity' | 'countdown' | 'battle' | 'done';
 
 type KingClipState =
   | { status: 'loading' }
-  | { status: 'loaded'; url: string }
+  | { status: 'loaded'; url: string; blinkTsMs: number }
   | { status: 'unavailable' };
 
 /** Structural type of CvComponent's props/ref — used for the test-injection seam below. */
@@ -107,6 +107,10 @@ export function KothBattle({
   const startTimeRef = useRef(0);
   const sanityTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const countdownTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const kingBlinkTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  // Mirrors the `kingClip` state in a ref so the battle-start / fetch-resolve callbacks below
+  // (which run outside React's render cycle) can read the latest value without a stale closure.
+  const kingClipRef = useRef<KingClipState>({ status: 'loading' });
 
   // Drives rendering only.
   const [phase, setPhase] = useState<Phase>('sanity');
@@ -118,6 +122,7 @@ export function KothBattle({
     teardownRef.current = true;
     if (sanityTimerRef.current) clearTimeout(sanityTimerRef.current);
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    if (kingBlinkTimerRef.current) clearTimeout(kingBlinkTimerRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -181,6 +186,34 @@ export function KothBattle({
     [],
   );
 
+  // Criterion 4 — win-by-outlasting: the actual win condition per the spec ("досмотрел до момента
+  // моргания царя, сам не моргнув → победа") is outlasting the king clip's OWN blink_ts_ms without
+  // blinking. Arms a one-shot timer keyed off that timestamp; if the player is still in the
+  // 'battle' phase (hasn't blinked / lost face — those already call handleOutcome themselves) when
+  // it fires, they've outlasted the king → fire the outcome with the elapsed time as the win.
+  // No-op if no king clip is loaded (nothing to outlast) or a timer is already armed. Ranked is
+  // explicitly excluded even if a clip happens to be loaded: its mechanic is server-side time
+  // thresholds (docs/specs/12-king-of-the-hill.md), not tied to any clip's blink moment — a ranked
+  // attempt only ends via the player's own blink/face-loss, so holding indefinitely is expected.
+  const armKingBlinkTimer = useCallback(() => {
+    if (hillType === 'ranked') return;
+    // Only arm once the battle phase has actually started — called both right when the countdown
+    // reaches zero AND from the king-clip fetch resolution (which may land during sanity/countdown
+    // if it's still loading). Arming early would anchor the timeout to the wrong start time and
+    // burn the "already armed" guard before battle even begins.
+    if (phaseRef.current !== 'battle') return;
+    const clip = kingClipRef.current;
+    if (clip.status !== 'loaded') return;
+    if (kingBlinkTimerRef.current) return;
+    kingBlinkTimerRef.current = setTimeout(() => {
+      if (phaseRef.current === 'battle') {
+        handleOutcome(Date.now() - startTimeRef.current);
+      }
+    }, clip.blinkTsMs);
+    // Intentionally stable ([]): only reads refs (mirrors the other timer-arming callbacks here).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const startCountdown = useCallback(() => {
     phaseRef.current = 'countdown';
     setPhase('countdown');
@@ -193,6 +226,9 @@ export function KothBattle({
         phaseRef.current = 'battle';
         startTimeRef.current = Date.now();
         setPhase('battle');
+        // Arm the win-by-outlasting timer now that battle has started, if the king clip already
+        // finished loading (armKingBlinkTimer no-ops for ranked / not-yet-loaded — see its comment).
+        armKingBlinkTimer();
       } else {
         setCountdown(remaining);
       }
@@ -239,6 +275,7 @@ export function KothBattle({
     outcomeRef.current = false;
     facePresentRef.current = false;
     phaseRef.current = 'sanity';
+    kingBlinkTimerRef.current = undefined;
 
     if (localVideoRef.current && cvRef.current) {
       cvRef.current.start(localVideoRef.current);
@@ -299,19 +336,31 @@ export function KothBattle({
       .then((data) => {
         if (cancelled) return;
         if (data) {
-          setKingClip({ status: 'loaded', url: data.download_url });
+          const next: KingClipState = {
+            status: 'loaded',
+            url: data.download_url,
+            blinkTsMs: data.blink_ts_ms,
+          };
+          kingClipRef.current = next;
+          setKingClip(next);
+          // Covers the race where the clip finishes loading AFTER the battle phase already
+          // started (e.g. a slow fetch outlived the countdown) — arm the timer now instead of
+          // leaving the player with no way to win via outlasting for the rest of the attempt.
+          armKingBlinkTimer();
         } else {
+          kingClipRef.current = { status: 'unavailable' };
           setKingClip({ status: 'unavailable' });
         }
       })
       .catch(() => {
         if (cancelled) return;
+        kingClipRef.current = { status: 'unavailable' };
         setKingClip({ status: 'unavailable' });
       });
     return () => {
       cancelled = true;
     };
-  }, [hillType, kingClipsApi]);
+  }, [hillType, kingClipsApi, armKingBlinkTimer]);
 
   return (
     <div data-testid="koth-battle-screen">
@@ -322,6 +371,7 @@ export function KothBattle({
           <video
             src={kingClip.url}
             autoPlay
+            muted
             playsInline
             data-testid="king-clip-video"
           />

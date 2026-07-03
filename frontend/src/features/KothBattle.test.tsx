@@ -187,6 +187,21 @@ describe('KothBattle', () => {
     expect(screen.queryByTestId('no-king-clip')).not.toBeInTheDocument();
   });
 
+  // bug 1 — the king-clip video must be muted, same as local-video, or the browser autoplay
+  // policy (Safari requires muted+playsinline; Chrome gates on Media Engagement) silently blocks
+  // playback and the recorded "opponent" never plays.
+  it('bug1-king-clip-video-is-muted: the king-clip video element is muted so it can autoplay', async () => {
+    const { Cv } = makeFakeCv();
+    const kingClipsApi = makeKingClipsApi({
+      current: { download_url: 'https://cdn.example/king.webm', blink_ts_ms: 900 },
+    });
+    renderKothBattle('daily', { cvComponent: Cv, kingClipsApi });
+
+    await flush();
+    const video = screen.getByTestId('king-clip-video') as HTMLVideoElement;
+    expect(video.muted).toBe(true);
+  });
+
   // criterion: 1 (violation guard) — no king clip yet (404 -> null) must render the neutral
   // placeholder, not crash, and not render a video element.
   it('king-clip-plays-as-opponent violation guard: a 404/null clip renders the no-clip placeholder', async () => {
@@ -328,6 +343,85 @@ describe('KothBattle', () => {
     );
     await flush();
     expect(screen.getByTestId('results-won').textContent).toBe('false');
+  });
+
+  // bug 2 — the actual win condition: outlasting the king clip's own blink_ts_ms WITHOUT ever
+  // blinking. This is the previously-impossible path (a player who never blinks used to hang in
+  // 'battle' forever, and survived_ms never got computed/posted). Without the fix, advancing past
+  // blink_ts_ms here would never reach the results screen and this test would time out/fail.
+  it('bug2-outlasts-king-clip-wins: holding past the loaded clip blink_ts_ms without blinking fires the win outcome', async () => {
+    const { Cv, fireFacePresent } = makeFakeCv();
+    const kingClipsApi = makeKingClipsApi({
+      current: { download_url: 'https://cdn.example/king.webm', blink_ts_ms: 600 },
+      upload: { id: 88 },
+    });
+    const kothApi = makeKothApi({
+      challenge: { won: true, king: { user_id: 5, clip_id: '88', blink_ts_ms: 600 } },
+    });
+    renderKothBattle('daily', { cvComponent: Cv, kingClipsApi, kothApi });
+
+    // Let the king clip finish loading BEFORE the battle phase starts.
+    await flush();
+    expect(screen.getByTestId('king-clip-video')).toBeInTheDocument();
+
+    reachBattle(fireFacePresent);
+    expect(screen.getByTestId('battle-live')).toBeInTheDocument();
+
+    // Advance exactly to blink_ts_ms WITHOUT ever firing onBlink — outlasting is the win trigger,
+    // not a manual blink.
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(kingClipsApi.upload).toHaveBeenCalledWith('daily', 600, expect.any(Blob));
+    expect(kothApi.challengeHill).toHaveBeenCalledWith('daily', {
+      survived_ms: 600,
+      new_clip_id: '88',
+    });
+
+    await flush();
+    expect(screen.getByTestId('results-probe')).toBeInTheDocument();
+    expect(screen.getByTestId('results-hillType').textContent).toBe('daily');
+    expect(screen.getByTestId('results-won').textContent).toBe('true');
+    expect(screen.getByTestId('results-survivedMs').textContent).toBe('600');
+  });
+
+  // bug 2 (violation guard) — ranked's mechanic is server-side time thresholds, not tied to any
+  // clip's blink moment (per the spec), so even if a clip happens to be loaded, ranked must NOT
+  // arm a clip-blink timer: holding past its blink_ts_ms must not end the battle. Only the
+  // player's own blink/face-loss ends a ranked attempt.
+  it('bug2-ranked-has-no-king-blink-timer: holding past a loaded clip blink_ts_ms in ranked does not end the battle', async () => {
+    const { Cv, fireFacePresent, fireBlink } = makeFakeCv();
+    const kingClipsApi = makeKingClipsApi({
+      current: { download_url: 'https://cdn.example/king.webm', blink_ts_ms: 300 },
+    });
+    const kothApi = makeKothApi({
+      ranked: { achieved_rank: 1, current_rank: 2, newly_reached: false },
+    });
+    renderKothBattle('ranked', { cvComponent: Cv, kingClipsApi, kothApi });
+
+    await flush();
+    reachBattle(fireFacePresent);
+    expect(screen.getByTestId('battle-live')).toBeInTheDocument();
+
+    // Advance well past the loaded clip's blink_ts_ms — ranked must have no clip-blink timer, so
+    // the battle is still live and the ranked endpoint has not been called yet.
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getByTestId('battle-live')).toBeInTheDocument();
+    expect(kothApi.submitRankedAttempt).not.toHaveBeenCalled();
+
+    // The player still ends the attempt themselves via a blink, as usual for ranked.
+    await act(async () => {
+      fireBlink();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(kothApi.submitRankedAttempt).toHaveBeenCalledWith({ held_ms: 5000 });
   });
 
   // criterion: 3 — the ranked hill posts POST /v1/koth/ranked/attempt with held_ms and routes to
