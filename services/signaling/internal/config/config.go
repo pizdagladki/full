@@ -34,6 +34,7 @@ type RedisConfig struct {
 type signalingRaw struct {
 	SessionCookie           string `yaml:"session_cookie"`
 	RoomTTLStr              string `yaml:"room_ttl"`
+	RoomCodeTTLStr          string `yaml:"room_code_ttl"`
 	KeepaliveIntervalStr    string `yaml:"keepalive_interval"`
 	KeepalivePingTimeoutStr string `yaml:"keepalive_ping_timeout"`
 	ConfirmationBufferStr   string `yaml:"confirmation_buffer"`
@@ -45,6 +46,10 @@ type SignalingConfig struct {
 	SessionCookie string
 	// RoomTTL is the Redis TTL applied to room member sets on every Join.
 	RoomTTL time.Duration
+	// RoomCodeTTL is the Redis TTL applied to a private-room invite code
+	// (roomcode:<code> → roomID) on creation. Env: SIG_ROOM_CODE_TTL.
+	// YAML: room_code_ttl. Default 15m.
+	RoomCodeTTL time.Duration
 	// KeepaliveInterval is how often the server pings each connected peer.
 	// Zero disables keepalives (tests only).
 	KeepaliveInterval time.Duration
@@ -68,6 +73,7 @@ const (
 	defaultAddr                 = ":8081"
 	defaultSessionCookie        = "session"
 	defaultRoomTTL              = 30 * time.Minute
+	defaultRoomCodeTTL          = 15 * time.Minute
 	defaultKeepaliveInterval    = 30 * time.Second
 	defaultKeepalivePingTimeout = 10 * time.Second
 	defaultConfirmationBuffer   = 150 * time.Millisecond
@@ -110,6 +116,15 @@ func loadFromEnv() *Config {
 		}
 	}
 
+	roomCodeTTL := defaultRoomCodeTTL
+
+	if v := os.Getenv("SIG_ROOM_CODE_TTL"); v != "" {
+		d, parseErr := time.ParseDuration(v)
+		if parseErr == nil {
+			roomCodeTTL = d
+		}
+	}
+
 	keepaliveInterval := defaultKeepaliveInterval
 
 	if v := os.Getenv("SIG_KEEPALIVE_INTERVAL"); v != "" {
@@ -146,6 +161,7 @@ func loadFromEnv() *Config {
 		Signaling: SignalingConfig{
 			SessionCookie:        getEnv("SIG_SESSION_COOKIE", defaultSessionCookie),
 			RoomTTL:              roomTTL,
+			RoomCodeTTL:          roomCodeTTL,
 			KeepaliveInterval:    keepaliveInterval,
 			KeepalivePingTimeout: keepalivePingTimeout,
 			ConfirmationBuffer:   confirmationBuffer,
@@ -177,6 +193,15 @@ func loadFromFile(path string) (*Config, error) {
 		roomTTL, err = time.ParseDuration(raw.Signaling.RoomTTLStr)
 		if err != nil {
 			return nil, fmt.Errorf("parse signaling.room_ttl %q: %w", raw.Signaling.RoomTTLStr, err)
+		}
+	}
+
+	var roomCodeTTL time.Duration
+
+	if raw.Signaling.RoomCodeTTLStr != "" {
+		roomCodeTTL, err = time.ParseDuration(raw.Signaling.RoomCodeTTLStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse signaling.room_code_ttl %q: %w", raw.Signaling.RoomCodeTTLStr, err)
 		}
 	}
 
@@ -213,6 +238,7 @@ func loadFromFile(path string) (*Config, error) {
 		Signaling: SignalingConfig{
 			SessionCookie:        raw.Signaling.SessionCookie,
 			RoomTTL:              roomTTL,
+			RoomCodeTTL:          roomCodeTTL,
 			KeepaliveInterval:    keepaliveInterval,
 			KeepalivePingTimeout: keepalivePingTimeout,
 			ConfirmationBuffer:   confirmationBuffer,
@@ -229,6 +255,10 @@ func applySignalingDefaults(s *SignalingConfig) {
 
 	if s.RoomTTL == 0 {
 		s.RoomTTL = defaultRoomTTL
+	}
+
+	if s.RoomCodeTTL == 0 {
+		s.RoomCodeTTL = defaultRoomCodeTTL
 	}
 
 	if s.KeepaliveInterval == 0 {

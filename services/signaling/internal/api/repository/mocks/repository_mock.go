@@ -123,3 +123,71 @@ func (mr *MockRoomRepositoryMockRecorder) RemoveRoom(ctx, roomID any) *gomock.Ca
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveRoom", reflect.TypeOf((*MockRoomRepository)(nil).RemoveRoom), ctx, roomID)
 }
+
+// MockRoomCodeRepository is a mock of RoomCodeRepository interface.
+type MockRoomCodeRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockRoomCodeRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockRoomCodeRepositoryMockRecorder is the mock recorder for MockRoomCodeRepository.
+type MockRoomCodeRepositoryMockRecorder struct {
+	mock *MockRoomCodeRepository
+}
+
+// NewMockRoomCodeRepository creates a new mock instance.
+func NewMockRoomCodeRepository(ctrl *gomock.Controller) *MockRoomCodeRepository {
+	mock := &MockRoomCodeRepository{ctrl: ctrl}
+	mock.recorder = &MockRoomCodeRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRoomCodeRepository) EXPECT() *MockRoomCodeRepositoryMockRecorder {
+	return m.recorder
+}
+
+// CreateCode mocks base method.
+func (m *MockRoomCodeRepository) CreateCode(ctx context.Context, roomID string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateCode", ctx, roomID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateCode indicates an expected call of CreateCode.
+func (mr *MockRoomCodeRepositoryMockRecorder) CreateCode(ctx, roomID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateCode", reflect.TypeOf((*MockRoomCodeRepository)(nil).CreateCode), ctx, roomID)
+}
+
+// RemoveCode mocks base method.
+func (m *MockRoomCodeRepository) RemoveCode(ctx context.Context, code string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveCode", ctx, code)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RemoveCode indicates an expected call of RemoveCode.
+func (mr *MockRoomCodeRepositoryMockRecorder) RemoveCode(ctx, code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveCode", reflect.TypeOf((*MockRoomCodeRepository)(nil).RemoveCode), ctx, code)
+}
+
+// ResolveCode mocks base method.
+func (m *MockRoomCodeRepository) ResolveCode(ctx context.Context, code string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveCode", ctx, code)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveCode indicates an expected call of ResolveCode.
+func (mr *MockRoomCodeRepositoryMockRecorder) ResolveCode(ctx, code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveCode", reflect.TypeOf((*MockRoomCodeRepository)(nil).ResolveCode), ctx, code)
+}

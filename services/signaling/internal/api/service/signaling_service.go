@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -26,10 +28,14 @@ type arbitrationState struct {
 
 // signalingService implements SignalingService.
 type signalingService struct {
-	logger    *zap.Logger
-	roomRepo  repository.RoomRepository
-	now       func() time.Time
-	afterFunc func(time.Duration, func()) *time.Timer
+	logger       *zap.Logger
+	roomRepo     repository.RoomRepository
+	roomCodeRepo repository.RoomCodeRepository
+	now          func() time.Time
+	afterFunc    func(time.Duration, func()) *time.Timer
+	// genRoomID generates a fresh room_id for CreateRoom (injectable for
+	// deterministic tests; production passes a crypto/rand hex generator).
+	genRoomID func() (string, error)
 
 	confirmationBuffer time.Duration
 	ratingsClient      RatingsClient
@@ -43,11 +49,16 @@ type signalingService struct {
 	roomModes map[string]string
 	// battleStart stores the time when a room became full (2 members).
 	battleStart map[string]time.Time
+	// roomCodes stores the invite code for each private room created via
+	// CreateRoom, keyed by roomID, so Leave can clean it up on creator
+	// disconnect (before or after a second peer joins).
+	roomCodes map[string]string
 }
 
 // NewSignalingService constructs a SignalingService.
 // now and afterFunc are injectable for fake-clock tests; pass time.Now and
-// time.AfterFunc in production.
+// time.AfterFunc in production. genRoomID generates fresh room ids for
+// CreateRoom; production passes a crypto/rand hex generator.
 func NewSignalingService(
 	logger *zap.Logger,
 	roomRepo repository.RoomRepository,
@@ -55,18 +66,23 @@ func NewSignalingService(
 	afterFunc func(time.Duration, func()) *time.Timer,
 	confirmationBuffer time.Duration,
 	ratingsClient RatingsClient,
+	roomCodeRepo repository.RoomCodeRepository,
+	genRoomID func() (string, error),
 ) SignalingService {
 	return &signalingService{
 		logger:             logger,
 		roomRepo:           roomRepo,
+		roomCodeRepo:       roomCodeRepo,
 		now:                now,
 		afterFunc:          afterFunc,
+		genRoomID:          genRoomID,
 		confirmationBuffer: confirmationBuffer,
 		ratingsClient:      ratingsClient,
 		rooms:              make(map[string]map[int64]Conn),
 		arbitrations:       make(map[string]*arbitrationState),
 		roomModes:          make(map[string]string),
 		battleStart:        make(map[string]time.Time),
+		roomCodes:          make(map[string]string),
 	}
 }
 
@@ -88,25 +104,88 @@ func (s *signalingService) Join(ctx context.Context, conn Conn, roomID string, m
 	}
 
 	// JoinResultJoined or JoinResultAlreadyMember — register in the hub.
-	s.mu.Lock()
-	if s.rooms[roomID] == nil {
-		s.rooms[roomID] = make(map[int64]Conn)
-		// Store mode on first join.
-		s.roomModes[roomID] = mode
-	}
-
-	s.rooms[roomID][conn.UserID()] = conn
-
-	// Record battle start time when the room becomes full (2 members).
-	if len(s.rooms[roomID]) == 2 {
-		if _, ok := s.battleStart[roomID]; !ok {
-			s.battleStart[roomID] = s.now()
-		}
-	}
-
-	s.mu.Unlock()
+	s.registerConn(roomID, mode, conn)
 
 	return nil
+}
+
+// CreateRoom generates a fresh room_id, registers the caller as the first
+// member of a new UNRANKED private room, mints an invite code mapped to it,
+// and returns both. On any failure it best-effort rolls back partial state.
+func (s *signalingService) CreateRoom(ctx context.Context, conn Conn) (string, string, error) {
+	roomID, err := s.genRoomID()
+	if err != nil {
+		return "", "", fmt.Errorf("generate room id: %w", err)
+	}
+
+	result, err := s.roomRepo.Join(ctx, roomID, conn.UserID())
+	if err != nil {
+		return "", "", fmt.Errorf("join redis room %q: %w", roomID, err)
+	}
+
+	// A freshly generated room_id must always be admitted (never full).
+	if result == repository.JoinResultFull {
+		return "", "", domain.ErrRoomFull
+	}
+
+	s.registerConn(roomID, domain.ModeUnranked, conn)
+
+	code, err := s.roomCodeRepo.CreateCode(ctx, roomID)
+	if err != nil {
+		// Roll back the hub + Redis room so a failed create leaves no residue.
+		s.mu.Lock()
+		delete(s.rooms, roomID)
+		delete(s.roomModes, roomID)
+		delete(s.battleStart, roomID)
+		s.mu.Unlock()
+
+		removeErr := s.roomRepo.RemoveRoom(ctx, roomID)
+		if removeErr != nil {
+			s.logger.Error("rollback remove room after code creation failure",
+				zap.String("room_id", roomID),
+				zap.Error(removeErr),
+			)
+		}
+
+		return "", "", fmt.Errorf("create invite code for room %q: %w", roomID, err)
+	}
+
+	s.mu.Lock()
+	s.roomCodes[roomID] = code
+	s.mu.Unlock()
+
+	return roomID, code, nil
+}
+
+// JoinByCode resolves an invite code to its room_id and joins the caller as
+// the second member. The room stays unranked (set by the creator via
+// CreateRoom). Returns domain.ErrInvalidCode for an unknown/expired code and
+// domain.ErrRoomFull when the room already has two members.
+func (s *signalingService) JoinByCode(ctx context.Context, conn Conn, code string) (string, error) {
+	roomID, err := s.roomCodeRepo.ResolveCode(ctx, code)
+	if err != nil {
+		if errors.Is(err, repository.ErrCodeNotFound) {
+			return "", domain.ErrInvalidCode
+		}
+
+		return "", fmt.Errorf("resolve invite code %q: %w", code, err)
+	}
+
+	result, err := s.roomRepo.Join(ctx, roomID, conn.UserID())
+	if err != nil {
+		return "", fmt.Errorf("join redis room %q: %w", roomID, err)
+	}
+
+	if result == repository.JoinResultFull {
+		return "", domain.ErrRoomFull
+	}
+
+	// mode is whatever the creator set (domain.ModeUnranked) — registerConn
+	// only stores it on the room's first registration, so the value passed
+	// here is ignored when the room already exists in the hub.
+	s.registerConn(roomID, domain.ModeUnranked, conn)
+
+	return roomID, nil
 }
 
 // Relay forwards raw bytes verbatim to every other in-process member of roomID.
@@ -277,7 +356,23 @@ func (s *signalingService) Leave(ctx context.Context, conn Conn, roomID string) 
 	delete(s.arbitrations, roomID)
 	delete(s.roomModes, roomID)
 	delete(s.battleStart, roomID)
+
+	// Capture the invite code (if this was a private room) for cleanup below;
+	// the TTL is the backstop if this fails.
+	code, hadCode := s.roomCodes[roomID]
+	delete(s.roomCodes, roomID)
+
 	s.mu.Unlock()
+
+	if hadCode {
+		removeErr := s.roomCodeRepo.RemoveCode(ctx, code)
+		if removeErr != nil {
+			s.logger.Error("remove invite code on leave",
+				zap.String("room_id", roomID),
+				zap.Error(removeErr),
+			)
+		}
+	}
 
 	// Send outcome (forfeit) before peer_left so the peer knows why it won.
 	if outcomePayload != nil {
@@ -333,6 +428,31 @@ func (s *signalingService) Leave(ctx context.Context, conn Conn, roomID string) 
 			zap.String("room_id", roomID),
 			zap.Error(err),
 		)
+	}
+}
+
+// registerConn registers conn as a member of roomID in the in-process hub.
+// mode is stored the first time a room is registered (first join / CreateRoom)
+// and ignored on subsequent calls for the same room. battleStart is recorded
+// the moment the room reaches its second member. Shared by Join, CreateRoom,
+// and JoinByCode so the hub-registration/battleStart logic never forks.
+func (s *signalingService) registerConn(roomID string, mode string, conn Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.rooms[roomID] == nil {
+		s.rooms[roomID] = make(map[int64]Conn)
+		// Store mode on first join.
+		s.roomModes[roomID] = mode
+	}
+
+	s.rooms[roomID][conn.UserID()] = conn
+
+	// Record battle start time when the room becomes full (2 members).
+	if len(s.rooms[roomID]) == 2 {
+		if _, ok := s.battleStart[roomID]; !ok {
+			s.battleStart[roomID] = s.now()
+		}
 	}
 }
 

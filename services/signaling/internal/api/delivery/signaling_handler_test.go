@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -260,6 +261,244 @@ func TestSignalingHandler_Join_RoomFull_ErrorAndClose(t *testing.T) {
 	expectClosed(t, c) // criterion: 1 — fails if connection not closed for full room
 }
 
+func TestSignalingHandler_CreateRoom_Success(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 7 — create_room returns a room_created frame carrying room_id and code
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockSignalingService(ctrl)
+
+	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(1), nil)
+	svc.EXPECT().CreateRoom(gomock.Any(), gomock.Any()).Return("room-new", "CODE123", nil)
+	// Deferred CloseNow triggers leaveOnDisconnect asynchronously; absorb it.
+	svc.EXPECT().Leave(gomock.Any(), gomock.Any(), "room-new").AnyTimes()
+
+	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	c := dialWithCookie(t, srv, "tok")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"create_room"}`)
+
+	raw := readRaw(t, c)
+
+	var msg struct {
+		Type   string `json:"type"`
+		RoomID string `json:"room_id"`
+		Code   string `json:"code"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal room_created frame: %v", err)
+	}
+
+	if msg.Type != "room_created" {
+		t.Errorf("type = %q, want room_created", msg.Type) // criterion: 7
+	}
+
+	if msg.RoomID != "room-new" {
+		t.Errorf("room_id = %q, want room-new", msg.RoomID) // criterion: 7 — fails if room_id missing
+	}
+
+	if msg.Code != "CODE123" {
+		t.Errorf("code = %q, want CODE123", msg.Code) // criterion: 7 — fails if code missing
+	}
+}
+
+func TestSignalingHandler_CreateRoom_AlreadyInRoom(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 7 — create_room while already in a room is rejected, one-room-per-connection
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockSignalingService(ctrl)
+
+	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(1), nil)
+	svc.EXPECT().Join(gomock.Any(), gomock.Any(), "room-existing", gomock.Any()).Return(nil)
+	// Deferred CloseNow triggers leaveOnDisconnect asynchronously; absorb it.
+	svc.EXPECT().Leave(gomock.Any(), gomock.Any(), "room-existing").AnyTimes()
+
+	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	c := dialWithCookie(t, srv, "tok")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"join","room_id":"room-existing"}`)
+
+	sendFrame(t, c, `{"type":"create_room"}`)
+
+	msg := readJSON(t, c)
+	if msg["type"] != "error" {
+		t.Errorf("type = %q, want error", msg["type"]) // criterion: 7 — fails if create_room allowed on a second room
+	}
+
+	if msg["error"] != domain.ErrAlreadyInRoom.Error() {
+		t.Errorf("error = %q, want %q", msg["error"], domain.ErrAlreadyInRoom.Error())
+	}
+}
+
+func TestSignalingHandler_CreateRoom_ServiceError(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 7 — a CreateRoom failure yields a redacted error frame, connection stays open
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockSignalingService(ctrl)
+
+	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(1), nil)
+	svc.EXPECT().CreateRoom(gomock.Any(), gomock.Any()).Return("", "", errors.New("redis down"))
+
+	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	c := dialWithCookie(t, srv, "tok")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"create_room"}`)
+
+	msg := readJSON(t, c)
+	if msg["type"] != "error" {
+		t.Errorf("type = %q, want error", msg["type"]) // criterion: 7
+	}
+}
+
+func TestSignalingHandler_JoinRoom_Success(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 8 — join_room returns a room_joined frame carrying room_id
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockSignalingService(ctrl)
+
+	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(2), nil)
+	svc.EXPECT().JoinByCode(gomock.Any(), gomock.Any(), "CODE123").Return("room-priv", nil)
+	// Deferred CloseNow triggers leaveOnDisconnect asynchronously; absorb it.
+	svc.EXPECT().Leave(gomock.Any(), gomock.Any(), "room-priv").AnyTimes()
+
+	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	c := dialWithCookie(t, srv, "tok")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"join_room","code":"CODE123"}`)
+
+	msg := readJSON(t, c)
+	if msg["type"] != "room_joined" {
+		t.Errorf("type = %q, want room_joined", msg["type"]) // criterion: 8
+	}
+
+	if msg["room_id"] != "room-priv" {
+		t.Errorf("room_id = %q, want room-priv", msg["room_id"]) // criterion: 8 — fails if room_id missing
+	}
+}
+
+func TestSignalingHandler_JoinRoom_AlreadyInRoom(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 8 — join_room while already in a room is rejected
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockSignalingService(ctrl)
+
+	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(1), nil)
+	svc.EXPECT().Join(gomock.Any(), gomock.Any(), "room-existing", gomock.Any()).Return(nil)
+	// Deferred CloseNow triggers leaveOnDisconnect asynchronously; absorb it.
+	svc.EXPECT().Leave(gomock.Any(), gomock.Any(), "room-existing").AnyTimes()
+
+	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	c := dialWithCookie(t, srv, "tok")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"join","room_id":"room-existing"}`)
+
+	sendFrame(t, c, `{"type":"join_room","code":"CODE123"}`)
+
+	msg := readJSON(t, c)
+	if msg["type"] != "error" {
+		t.Errorf("type = %q, want error", msg["type"]) // criterion: 8 — fails if join_room allowed on a second room
+	}
+
+	if msg["error"] != domain.ErrAlreadyInRoom.Error() {
+		t.Errorf("error = %q, want %q", msg["error"], domain.ErrAlreadyInRoom.Error())
+	}
+}
+
+func TestSignalingHandler_JoinRoom_InvalidCode_KeepsConnOpen(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 9 — an invalid/expired code gets an error frame; the connection stays open
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockSignalingService(ctrl)
+
+	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(2), nil)
+	svc.EXPECT().JoinByCode(gomock.Any(), gomock.Any(), "BADCODE").Return("", domain.ErrInvalidCode)
+
+	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	c := dialWithCookie(t, srv, "tok")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"join_room","code":"BADCODE"}`)
+
+	msg := readJSON(t, c)
+	if msg["type"] != "error" {
+		t.Errorf("type = %q, want error", msg["type"]) // criterion: 9
+	}
+
+	if msg["error"] != domain.ErrInvalidCode.Error() {
+		t.Errorf("error = %q, want %q", msg["error"], domain.ErrInvalidCode.Error()) // criterion: 9 — fails if wrong error text
+	}
+
+	// The connection must remain open — the client may retry with a corrected code.
+	sendFrame(t, c, `{"type":"bogus"}`)
+
+	msg2 := readJSON(t, c)
+	if msg2["type"] != "error" {
+		t.Errorf("second frame type = %q, want error (connection must stay open)", msg2["type"]) // criterion: 9
+	}
+}
+
+func TestSignalingHandler_JoinRoom_RoomFull_ErrorAndClose(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 10 — join_room to a full room gets an error frame then the connection closes
+	ctrl := gomock.NewController(t)
+	sessionRepo := repomocks.NewMockSessionRepository(ctrl)
+	svc := svcmocks.NewMockSignalingService(ctrl)
+
+	sessionRepo.EXPECT().UserIDBySession(gomock.Any(), "tok").Return(int64(3), nil)
+	svc.EXPECT().JoinByCode(gomock.Any(), gomock.Any(), "FULLCODE").Return("", domain.ErrRoomFull)
+
+	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
+	srv := httptest.NewServer(makeHTTPHandler(handler))
+	t.Cleanup(srv.Close)
+
+	c := dialWithCookie(t, srv, "tok")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"join_room","code":"FULLCODE"}`)
+
+	msg := readJSON(t, c)
+	if msg["type"] != "error" {
+		t.Errorf("type = %q, want error", msg["type"]) // criterion: 10 — fails if error frame not sent
+	}
+
+	expectClosed(t, c) // criterion: 10 — fails if connection not closed for a full room
+}
+
 func TestSignalingHandler_Relay_NonMember_ErrorFrame(t *testing.T) {
 	t.Parallel()
 
@@ -424,12 +663,93 @@ func (n *nopRatingsClient) ApplyResult(_ context.Context, _ service.ApplyResultR
 	return nil
 }
 
+// fakeRoomCodeRepo is an in-memory RoomCodeRepository for integration tests.
+type fakeRoomCodeRepo struct {
+	mu      sync.Mutex
+	nextID  int
+	byCode  map[string]string
+	removed []string
+}
+
+func newFakeRoomCodeRepo() *fakeRoomCodeRepo {
+	return &fakeRoomCodeRepo{byCode: make(map[string]string)}
+}
+
+func (r *fakeRoomCodeRepo) CreateCode(_ context.Context, roomID string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.nextID++
+	code := fmt.Sprintf("CODE%d", r.nextID)
+	r.byCode[code] = roomID
+
+	return code, nil
+}
+
+func (r *fakeRoomCodeRepo) ResolveCode(_ context.Context, code string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	roomID, ok := r.byCode[code]
+	if !ok {
+		return "", repository.ErrCodeNotFound
+	}
+
+	return roomID, nil
+}
+
+func (r *fakeRoomCodeRepo) RemoveCode(_ context.Context, code string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	delete(r.byCode, code)
+	r.removed = append(r.removed, code)
+
+	return nil
+}
+
+func (r *fakeRoomCodeRepo) hasCode(code string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	_, ok := r.byCode[code]
+
+	return ok
+}
+
+// testRoomIDGen returns a deterministic room-id generator for integration tests.
+func testRoomIDGen() func() (string, error) {
+	var n int64
+
+	return func() (string, error) {
+		n++
+
+		return fmt.Sprintf("private-room-%d", n), nil
+	}
+}
+
 // newIntegrationServer wires a real SignalingService + fake repos into an httptest.Server.
 // Keepalive is disabled (interval=0) to keep integration tests deterministic.
 func newIntegrationServer(t *testing.T, sessionRepo repository.SessionRepository, roomRepo repository.RoomRepository) *httptest.Server {
 	t.Helper()
 
-	svc := service.NewSignalingService(zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond, &nopRatingsClient{})
+	return newIntegrationServerWithCodes(t, sessionRepo, roomRepo, newFakeRoomCodeRepo())
+}
+
+// newIntegrationServerWithCodes wires a real SignalingService + fake repos,
+// including an explicit RoomCodeRepository, into an httptest.Server.
+func newIntegrationServerWithCodes(
+	t *testing.T,
+	sessionRepo repository.SessionRepository,
+	roomRepo repository.RoomRepository,
+	roomCodeRepo repository.RoomCodeRepository,
+) *httptest.Server {
+	t.Helper()
+
+	svc := service.NewSignalingService(
+		zap.NewNop(), roomRepo, time.Now, time.AfterFunc, 150*time.Millisecond, &nopRatingsClient{},
+		roomCodeRepo, testRoomIDGen(),
+	)
 	handler := NewSignalingHandler(zap.NewNop(), sessionRepo, svc, "session", 0, 0)
 	srv := httptest.NewServer(makeHTTPHandler(handler))
 	t.Cleanup(srv.Close)
@@ -771,6 +1091,195 @@ func TestIntegration_MultiRoomDisconnectCleansOriginalRoom(t *testing.T) {
 	peerLeftType := readMsgType(t, cB)
 	if peerLeftType != "peer_left" {
 		t.Errorf("B second frame type = %q, want peer_left after A disconnect", peerLeftType) // fix1/5
+	}
+}
+
+// ─── Private rooms: invite-a-friend (issue #96) integration tests ────────────
+
+func TestIntegration_CreateAndJoinByCode_RelaysBetweenPeers(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 7,8 — create_room mints a room+code; join_room admits the
+	// second peer into the SAME room, and SDP relay flows between them.
+	sessionRepo := newFakeSessionRepo()
+	sessionRepo.add("tokCreator", 1)
+	sessionRepo.add("tokJoiner", 2)
+
+	roomRepo := newFakeRoomRepo()
+	roomCodeRepo := newFakeRoomCodeRepo()
+	srv := newIntegrationServerWithCodes(t, sessionRepo, roomRepo, roomCodeRepo)
+
+	creator := dialWithCookie(t, srv, "tokCreator")
+	defer creator.CloseNow() //nolint:errcheck
+
+	sendFrame(t, creator, `{"type":"create_room"}`)
+
+	var created struct {
+		Type   string `json:"type"`
+		RoomID string `json:"room_id"`
+		Code   string `json:"code"`
+	}
+
+	rawCreated := readRaw(t, creator)
+	if err := json.Unmarshal(rawCreated, &created); err != nil {
+		t.Fatalf("unmarshal room_created: %v", err)
+	}
+
+	if created.Type != "room_created" {
+		t.Fatalf("type = %q, want room_created", created.Type) // criterion: 7
+	}
+
+	if created.RoomID == "" || created.Code == "" {
+		t.Fatalf("room_created missing room_id/code: %+v", created) // criterion: 7
+	}
+
+	joiner := dialWithCookie(t, srv, "tokJoiner")
+	defer joiner.CloseNow() //nolint:errcheck
+
+	sendFrame(t, joiner, fmt.Sprintf(`{"type":"join_room","code":%q}`, created.Code))
+
+	var joined struct {
+		Type   string `json:"type"`
+		RoomID string `json:"room_id"`
+	}
+
+	rawJoined := readRaw(t, joiner)
+	if err := json.Unmarshal(rawJoined, &joined); err != nil {
+		t.Fatalf("unmarshal room_joined: %v", err)
+	}
+
+	if joined.Type != "room_joined" {
+		t.Fatalf("type = %q, want room_joined", joined.Type) // criterion: 8
+	}
+
+	if joined.RoomID != created.RoomID {
+		t.Errorf("joiner's room_id = %q, want %q (same room as creator)", joined.RoomID, created.RoomID) // criterion: 8 — fails if not the same room
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// SDP relay must flow between creator and joiner — proves both are wired
+	// into the existing #24 relay hub via the SAME room_id.
+	offer := fmt.Sprintf(`{"type":"sdp","room_id":%q,"sdp":"v=0 private offer"}`, created.RoomID)
+	sendFrame(t, creator, offer)
+
+	got := readRaw(t, joiner)
+	if string(got) != offer {
+		t.Errorf("joiner received %q, want %q (verbatim relay via private room)", got, offer) // criterion: 8
+	}
+}
+
+func TestIntegration_JoinRoom_InvalidCode(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 9 — an unknown/expired invite code is rejected, connection stays open
+	sessionRepo := newFakeSessionRepo()
+	sessionRepo.add("tokJoiner", 2)
+
+	roomRepo := newFakeRoomRepo()
+	roomCodeRepo := newFakeRoomCodeRepo()
+	srv := newIntegrationServerWithCodes(t, sessionRepo, roomRepo, roomCodeRepo)
+
+	c := dialWithCookie(t, srv, "tokJoiner")
+	defer c.CloseNow() //nolint:errcheck
+
+	sendFrame(t, c, `{"type":"join_room","code":"NOSUCHCODE"}`)
+
+	msg := readJSON(t, c)
+	if msg["type"] != "error" {
+		t.Errorf("type = %q, want error", msg["type"]) // criterion: 9 — fails if invalid code accepted
+	}
+
+	if msg["error"] != domain.ErrInvalidCode.Error() {
+		t.Errorf("error = %q, want %q", msg["error"], domain.ErrInvalidCode.Error())
+	}
+}
+
+func TestIntegration_JoinRoom_ThirdPeerToFullPrivateRoomRejected(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 10 — a third join_room to an already-full private room is
+	// rejected with an error frame and the connection is closed.
+	sessionRepo := newFakeSessionRepo()
+	sessionRepo.add("tokCreator", 1)
+	sessionRepo.add("tokJoiner", 2)
+	sessionRepo.add("tokStranger", 3)
+
+	roomRepo := newFakeRoomRepo()
+	roomCodeRepo := newFakeRoomCodeRepo()
+	srv := newIntegrationServerWithCodes(t, sessionRepo, roomRepo, roomCodeRepo)
+
+	creator := dialWithCookie(t, srv, "tokCreator")
+	defer creator.CloseNow() //nolint:errcheck
+
+	sendFrame(t, creator, `{"type":"create_room"}`)
+
+	var created struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(readRaw(t, creator), &created); err != nil {
+		t.Fatalf("unmarshal room_created: %v", err)
+	}
+
+	joiner := dialWithCookie(t, srv, "tokJoiner")
+	defer joiner.CloseNow() //nolint:errcheck
+
+	sendFrame(t, joiner, fmt.Sprintf(`{"type":"join_room","code":%q}`, created.Code))
+	readRaw(t, joiner) // drain room_joined
+
+	time.Sleep(30 * time.Millisecond)
+
+	stranger := dialWithCookie(t, srv, "tokStranger")
+	defer stranger.CloseNow() //nolint:errcheck
+
+	sendFrame(t, stranger, fmt.Sprintf(`{"type":"join_room","code":%q}`, created.Code))
+
+	msg := readJSON(t, stranger)
+	if msg["type"] != "error" {
+		t.Errorf("type = %q, want error", msg["type"]) // criterion: 10 — fails if third peer admitted
+	}
+
+	expectClosed(t, stranger) // criterion: 10 — fails if connection not closed for a full private room
+}
+
+func TestIntegration_CreateRoom_CreatorLeaveCleansUpCode(t *testing.T) {
+	t.Parallel()
+
+	// criterion: 11 — when the creator disconnects before anyone joins, the
+	// room AND its invite code are cleaned up (RemoveCode called / mapping gone).
+	sessionRepo := newFakeSessionRepo()
+	sessionRepo.add("tokCreator", 1)
+
+	roomRepo := newFakeRoomRepo()
+	roomCodeRepo := newFakeRoomCodeRepo()
+	srv := newIntegrationServerWithCodes(t, sessionRepo, roomRepo, roomCodeRepo)
+
+	creator := dialWithCookie(t, srv, "tokCreator")
+
+	sendFrame(t, creator, `{"type":"create_room"}`)
+
+	var created struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(readRaw(t, creator), &created); err != nil {
+		t.Fatalf("unmarshal room_created: %v", err)
+	}
+
+	if !roomCodeRepo.hasCode(created.Code) {
+		t.Fatalf("code %q not stored right after create_room", created.Code)
+	}
+
+	// Creator disconnects before anyone joins.
+	creator.CloseNow() //nolint:errcheck
+
+	// Poll briefly for the async Leave cleanup to run.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && roomCodeRepo.hasCode(created.Code) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if roomCodeRepo.hasCode(created.Code) {
+		t.Errorf("code %q still present after creator disconnect, want removed", created.Code) // criterion: 11
 	}
 }
 

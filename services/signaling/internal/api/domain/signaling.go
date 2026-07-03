@@ -21,6 +21,8 @@ var (
 	// ErrMatchFinished is returned when a blink/face_lost is reported after an outcome
 	// has already been decided for the room (idempotent guard).
 	ErrMatchFinished = errors.New("match outcome already decided")
+	// ErrInvalidCode is returned when a join_room code is unknown or expired.
+	ErrInvalidCode = errors.New("invalid or expired code")
 )
 
 const maxRoomIDLen = 128
@@ -36,6 +38,11 @@ const (
 	TypeFaceLost = "face_lost"
 	// TypeOutcome is sent by the server to announce the battle result.
 	TypeOutcome = "outcome"
+	// TypeCreateRoom is sent by a client to create a fresh private (unranked)
+	// room and receive a shareable invite code.
+	TypeCreateRoom = "create_room"
+	// TypeJoinRoom is sent by a client to join a private room by invite code.
+	TypeJoinRoom = "join_room"
 )
 
 // Room mode constants.
@@ -54,6 +61,8 @@ type InboundEnvelope struct {
 	Type   string `json:"type"`
 	RoomID string `json:"room_id"`
 	Mode   string `json:"mode,omitempty"`
+	// Code carries the invite code for a join_room request.
+	Code string `json:"code,omitempty"`
 }
 
 // peerLeftMsg is the server-to-client notification when the peer disconnects.
@@ -74,6 +83,19 @@ type errMsg struct {
 	Error string `json:"error"`
 }
 
+// roomCreatedMsg is the server-to-client acknowledgement of a create_room request.
+type roomCreatedMsg struct {
+	Type   string `json:"type"`
+	RoomID string `json:"room_id"`
+	Code   string `json:"code"`
+}
+
+// roomJoinedMsg is the server-to-client acknowledgement of a join_room request.
+type roomJoinedMsg struct {
+	Type   string `json:"type"`
+	RoomID string `json:"room_id"`
+}
+
 // OutcomeBytes returns the marshaled {"type":"outcome","winner_id":...,"loser_id":...} frame bytes.
 // Panics on marshal failure (struct has only primitive fields — cannot fail).
 func OutcomeBytes(winnerID, loserID int64) []byte {
@@ -91,6 +113,28 @@ func PeerLeftBytes() []byte {
 	b, err := json.Marshal(peerLeftMsg{Type: "peer_left"})
 	if err != nil {
 		panic("domain: marshal peer_left: " + err.Error())
+	}
+
+	return b
+}
+
+// RoomCreatedBytes returns the marshaled {"type":"room_created","room_id":...,"code":...} frame bytes.
+// Panics on marshal failure (struct has only primitive fields — cannot fail).
+func RoomCreatedBytes(roomID, code string) []byte {
+	b, err := json.Marshal(roomCreatedMsg{Type: "room_created", RoomID: roomID, Code: code})
+	if err != nil {
+		panic("domain: marshal room_created: " + err.Error())
+	}
+
+	return b
+}
+
+// RoomJoinedBytes returns the marshaled {"type":"room_joined","room_id":...} frame bytes.
+// Panics on marshal failure (struct has only primitive fields — cannot fail).
+func RoomJoinedBytes(roomID string) []byte {
+	b, err := json.Marshal(roomJoinedMsg{Type: "room_joined", RoomID: roomID})
+	if err != nil {
+		panic("domain: marshal room_joined: " + err.Error())
 	}
 
 	return b
