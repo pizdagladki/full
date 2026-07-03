@@ -82,9 +82,15 @@ type KingClipRepository interface {
 	// object_key. Returns ErrKingClipNotFound when absent.
 	Delete(ctx context.Context, id int64) (objectKey string, err error)
 
-	// DeleteSupersededByHill deletes all king clips for hillType other than
-	// keepID and returns their object_key values. Used to evict the prior
-	// king clip(s) for a hill when a new one is uploaded.
+	// DeleteSupersededByHill deletes king clips for hillType OLDER than keepID
+	// (superseded) and returns their object_key values. Only rows with
+	// id < keepID are removed, never rows with id >= keepID: king clip ids are
+	// monotonic BIGINT IDENTITY, so under two concurrent uploads for the same
+	// hill, whichever insert obtained the highest id always survives and
+	// neither caller ever deletes a row it does not own — this keeps exactly
+	// one king per hill even under a race, instead of a symmetric
+	// "id <> keepID" delete that could let both concurrent uploads wipe each
+	// other's just-created row.
 	DeleteSupersededByHill(ctx context.Context, hillType string, keepID int64) ([]string, error)
 
 	// DeleteExpired deletes all king clips whose expires_at has passed and

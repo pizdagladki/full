@@ -105,7 +105,7 @@ func (r *kingClipRepository) Delete(ctx context.Context, id int64) (string, erro
 
 const deleteSupersededByHillSQL = `
 DELETE FROM king_clips
-WHERE hill_type = $1 AND id <> $2
+WHERE hill_type = $1 AND id < $2
 RETURNING object_key`
 
 func (r *kingClipRepository) DeleteSupersededByHill(

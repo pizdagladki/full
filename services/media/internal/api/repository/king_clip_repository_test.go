@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
 	"time"
 
@@ -105,6 +106,21 @@ func TestKingClipRepository_Create(t *testing.T) {
 	}
 }
 
+// getCurrentKingClipSQLTest mirrors the production getCurrentKingClipSQL
+// constant in king_clip_repository.go verbatim. It is duplicated here
+// (rather than exported from the repository) so the test pins the exact
+// query text: any regression that drops the "expires_at > now()" predicate
+// (serving an already-DEAD king) or the "ORDER BY created_at DESC" ordering
+// (serving a stale king instead of the latest) changes the production string
+// but not this one, so pgxmock's ExpectQuery no longer matches the actual
+// call and every case below fails.
+const getCurrentKingClipSQLTest = `
+SELECT id, user_id, hill_type, object_key, blink_ts_ms, created_at, expires_at
+FROM king_clips
+WHERE hill_type = $1 AND expires_at > now()
+ORDER BY created_at DESC, id DESC
+LIMIT 1`
+
 func TestKingClipRepository_GetCurrent(t *testing.T) {
 	t.Parallel()
 
@@ -120,23 +136,30 @@ func TestKingClipRepository_GetCurrent(t *testing.T) {
 		wantErr  error
 	}{
 		{
-			// criterion: 3 — returns the current non-expired king clip for the hill.
+			// criterion: 3 — returns the current non-expired king clip for the
+			// hill. The query is matched against the exact production SQL text
+			// (via regexp.QuoteMeta), so a regression that removes
+			// "expires_at > now()" or "ORDER BY created_at DESC" makes the
+			// production query text diverge from this expectation and the case
+			// fails (no matching expectation registered).
 			name:     "returns current non-expired king clip",
 			hillType: domain.HillTypeDaily,
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols).
 					AddRow(int64(3), int64(42), "daily", "king-clips/daily/42/c.webm", int64(555), now, expires)
-				m.ExpectQuery(`SELECT`).WithArgs("daily").WillReturnRows(rows)
+				m.ExpectQuery(regexp.QuoteMeta(getCurrentKingClipSQLTest)).WithArgs("daily").WillReturnRows(rows)
 			},
 			wantID: 3,
 		},
 		{
-			// criterion: 3 — none available (no rows, e.g. all expired) → ErrKingClipNotFound.
+			// criterion: 3 — none available (no rows, e.g. all expired) →
+			// ErrKingClipNotFound. Still pinned against the exact non-expired,
+			// latest-first query text.
 			name:     "no current king clip returns ErrKingClipNotFound",
 			hillType: domain.HillTypeMonthly,
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols)
-				m.ExpectQuery(`SELECT`).WithArgs("monthly").WillReturnRows(rows)
+				m.ExpectQuery(regexp.QuoteMeta(getCurrentKingClipSQLTest)).WithArgs("monthly").WillReturnRows(rows)
 			},
 			wantErr: repository.ErrKingClipNotFound,
 		},
@@ -144,7 +167,7 @@ func TestKingClipRepository_GetCurrent(t *testing.T) {
 			name:     "query error propagated",
 			hillType: domain.HillTypeRanked,
 			setup: func(m pgxmock.PgxPoolIface) {
-				m.ExpectQuery(`SELECT`).WillReturnError(errors.New("db error"))
+				m.ExpectQuery(regexp.QuoteMeta(getCurrentKingClipSQLTest)).WillReturnError(errors.New("db error"))
 			},
 			wantErr: errors.New("db error"),
 		},
@@ -376,8 +399,11 @@ func TestKingClipRepository_DeleteSupersededByHill(t *testing.T) {
 	}{
 		{
 			// criterion: 4(b) — a new upload for a hill evicts the superseded
-			// prior king clip(s) for that hill_type (object + metadata removed),
-			// while other hills are untouched (hill_type is scoped in the SQL).
+			// (older) prior king clip(s) for that hill_type (object + metadata
+			// removed), while other hills are untouched (hill_type is scoped in
+			// the SQL). The query is matched against the exact "id < $2" text, so
+			// a regression back to a symmetric "id <> $2" predicate fails this
+			// case outright (no matching expectation registered).
 			name:     "evicts prior king clips for the same hill, keeping the new one",
 			hillType: domain.HillTypeDaily,
 			keepID:   9,
@@ -385,9 +411,30 @@ func TestKingClipRepository_DeleteSupersededByHill(t *testing.T) {
 				rows := pgxmock.NewRows([]string{"object_key"}).
 					AddRow("king-clips/daily/42/old1.webm").
 					AddRow("king-clips/daily/7/old2.webm")
-				m.ExpectQuery(`DELETE FROM king_clips`).WithArgs("daily", int64(9)).WillReturnRows(rows)
+				m.ExpectQuery(regexp.QuoteMeta("DELETE FROM king_clips\nWHERE hill_type = $1 AND id < $2")).
+					WithArgs("daily", int64(9)).WillReturnRows(rows)
 			},
 			wantKeys: []string{"king-clips/daily/42/old1.webm", "king-clips/daily/7/old2.webm"},
+		},
+		{
+			// criterion: concurrency race guard — a concurrent upload that landed a
+			// HIGHER id than keepID (i.e. it is NEWER than the row that just called
+			// DeleteSupersededByHill) must never be superseded: the repository only
+			// issues "id < $2" against the DB, so pgxmock records zero rows deleted
+			// for a keepID lower than the concurrent writer's id. This is the
+			// mechanical proof that two racing uploads for the same hill cannot both
+			// wipe each other out — whichever holds the highest id survives.
+			name:     "newer concurrent upload (id > keepID) is never superseded",
+			hillType: domain.HillTypeDaily,
+			keepID:   5,
+			setup: func(m pgxmock.PgxPoolIface) {
+				// The concurrent writer's row (id=9 > keepID=5) is NOT among the
+				// returned object keys: only rows with id < 5 come back.
+				rows := pgxmock.NewRows([]string{"object_key"}).AddRow("king-clips/daily/42/old.webm")
+				m.ExpectQuery(regexp.QuoteMeta("DELETE FROM king_clips\nWHERE hill_type = $1 AND id < $2")).
+					WithArgs("daily", int64(5)).WillReturnRows(rows)
+			},
+			wantKeys: []string{"king-clips/daily/42/old.webm"},
 		},
 		{
 			name:     "no superseded clips returns empty slice",
