@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { defaultRatingsApi } from '../api/ratings';
 import type { RatingsApi, RatingData } from '../api/ratings';
+import { PointsWidget } from './PointsWidget';
+import type { PointsApi } from '../api/points';
 
 // ---------------------------------------------------------------------------
 // Mock TikTok tracks (no real audio yet — placeholder list)
@@ -21,13 +23,15 @@ const MOCK_TRACKS = [
 export interface HomeProps {
   /** Injectable ratings API (swap with a mock in tests). Defaults to the real client. */
   ratingsApi?: RatingsApi;
+  /** Injectable points API (swap with a mock in tests). Defaults to the real client. */
+  pointsApi?: PointsApi;
 }
 
 // ---------------------------------------------------------------------------
 // Home component
 // ---------------------------------------------------------------------------
 
-export function Home({ ratingsApi = defaultRatingsApi }: HomeProps) {
+export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
   const { user } = useAuth();
 
   // --- camera devices ---
@@ -146,6 +150,9 @@ export function Home({ ratingsApi = defaultRatingsApi }: HomeProps) {
 
   return (
     <div data-testid="home-screen">
+      {/* Points widget (balance + info panel) — top-right */}
+      <PointsWidget pointsApi={pointsApi} />
+
       {/* Top AdSense banner slot */}
       <div data-testid="ad-slot" aria-hidden="true" />
 
