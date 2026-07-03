@@ -160,7 +160,7 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
       <nav>
         <Link to="/store">Store</Link>
         <Link to="/profile">Profile</Link>
-        <Link to="/search">Play</Link>
+        <Link to="/mode-select">Play</Link>
       </nav>
 
       {/* Level progress bar */}

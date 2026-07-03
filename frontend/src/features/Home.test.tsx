@@ -257,13 +257,13 @@ describe('Criterion 4 — navigation and banner slots', () => {
     expect(profileLink.getAttribute('href')).toBe('/profile');
   });
 
-  it('criterion-4: renders a link to /search (mode-select entry)', () => {
-    // criterion: 4 — nav must have a link to mode-select (/search)
+  it('criterion-4: renders a link to /mode-select (mode-select entry)', () => {
+    // criterion: 4 — nav must have a link to mode-select (/mode-select)
     renderHome();
 
     const playLink = screen.getByRole('link', { name: /play/i }) as HTMLAnchorElement;
     expect(playLink).toBeInTheDocument();
-    expect(playLink.getAttribute('href')).toBe('/search');
+    expect(playLink.getAttribute('href')).toBe('/mode-select');
   });
 
   it('criterion-4 violation guard: missing store link would fail', () => {
