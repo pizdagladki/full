@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -157,32 +158,55 @@ func TestRunWorkers_GracefulShutdown(t *testing.T) {
 }
 
 // TestRunWorkers_WorkerError verifies criterion: a worker start failure (bad
-// bind address) is surfaced as an error from runWorkers.
+// bind address) is surfaced as an error from runWorkers. It also proves that
+// runWorkers itself unwinds workerReset's ctx.Done()-only loop and returns
+// promptly, without relying on the caller to cancel the passed-in ctx.
 func TestRunWorkers_WorkerError(t *testing.T) {
 	t.Parallel()
 
 	// A bind address with no port makes e.Start fail, surfacing a worker error.
 	a := newTestApp(t, "not-a-valid-bind-addr")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	err := a.runWorkers(context.Background())
+	if err == nil {
+		t.Fatal("runWorkers() error = nil, want the worker's start error")
+	}
+}
+
+// TestRunWorkers_CancelsSharedCtxOnFirstExit verifies criterion: when one
+// worker returns (with an error) while another worker's loop only exits on
+// ctx.Done(), runWorkers cancels the shared ctx as soon as the first worker
+// exits, unwinding the still-running worker so runWorkers returns promptly
+// instead of hanging on wg.Wait() forever.
+func TestRunWorkers_CancelsSharedCtxOnFirstExit(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("boom")
+
+	failFast := func(_ context.Context, _ *App) error {
+		return wantErr
+	}
+
+	blockUntilCanceled := func(ctx context.Context, _ *App) error {
+		<-ctx.Done()
+
+		return nil
+	}
+
+	a := &App{}
 
 	done := make(chan error, 1)
-	go func() { done <- a.runWorkers(ctx) }()
-
-	// workerHTTP fails fast; workerReset's ticker loop only exits on
-	// ctx.Done(), so cancel once workerHTTP has had a chance to fail, letting
-	// runWorkers's shared WaitGroup complete.
-	time.Sleep(100 * time.Millisecond)
-	cancel()
+	go func() {
+		done <- a.runWorkersFor(context.Background(), []worker{failFast, blockUntilCanceled})
+	}()
 
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("runWorkers() error = nil, want the worker's start error")
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("runWorkers() error = %v, want %v", err, wantErr)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("runWorkers did not return after ctx cancel")
+	case <-time.After(1 * time.Second):
+		t.Fatal("runWorkers did not return promptly after one worker exited — shared ctx was not canceled")
 	}
 }
 
