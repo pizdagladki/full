@@ -1,6 +1,7 @@
 export { Landing } from './Landing';
 export { Register } from './Register';
 export { Home } from './Home';
+export { ModeSelect } from './ModeSelect';
 export { Search } from './Search';
 export { Battle } from './Battle';
 export { Results } from './Results';
