@@ -168,3 +168,117 @@ func (mr *MockSessionRepositoryMockRecorder) UserIDBySession(ctx, sessionID any)
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserIDBySession", reflect.TypeOf((*MockSessionRepository)(nil).UserIDBySession), ctx, sessionID)
 }
+
+// MockKingClipRepository is a mock of KingClipRepository interface.
+type MockKingClipRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockKingClipRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockKingClipRepositoryMockRecorder is the mock recorder for MockKingClipRepository.
+type MockKingClipRepositoryMockRecorder struct {
+	mock *MockKingClipRepository
+}
+
+// NewMockKingClipRepository creates a new mock instance.
+func NewMockKingClipRepository(ctrl *gomock.Controller) *MockKingClipRepository {
+	mock := &MockKingClipRepository{ctrl: ctrl}
+	mock.recorder = &MockKingClipRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockKingClipRepository) EXPECT() *MockKingClipRepositoryMockRecorder {
+	return m.recorder
+}
+
+// Create mocks base method.
+func (m *MockKingClipRepository) Create(ctx context.Context, clip domain.KingClip) (domain.KingClip, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Create", ctx, clip)
+	ret0, _ := ret[0].(domain.KingClip)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Create indicates an expected call of Create.
+func (mr *MockKingClipRepositoryMockRecorder) Create(ctx, clip any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockKingClipRepository)(nil).Create), ctx, clip)
+}
+
+// Delete mocks base method.
+func (m *MockKingClipRepository) Delete(ctx context.Context, id int64) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Delete", ctx, id)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockKingClipRepositoryMockRecorder) Delete(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockKingClipRepository)(nil).Delete), ctx, id)
+}
+
+// DeleteExpired mocks base method.
+func (m *MockKingClipRepository) DeleteExpired(ctx context.Context) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpired", ctx)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteExpired indicates an expected call of DeleteExpired.
+func (mr *MockKingClipRepositoryMockRecorder) DeleteExpired(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpired", reflect.TypeOf((*MockKingClipRepository)(nil).DeleteExpired), ctx)
+}
+
+// DeleteSupersededByHill mocks base method.
+func (m *MockKingClipRepository) DeleteSupersededByHill(ctx context.Context, hillType string, keepID int64) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteSupersededByHill", ctx, hillType, keepID)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteSupersededByHill indicates an expected call of DeleteSupersededByHill.
+func (mr *MockKingClipRepositoryMockRecorder) DeleteSupersededByHill(ctx, hillType, keepID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteSupersededByHill", reflect.TypeOf((*MockKingClipRepository)(nil).DeleteSupersededByHill), ctx, hillType, keepID)
+}
+
+// GetByID mocks base method.
+func (m *MockKingClipRepository) GetByID(ctx context.Context, id int64) (domain.KingClip, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByID", ctx, id)
+	ret0, _ := ret[0].(domain.KingClip)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByID indicates an expected call of GetByID.
+func (mr *MockKingClipRepositoryMockRecorder) GetByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockKingClipRepository)(nil).GetByID), ctx, id)
+}
+
+// GetCurrent mocks base method.
+func (m *MockKingClipRepository) GetCurrent(ctx context.Context, hillType string) (domain.KingClip, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCurrent", ctx, hillType)
+	ret0, _ := ret[0].(domain.KingClip)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCurrent indicates an expected call of GetCurrent.
+func (mr *MockKingClipRepositoryMockRecorder) GetCurrent(ctx, hillType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrent", reflect.TypeOf((*MockKingClipRepository)(nil).GetCurrent), ctx, hillType)
+}

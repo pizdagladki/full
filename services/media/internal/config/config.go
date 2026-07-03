@@ -12,12 +12,13 @@ import (
 
 // Config is the media service configuration.
 type Config struct {
-	HTTP     HTTPConfig     `yaml:"http"     validate:"required"`
-	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
-	Storage  StorageConfig  `yaml:"storage"  validate:"required"`
-	Redis    RedisConfig    `yaml:"redis"    validate:"required"`
-	Session  SessionConfig  `yaml:"session"`
-	Clips    ClipsConfig    `yaml:"clips"`
+	HTTP      HTTPConfig      `yaml:"http"     validate:"required"`
+	Postgres  PostgresConfig  `yaml:"postgres" validate:"required"`
+	Storage   StorageConfig   `yaml:"storage"  validate:"required"`
+	Redis     RedisConfig     `yaml:"redis"    validate:"required"`
+	Session   SessionConfig   `yaml:"session"`
+	Clips     ClipsConfig     `yaml:"clips"`
+	KingClips KingClipsConfig `yaml:"king_clips"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -57,11 +58,27 @@ type ClipsConfig struct {
 	DownloadURLTTL    time.Duration `yaml:"-"`
 }
 
+// KingClipsConfig holds the per-hill king-of-the-hill clip term lengths.
+// MaxUploadBytes and the download URL TTL are shared with Clips. Term lengths
+// are config-driven so ops can retune daily/monthly/ranked windows without a
+// code change.
+type KingClipsConfig struct {
+	DailyTTLRaw   string        `yaml:"daily_ttl"`
+	DailyTTL      time.Duration `yaml:"-"`
+	MonthlyTTLRaw string        `yaml:"monthly_ttl"`
+	MonthlyTTL    time.Duration `yaml:"-"`
+	RankedTTLRaw  string        `yaml:"ranked_ttl"`
+	RankedTTL     time.Duration `yaml:"-"`
+}
+
 const (
 	defaultAddr              = ":8082"
 	defaultSessionCookieName = "session"
 	defaultMaxUploadBytes    = int64(52428800) // 50 MiB
 	defaultDownloadURLTTL    = "15m"
+	defaultKingDailyTTL      = "24h"
+	defaultKingMonthlyTTL    = "720h" // ~30 days
+	defaultKingRankedTTL     = "24h"
 )
 
 // Load reads the config from environment variables when IS_DOCKER is set,
@@ -103,6 +120,27 @@ func loadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("parse MEDIA_DOWNLOAD_URL_TTL %q: %w", ttlRaw, err)
 	}
 
+	dailyRaw := getEnv("MEDIA_KING_DAILY_TTL", defaultKingDailyTTL)
+
+	dailyTTL, err := time.ParseDuration(dailyRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse MEDIA_KING_DAILY_TTL %q: %w", dailyRaw, err)
+	}
+
+	monthlyRaw := getEnv("MEDIA_KING_MONTHLY_TTL", defaultKingMonthlyTTL)
+
+	monthlyTTL, err := time.ParseDuration(monthlyRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse MEDIA_KING_MONTHLY_TTL %q: %w", monthlyRaw, err)
+	}
+
+	rankedRaw := getEnv("MEDIA_KING_RANKED_TTL", defaultKingRankedTTL)
+
+	rankedTTL, err := time.ParseDuration(rankedRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse MEDIA_KING_RANKED_TTL %q: %w", rankedRaw, err)
+	}
+
 	cfg := &Config{
 		HTTP: HTTPConfig{Addr: getEnv("HTTP_ADDR", defaultAddr)},
 		Postgres: PostgresConfig{
@@ -127,6 +165,14 @@ func loadFromEnv() (*Config, error) {
 			DownloadURLTTLRaw: ttlRaw,
 			DownloadURLTTL:    ttl,
 		},
+		KingClips: KingClipsConfig{
+			DailyTTLRaw:   dailyRaw,
+			DailyTTL:      dailyTTL,
+			MonthlyTTLRaw: monthlyRaw,
+			MonthlyTTL:    monthlyTTL,
+			RankedTTLRaw:  rankedRaw,
+			RankedTTL:     rankedTTL,
+		},
 	}
 
 	return cfg, nil
@@ -144,6 +190,11 @@ func loadFromFile(path string) (*Config, error) {
 		Clips: ClipsConfig{
 			MaxUploadBytes:    defaultMaxUploadBytes,
 			DownloadURLTTLRaw: defaultDownloadURLTTL,
+		},
+		KingClips: KingClipsConfig{
+			DailyTTLRaw:   defaultKingDailyTTL,
+			MonthlyTTLRaw: defaultKingMonthlyTTL,
+			RankedTTLRaw:  defaultKingRankedTTL,
 		},
 	}
 
@@ -176,6 +227,33 @@ func loadFromFile(path string) (*Config, error) {
 	}
 
 	cfg.Clips.DownloadURLTTL = ttl
+
+	if cfg.KingClips.DailyTTLRaw == "" {
+		cfg.KingClips.DailyTTLRaw = defaultKingDailyTTL
+	}
+
+	cfg.KingClips.DailyTTL, err = time.ParseDuration(cfg.KingClips.DailyTTLRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse king_clips.daily_ttl %q: %w", cfg.KingClips.DailyTTLRaw, err)
+	}
+
+	if cfg.KingClips.MonthlyTTLRaw == "" {
+		cfg.KingClips.MonthlyTTLRaw = defaultKingMonthlyTTL
+	}
+
+	cfg.KingClips.MonthlyTTL, err = time.ParseDuration(cfg.KingClips.MonthlyTTLRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse king_clips.monthly_ttl %q: %w", cfg.KingClips.MonthlyTTLRaw, err)
+	}
+
+	if cfg.KingClips.RankedTTLRaw == "" {
+		cfg.KingClips.RankedTTLRaw = defaultKingRankedTTL
+	}
+
+	cfg.KingClips.RankedTTL, err = time.ParseDuration(cfg.KingClips.RankedTTLRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse king_clips.ranked_ttl %q: %w", cfg.KingClips.RankedTTLRaw, err)
+	}
 
 	return cfg, nil
 }

@@ -34,36 +34,72 @@ func TestLoad(t *testing.T) {
 		"redis:\n  addr: \"" + validRedisAddr + "\"\n"
 
 	tests := []struct {
-		name           string
-		isDocker       bool
-		env            map[string]string
-		setup          func(t *testing.T) string // returns the config path
-		wantAddr       string
-		wantRedisAddr  string
-		wantCookieName string
-		wantMaxBytes   int64
-		wantTTL        time.Duration
-		wantErr        bool
+		name               string
+		isDocker           bool
+		env                map[string]string
+		setup              func(t *testing.T) string // returns the config path
+		wantAddr           string
+		wantRedisAddr      string
+		wantCookieName     string
+		wantMaxBytes       int64
+		wantTTL            time.Duration
+		wantKingDailyTTL   time.Duration
+		wantKingMonthlyTTL time.Duration
+		wantKingRankedTTL  time.Duration
+		wantErr            bool
 	}{
 		{
-			name:           "env mode all set with explicit HTTP_ADDR",
-			isDocker:       true,
-			env:            merge(map[string]string{"HTTP_ADDR": ":9090"}, baseEnv),
-			wantAddr:       ":9090",
-			wantRedisAddr:  validRedisAddr,
-			wantCookieName: defaultSessionCookieName,
-			wantMaxBytes:   defaultMaxUploadBytes,
-			wantTTL:        15 * time.Minute,
+			name:               "env mode all set with explicit HTTP_ADDR",
+			isDocker:           true,
+			env:                merge(map[string]string{"HTTP_ADDR": ":9090"}, baseEnv),
+			wantAddr:           ":9090",
+			wantRedisAddr:      validRedisAddr,
+			wantCookieName:     defaultSessionCookieName,
+			wantMaxBytes:       defaultMaxUploadBytes,
+			wantTTL:            15 * time.Minute,
+			wantKingDailyTTL:   24 * time.Hour,
+			wantKingMonthlyTTL: 720 * time.Hour,
+			wantKingRankedTTL:  24 * time.Hour,
 		},
 		{
-			name:           "env mode default HTTP addr",
-			isDocker:       true,
-			env:            baseEnv,
-			wantAddr:       ":8082",
-			wantRedisAddr:  validRedisAddr,
-			wantCookieName: defaultSessionCookieName,
-			wantMaxBytes:   defaultMaxUploadBytes,
-			wantTTL:        15 * time.Minute,
+			name:               "env mode default HTTP addr",
+			isDocker:           true,
+			env:                baseEnv,
+			wantAddr:           ":8082",
+			wantRedisAddr:      validRedisAddr,
+			wantCookieName:     defaultSessionCookieName,
+			wantMaxBytes:       defaultMaxUploadBytes,
+			wantTTL:            15 * time.Minute,
+			wantKingDailyTTL:   24 * time.Hour,
+			wantKingMonthlyTTL: 720 * time.Hour,
+			wantKingRankedTTL:  24 * time.Hour,
+		},
+		{
+			// criterion: 4 — king clip terms are config-driven per hill (daily
+			// ~24h, monthly ~30d, ranked ~24h), overridable via env vars.
+			name:     "env mode custom king clip TTLs",
+			isDocker: true,
+			env: merge(map[string]string{
+				"MEDIA_KING_DAILY_TTL":   "12h",
+				"MEDIA_KING_MONTHLY_TTL": "360h",
+				"MEDIA_KING_RANKED_TTL":  "6h",
+			}, baseEnv),
+			wantAddr:           ":8082",
+			wantRedisAddr:      validRedisAddr,
+			wantCookieName:     defaultSessionCookieName,
+			wantMaxBytes:       defaultMaxUploadBytes,
+			wantTTL:            15 * time.Minute,
+			wantKingDailyTTL:   12 * time.Hour,
+			wantKingMonthlyTTL: 360 * time.Hour,
+			wantKingRankedTTL:  6 * time.Hour,
+		},
+		{
+			name:     "env mode invalid king daily ttl fails",
+			isDocker: true,
+			env: merge(map[string]string{
+				"MEDIA_KING_DAILY_TTL": "not-a-duration",
+			}, baseEnv),
+			wantErr: true,
 		},
 		{
 			name:     "env mode missing Postgres DSN fails validation",
@@ -120,15 +156,43 @@ func TestLoad(t *testing.T) {
 			wantTTL:        30 * time.Minute,
 		},
 		{
+			// criterion: 4 — in file mode, missing king_clips section falls back
+			// to the config-driven defaults (daily ~24h, monthly ~30d, ranked ~24h).
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, validYAML)
 			},
-			wantAddr:       ":7070",
-			wantRedisAddr:  validRedisAddr,
-			wantCookieName: defaultSessionCookieName,
-			wantMaxBytes:   defaultMaxUploadBytes,
-			wantTTL:        15 * time.Minute,
+			wantAddr:           ":7070",
+			wantRedisAddr:      validRedisAddr,
+			wantCookieName:     defaultSessionCookieName,
+			wantMaxBytes:       defaultMaxUploadBytes,
+			wantTTL:            15 * time.Minute,
+			wantKingDailyTTL:   24 * time.Hour,
+			wantKingMonthlyTTL: 720 * time.Hour,
+			wantKingRankedTTL:  24 * time.Hour,
+		},
+		{
+			// criterion: 4 — file mode king clip TTLs are parsed from yaml.
+			name: "file mode custom king clip TTLs",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, validYAML+
+					"king_clips:\n  daily_ttl: \"12h\"\n  monthly_ttl: \"360h\"\n  ranked_ttl: \"6h\"\n")
+			},
+			wantAddr:           ":7070",
+			wantRedisAddr:      validRedisAddr,
+			wantCookieName:     defaultSessionCookieName,
+			wantMaxBytes:       defaultMaxUploadBytes,
+			wantTTL:            15 * time.Minute,
+			wantKingDailyTTL:   12 * time.Hour,
+			wantKingMonthlyTTL: 360 * time.Hour,
+			wantKingRankedTTL:  6 * time.Hour,
+		},
+		{
+			name: "file mode invalid king daily_ttl fails",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, validYAML+"king_clips:\n  daily_ttl: \"bad-duration\"\n")
+			},
+			wantErr: true,
 		},
 		{
 			name: "file mode empty addr falls back to default",
@@ -227,6 +291,15 @@ func TestLoad(t *testing.T) {
 			}
 			if tt.wantTTL != 0 && cfg.Clips.DownloadURLTTL != tt.wantTTL {
 				t.Errorf("clips.download_url_ttl = %v, want %v", cfg.Clips.DownloadURLTTL, tt.wantTTL)
+			}
+			if tt.wantKingDailyTTL != 0 && cfg.KingClips.DailyTTL != tt.wantKingDailyTTL {
+				t.Errorf("king_clips.daily_ttl = %v, want %v", cfg.KingClips.DailyTTL, tt.wantKingDailyTTL)
+			}
+			if tt.wantKingMonthlyTTL != 0 && cfg.KingClips.MonthlyTTL != tt.wantKingMonthlyTTL {
+				t.Errorf("king_clips.monthly_ttl = %v, want %v", cfg.KingClips.MonthlyTTL, tt.wantKingMonthlyTTL)
+			}
+			if tt.wantKingRankedTTL != 0 && cfg.KingClips.RankedTTL != tt.wantKingRankedTTL {
+				t.Errorf("king_clips.ranked_ttl = %v, want %v", cfg.KingClips.RankedTTL, tt.wantKingRankedTTL)
 			}
 		})
 	}

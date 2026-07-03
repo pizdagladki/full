@@ -27,5 +27,18 @@ func (a *App) initServices() error {
 	)
 	a.sessionSvc = svc.NewSessionService(a.sessionRepo)
 
+	a.kingClipSvc = svc.NewKingClipService(
+		a.kingClipRepo,
+		a.objectStore,
+		svc.KingClipServiceConfig{
+			MaxUploadBytes: a.cfg.Clips.MaxUploadBytes,
+			DownloadURLTTL: a.cfg.Clips.DownloadURLTTL,
+			DailyTTL:       a.cfg.KingClips.DailyTTL,
+			MonthlyTTL:     a.cfg.KingClips.MonthlyTTL,
+			RankedTTL:      a.cfg.KingClips.RankedTTL,
+		},
+		a.logger,
+	)
+
 	return nil
 }
