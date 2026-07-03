@@ -20,10 +20,16 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	// Public ranked-hill leaderboard — no auth required.
 	e.GET("/v1/koth/ranked/leaderboard", a.rankHandler.Leaderboard)
 
+	// Public daily/monthly hill king lookup — no auth required.
+	e.GET("/v1/koth/hills/:hill_type/king", a.hillHandler.CurrentKing)
+
 	// Protected ranked-hill endpoints — session required.
 	v1 := e.Group("/v1", a.authMiddleware.RequireAuth)
 	v1.POST("/koth/ranked/attempt", a.rankHandler.SubmitAttempt)
 	v1.GET("/koth/ranked/me", a.rankHandler.Me)
+
+	// Protected daily/monthly hill challenge — session required.
+	v1.POST("/koth/hills/:hill_type/challenge", a.hillHandler.Challenge)
 
 	return e
 }

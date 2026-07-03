@@ -86,6 +86,60 @@ func (mr *MockRankRepositoryMockRecorder) UpsertRank(ctx, userID, day, newRank, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertRank", reflect.TypeOf((*MockRankRepository)(nil).UpsertRank), ctx, userID, day, newRank, bestHoldMs)
 }
 
+// MockHillRepository is a mock of HillRepository interface.
+type MockHillRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockHillRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockHillRepositoryMockRecorder is the mock recorder for MockHillRepository.
+type MockHillRepositoryMockRecorder struct {
+	mock *MockHillRepository
+}
+
+// NewMockHillRepository creates a new mock instance.
+func NewMockHillRepository(ctrl *gomock.Controller) *MockHillRepository {
+	mock := &MockHillRepository{ctrl: ctrl}
+	mock.recorder = &MockHillRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockHillRepository) EXPECT() *MockHillRepositoryMockRecorder {
+	return m.recorder
+}
+
+// Challenge mocks base method.
+func (m *MockHillRepository) Challenge(ctx context.Context, hillType domain.HillType, userID int64, survivedMs int, newClipID string) (domain.ChallengeOutcome, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Challenge", ctx, hillType, userID, survivedMs, newClipID)
+	ret0, _ := ret[0].(domain.ChallengeOutcome)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Challenge indicates an expected call of Challenge.
+func (mr *MockHillRepositoryMockRecorder) Challenge(ctx, hillType, userID, survivedMs, newClipID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Challenge", reflect.TypeOf((*MockHillRepository)(nil).Challenge), ctx, hillType, userID, survivedMs, newClipID)
+}
+
+// CurrentKing mocks base method.
+func (m *MockHillRepository) CurrentKing(ctx context.Context, hillType domain.HillType) (*domain.KingReign, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CurrentKing", ctx, hillType)
+	ret0, _ := ret[0].(*domain.KingReign)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CurrentKing indicates an expected call of CurrentKing.
+func (mr *MockHillRepositoryMockRecorder) CurrentKing(ctx, hillType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentKing", reflect.TypeOf((*MockHillRepository)(nil).CurrentKing), ctx, hillType)
+}
+
 // MockSessionRepository is a mock of SessionRepository interface.
 type MockSessionRepository struct {
 	ctrl     *gomock.Controller

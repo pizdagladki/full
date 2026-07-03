@@ -125,6 +125,60 @@ func (mr *MockRankServiceMockRecorder) SubmitAttempt(ctx, userID, heldMs any) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubmitAttempt", reflect.TypeOf((*MockRankService)(nil).SubmitAttempt), ctx, userID, heldMs)
 }
 
+// MockHillService is a mock of HillService interface.
+type MockHillService struct {
+	ctrl     *gomock.Controller
+	recorder *MockHillServiceMockRecorder
+	isgomock struct{}
+}
+
+// MockHillServiceMockRecorder is the mock recorder for MockHillService.
+type MockHillServiceMockRecorder struct {
+	mock *MockHillService
+}
+
+// NewMockHillService creates a new mock instance.
+func NewMockHillService(ctrl *gomock.Controller) *MockHillService {
+	mock := &MockHillService{ctrl: ctrl}
+	mock.recorder = &MockHillServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockHillService) EXPECT() *MockHillServiceMockRecorder {
+	return m.recorder
+}
+
+// Challenge mocks base method.
+func (m *MockHillService) Challenge(ctx context.Context, hillType string, userID int64, survivedMs int, newClipID string) (domain.ChallengeOutcome, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Challenge", ctx, hillType, userID, survivedMs, newClipID)
+	ret0, _ := ret[0].(domain.ChallengeOutcome)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Challenge indicates an expected call of Challenge.
+func (mr *MockHillServiceMockRecorder) Challenge(ctx, hillType, userID, survivedMs, newClipID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Challenge", reflect.TypeOf((*MockHillService)(nil).Challenge), ctx, hillType, userID, survivedMs, newClipID)
+}
+
+// CurrentKing mocks base method.
+func (m *MockHillService) CurrentKing(ctx context.Context, hillType string) (domain.KingReign, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CurrentKing", ctx, hillType)
+	ret0, _ := ret[0].(domain.KingReign)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CurrentKing indicates an expected call of CurrentKing.
+func (mr *MockHillServiceMockRecorder) CurrentKing(ctx, hillType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentKing", reflect.TypeOf((*MockHillService)(nil).CurrentKing), ctx, hillType)
+}
+
 // MockSessionService is a mock of SessionService interface.
 type MockSessionService struct {
 	ctrl     *gomock.Controller

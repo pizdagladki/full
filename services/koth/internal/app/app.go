@@ -29,12 +29,15 @@ type App struct {
 	redisClient *redis.Client
 
 	rankRepo    repository.RankRepository
+	hillRepo    repository.HillRepository
 	sessionRepo repository.SessionRepository
 
 	rankSvc    service.RankService
+	hillSvc    service.HillService
 	sessionSvc service.SessionService
 
 	rankHandler delivery.RankHandler
+	hillHandler delivery.HillHandler
 
 	authMiddleware *middleware.AuthMiddleware
 }
