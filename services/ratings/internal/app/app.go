@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -15,6 +17,9 @@ import (
 	"github.com/pizdagladki/full/services/ratings/internal/api/service"
 	"github.com/pizdagladki/full/services/ratings/internal/config"
 )
+
+// pointsClientTimeout bounds a single points-credit HTTP call.
+const pointsClientTimeout = 10 * time.Second
 
 // App holds the service dependencies and drives its lifecycle.
 type App struct {
@@ -101,7 +106,8 @@ func (a *App) initRepositories() {
 }
 
 func (a *App) initServices() {
-	a.ratingsService = service.NewRatingsService(a.ratingsRepo, a.logger)
+	pointsClient := service.NewHTTPPointsClient(a.cfg.StoreBaseURL, &http.Client{Timeout: pointsClientTimeout})
+	a.ratingsService = service.NewRatingsService(a.ratingsRepo, a.logger, pointsClient)
 }
 
 func (a *App) initHandlers() {

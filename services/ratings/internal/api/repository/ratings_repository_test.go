@@ -353,18 +353,22 @@ func TestApplyMatchResult(t *testing.T) {
 					WithArgs(int64(2), newLoserELO, domain.LevelForELO(newLoserELO), 1).
 					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-				// Insert match result
-				mock.ExpectExec(`INSERT INTO match_results`).
+				// Insert match result — RETURNING id (criterion: MatchID populated from the row).
+				mock.ExpectQuery(`INSERT INTO match_results`).
 					WithArgs(int64(1), int64(2), "classic", 32, -26, &dur).
-					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+					WillReturnRows(mock.NewRows([]string{"id"}).AddRow(int64(501)))
 
 				mock.ExpectCommit()
 			},
+			// criterion: 1 — MatchID is the id returned by the INSERT.
+			// criterion: 2 (no band change) — winner stays at level 4 → WinnerLeveledUp=false.
 			want: domain.MatchResult{
-				Winner:      domain.Rating{UserID: 1, ELO: 1032, Level: 4, GamesPlayed: 1},
-				Loser:       domain.Rating{UserID: 2, ELO: 974, Level: 4, GamesPlayed: 1},
-				WinnerDelta: 32,
-				LoserDelta:  -26,
+				Winner:          domain.Rating{UserID: 1, ELO: 1032, Level: 4, GamesPlayed: 1},
+				Loser:           domain.Rating{UserID: 2, ELO: 974, Level: 4, GamesPlayed: 1},
+				WinnerDelta:     32,
+				LoserDelta:      -26,
+				MatchID:         501,
+				WinnerLeveledUp: false,
 			},
 		},
 		{
@@ -411,17 +415,19 @@ func TestApplyMatchResult(t *testing.T) {
 					WithArgs(int64(3), newLoserELO, domain.LevelForELO(newLoserELO), 1).
 					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-				mock.ExpectExec(`INSERT INTO match_results`).
+				mock.ExpectQuery(`INSERT INTO match_results`).
 					WithArgs(int64(5), int64(3), "ranked", 32, -26, &dur).
-					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+					WillReturnRows(mock.NewRows([]string{"id"}).AddRow(int64(502)))
 
 				mock.ExpectCommit()
 			},
 			want: domain.MatchResult{
-				Winner:      domain.Rating{UserID: 5, ELO: 1032, Level: 4, GamesPlayed: 1},
-				Loser:       domain.Rating{UserID: 3, ELO: 974, Level: 4, GamesPlayed: 1},
-				WinnerDelta: 32,
-				LoserDelta:  -26,
+				Winner:          domain.Rating{UserID: 5, ELO: 1032, Level: 4, GamesPlayed: 1},
+				Loser:           domain.Rating{UserID: 3, ELO: 974, Level: 4, GamesPlayed: 1},
+				WinnerDelta:     32,
+				LoserDelta:      -26,
+				MatchID:         502,
+				WinnerLeveledUp: false,
 			},
 		},
 		{
@@ -508,13 +514,69 @@ func TestApplyMatchResult(t *testing.T) {
 					WithArgs(int64(2), 987, domain.LevelForELO(987), 21).
 					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
-				mock.ExpectExec(`INSERT INTO match_results`).
+				mock.ExpectQuery(`INSERT INTO match_results`).
 					WithArgs(int64(1), int64(2), "classic", 16, -13, (*int)(nil)).
-					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+					WillReturnRows(mock.NewRows([]string{"id"}).AddRow(int64(999)))
 
 				mock.ExpectCommit().WillReturnError(errors.New("write conflict"))
 			},
 			wantErr: true,
+		},
+		{
+			// criterion: 2 — winner's level band strictly increases → WinnerLeveledUp=true,
+			// asserted at the L4→L5 band boundary (900 → 1102 crosses 1100/1101 boundary).
+			name: "winner crosses a level band boundary — WinnerLeveledUp true",
+			input: domain.MatchInput{
+				WinnerID: 1,
+				LoserID:  2,
+				Mode:     "classic",
+			},
+			setup: func(mock pgxmock.PgxPoolIface) {
+				mock.ExpectBegin()
+
+				mock.ExpectExec(`INSERT INTO ratings`).
+					WithArgs(int64(1), domain.DefaultELO, domain.DefaultLevel, domain.DefaultGamesPlayed).
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				mock.ExpectExec(`INSERT INTO ratings`).
+					WithArgs(int64(2), domain.DefaultELO, domain.DefaultLevel, domain.DefaultGamesPlayed).
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+				// winner starts at ELO=1080 level 4 (≤1100), games_played=20 → K=32.
+				mock.ExpectQuery(`SELECT elo, level, games_played`).
+					WithArgs(int64(1)).
+					WillReturnRows(mock.NewRows([]string{"elo", "level", "games_played"}).
+						AddRow(1080, domain.LevelForELO(1080), 20))
+				// loser starts at ELO=1400 level 6, games_played=20 → K=32.
+				mock.ExpectQuery(`SELECT elo, level, games_played`).
+					WithArgs(int64(2)).
+					WillReturnRows(mock.NewRows([]string{"elo", "level", "games_played"}).
+						AddRow(1400, domain.LevelForELO(1400), 20))
+
+				// Upset: 1080 beats 1400 (K=32) → winnerDelta=+28 → new ELO=1108 → level 5 (crosses the 1100 boundary).
+				newWinnerELO := 1080 + 28
+				newLoserELO := 1400 - 22
+
+				mock.ExpectExec(`UPDATE ratings`).
+					WithArgs(int64(1), newWinnerELO, domain.LevelForELO(newWinnerELO), 21).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+				mock.ExpectExec(`UPDATE ratings`).
+					WithArgs(int64(2), newLoserELO, domain.LevelForELO(newLoserELO), 21).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+				mock.ExpectQuery(`INSERT INTO match_results`).
+					WithArgs(int64(1), int64(2), "classic", 28, -22, (*int)(nil)).
+					WillReturnRows(mock.NewRows([]string{"id"}).AddRow(int64(777)))
+
+				mock.ExpectCommit()
+			},
+			want: domain.MatchResult{
+				Winner:          domain.Rating{UserID: 1, ELO: 1108, Level: 5, GamesPlayed: 21},
+				Loser:           domain.Rating{UserID: 2, ELO: 1378, Level: 6, GamesPlayed: 21},
+				WinnerDelta:     28,
+				LoserDelta:      -22,
+				MatchID:         777,
+				WinnerLeveledUp: true,
+			},
 		},
 	}
 

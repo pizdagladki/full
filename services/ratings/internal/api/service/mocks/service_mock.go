@@ -14,6 +14,7 @@ import (
 	reflect "reflect"
 
 	domain "github.com/pizdagladki/full/services/ratings/internal/api/domain"
+	service "github.com/pizdagladki/full/services/ratings/internal/api/service"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -84,4 +85,42 @@ func (m *MockRatingsService) ListMatchHistory(ctx context.Context, userID int64,
 func (mr *MockRatingsServiceMockRecorder) ListMatchHistory(ctx, userID, limit, offset any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMatchHistory", reflect.TypeOf((*MockRatingsService)(nil).ListMatchHistory), ctx, userID, limit, offset)
+}
+
+// MockPointsClient is a mock of PointsClient interface.
+type MockPointsClient struct {
+	ctrl     *gomock.Controller
+	recorder *MockPointsClientMockRecorder
+	isgomock struct{}
+}
+
+// MockPointsClientMockRecorder is the mock recorder for MockPointsClient.
+type MockPointsClientMockRecorder struct {
+	mock *MockPointsClient
+}
+
+// NewMockPointsClient creates a new mock instance.
+func NewMockPointsClient(ctrl *gomock.Controller) *MockPointsClient {
+	mock := &MockPointsClient{ctrl: ctrl}
+	mock.recorder = &MockPointsClientMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPointsClient) EXPECT() *MockPointsClientMockRecorder {
+	return m.recorder
+}
+
+// Credit mocks base method.
+func (m *MockPointsClient) Credit(ctx context.Context, req service.CreditRequest) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Credit", ctx, req)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Credit indicates an expected call of Credit.
+func (mr *MockPointsClientMockRecorder) Credit(ctx, req any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Credit", reflect.TypeOf((*MockPointsClient)(nil).Credit), ctx, req)
 }

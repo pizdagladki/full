@@ -36,6 +36,14 @@ type MatchResult struct {
 	Loser       Rating
 	WinnerDelta int
 	LoserDelta  int
+
+	// MatchID is the id of the inserted match_results row — the natural match
+	// identifier, used as the ref_id when crediting points for this match.
+	MatchID int64
+
+	// WinnerLeveledUp is true when the winner's new level band is strictly
+	// greater than their level band before the match.
+	WinnerLeveledUp bool
 }
 
 // MatchHistoryItem is one entry in a player's match history.
