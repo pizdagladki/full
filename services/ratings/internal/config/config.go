@@ -13,6 +13,10 @@ type Config struct {
 	HTTP     HTTPConfig     `yaml:"http" validate:"required"`
 	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
 	Redis    RedisConfig    `yaml:"redis" validate:"required"`
+
+	// StoreBaseURL is the base URL of the store service, targeted by the
+	// PointsClient to credit match_win / level_up points.
+	StoreBaseURL string `yaml:"store_base_url" validate:"required"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -68,6 +72,7 @@ func loadFromEnv() *Config {
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
 		},
+		StoreBaseURL: os.Getenv("STORE_BASE_URL"),
 	}
 }
 

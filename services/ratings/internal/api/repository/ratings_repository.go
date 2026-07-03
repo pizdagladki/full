@@ -60,7 +60,8 @@ const (
 	sqlInsertMatchResult = `
 		INSERT INTO match_results
 		       (winner_id, loser_id, mode, winner_elo_delta, loser_elo_delta, duration_ms)
-		VALUES ($1,        $2,       $3,   $4,               $5,              $6)`
+		VALUES ($1,        $2,       $3,   $4,               $5,              $6)
+		RETURNING id`
 )
 
 func (r *ratingsRepository) ApplyMatchResult(ctx context.Context, input domain.MatchInput) (domain.MatchResult, error) {
@@ -152,10 +153,13 @@ func (r *ratingsRepository) ApplyMatchResult(ctx context.Context, input domain.M
 		return domain.MatchResult{}, fmt.Errorf("update loser %d: %w", input.LoserID, err)
 	}
 
-	// (e) INSERT match_results row.
-	_, err = tx.Exec(ctx, sqlInsertMatchResult,
+	// (e) INSERT match_results row, returning its id (the natural match
+	// identifier, used by the service as the points-credit ref_id).
+	var matchID int64
+
+	err = tx.QueryRow(ctx, sqlInsertMatchResult,
 		input.WinnerID, input.LoserID, input.Mode,
-		winnerDelta, loserDelta, input.DurationMS)
+		winnerDelta, loserDelta, input.DurationMS).Scan(&matchID)
 	if err != nil {
 		return domain.MatchResult{}, fmt.Errorf("insert match result: %w", err)
 	}
@@ -166,10 +170,12 @@ func (r *ratingsRepository) ApplyMatchResult(ctx context.Context, input domain.M
 	}
 
 	return domain.MatchResult{
-		Winner:      newWinner,
-		Loser:       newLoser,
-		WinnerDelta: winnerDelta,
-		LoserDelta:  loserDelta,
+		Winner:          newWinner,
+		Loser:           newLoser,
+		WinnerDelta:     winnerDelta,
+		LoserDelta:      loserDelta,
+		MatchID:         matchID,
+		WinnerLeveledUp: newWinner.Level > winnerBefore.Level,
 	}, nil
 }
 

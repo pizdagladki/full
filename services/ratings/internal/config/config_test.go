@@ -8,8 +8,9 @@ import (
 
 func TestLoad(t *testing.T) {
 	const (
-		validDSN  = "postgres://app:app@localhost:5432/app?sslmode=disable"
-		validAddr = "localhost:6379"
+		validDSN      = "postgres://app:app@localhost:5432/app?sslmode=disable"
+		validAddr     = "localhost:6379"
+		validStoreURL = "http://localhost:8083"
 	)
 
 	tests := []struct {
@@ -23,45 +24,67 @@ func TestLoad(t *testing.T) {
 		{
 			name:     "env mode all set with explicit HTTP_ADDR",
 			isDocker: true,
-			env:      map[string]string{"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			env: map[string]string{
+				"HTTP_ADDR": ":9090", "POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr,
+				"STORE_BASE_URL": validStoreURL,
+			},
 			wantAddr: ":9090",
 		},
 		{
 			name:     "env mode default HTTP addr",
 			isDocker: true,
-			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
+			env: map[string]string{
+				"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "STORE_BASE_URL": validStoreURL,
+			},
 			wantAddr: ":8080",
 		},
 		{
 			name:     "env mode missing Postgres DSN fails validation",
 			isDocker: true,
-			env:      map[string]string{"REDIS_ADDR": validAddr},
+			env:      map[string]string{"REDIS_ADDR": validAddr, "STORE_BASE_URL": validStoreURL},
 			wantErr:  true,
 		},
 		{
 			name:     "env mode missing Redis addr fails validation",
 			isDocker: true,
-			env:      map[string]string{"POSTGRES_DSN": validDSN},
+			env:      map[string]string{"POSTGRES_DSN": validDSN, "STORE_BASE_URL": validStoreURL},
+			wantErr:  true,
+		},
+		{
+			// criterion: 3 — StoreBaseURL is validated at startup: missing it fails ValidateConfig.
+			name:     "env mode missing store base URL fails validation",
+			isDocker: true,
+			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
 			wantErr:  true,
 		},
 		{
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+
+					"\"\nredis:\n  addr: \""+validAddr+"\"\nstore_base_url: \""+validStoreURL+"\"\n")
 			},
 			wantAddr: ":7070",
 		},
 		{
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+
+					"\"\nstore_base_url: \""+validStoreURL+"\"\n")
 			},
 			wantAddr: ":8080",
 		},
 		{
 			name: "file mode missing required Postgres fails validation",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\n")
+				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\nstore_base_url: \""+validStoreURL+"\"\n")
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 3 — StoreBaseURL is validated at startup: missing it fails ValidateConfig.
+			name: "file mode missing store base URL fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
 			},
 			wantErr: true,
 		},

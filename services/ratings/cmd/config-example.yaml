@@ -5,3 +5,4 @@ postgres:
 redis:
   addr: "localhost:6379"
   password: ""
+store_base_url: "http://localhost:8083"

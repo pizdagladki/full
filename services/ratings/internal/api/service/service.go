@@ -25,4 +25,19 @@ type (
 		// paginated by limit and offset.
 		ListMatchHistory(ctx context.Context, userID int64, limit, offset int) ([]domain.MatchHistoryItem, error)
 	}
+
+	// PointsClient credits points into the store's ledger. Implemented by an
+	// HTTP client targeting the store service. Credits are idempotent
+	// (deduped by user_id+reason+ref_id on the store side), so a failed call
+	// here is safe to log and drop — a retry (later) is not lost work.
+	PointsClient interface {
+		Credit(ctx context.Context, req CreditRequest) error
+	}
 )
+
+// CreditRequest is the body sent to the store's POST /v1/points/credit.
+type CreditRequest struct {
+	UserID int64  `json:"user_id"`
+	Reason string `json:"reason"`
+	RefID  string `json:"ref_id"`
+}
