@@ -20,3 +20,12 @@ type RankHandler interface {
 	// Leaderboard handles GET /v1/koth/ranked/leaderboard (public, no auth).
 	Leaderboard(c echo.Context) error
 }
+
+// HillHandler is the transport contract for the daily/monthly king-of-the-hill
+// resource.
+type HillHandler interface {
+	// CurrentKing handles GET /v1/koth/hills/:hill_type/king (public, no auth).
+	CurrentKing(c echo.Context) error
+	// Challenge handles POST /v1/koth/hills/:hill_type/challenge (requires auth).
+	Challenge(c echo.Context) error
+}

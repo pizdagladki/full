@@ -214,8 +214,11 @@ func newTestApp(t *testing.T, addr string) *App {
 		Session: config.SessionConfig{CookieName: "session"},
 	}
 
+	hillMock := svcmocks.NewMockHillService(ctrl)
+
 	// Wire stub handlers and middleware so registerHTTPRoutes works.
 	a.rankHandler = delivery.NewRankHandler(rankMock, zap.NewNop())
+	a.hillHandler = delivery.NewHillHandler(hillMock, zap.NewNop())
 	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
 
 	return a

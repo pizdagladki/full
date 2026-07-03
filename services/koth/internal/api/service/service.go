@@ -34,6 +34,22 @@ type RankService interface {
 	Leaderboard(ctx context.Context) ([]domain.RankCount, error)
 }
 
+// HillService is the business-logic contract for the daily/monthly
+// king-of-the-hill resource.
+type HillService interface {
+	// CurrentKing parses+validates hillType and returns the current king for
+	// it. Returns domain.ErrInvalidHillType for a bad hillType, or the
+	// repository.ErrHillNotFound sentinel when the hill needs seeding.
+	CurrentKing(ctx context.Context, hillType string) (domain.KingReign, error)
+	// Challenge parses+validates hillType, then decides the challenge: the
+	// challenger becomes king when survivedMs >= the current king's
+	// blink_ts_ms. Returns domain.ErrInvalidHillType for a bad hillType, or
+	// the repository.ErrHillNotFound sentinel when the hill needs seeding.
+	Challenge(
+		ctx context.Context, hillType string, userID int64, survivedMs int, newClipID string,
+	) (domain.ChallengeOutcome, error)
+}
+
 // SessionService resolves a session cookie value to a user ID.
 type SessionService interface {
 	// ResolveSession returns the user_id stored under the session cookie value.
