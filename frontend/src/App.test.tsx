@@ -100,9 +100,9 @@ describe('App routes', () => {
     expect(screen.getByTestId('search-screen')).toBeInTheDocument();
   });
 
-  it('renders Battle placeholder at /battle when authenticated', () => {
+  it('renders the Battle screen at /battle when authenticated', () => {
     renderWithAuth(routes, '/battle');
-    expect(screen.getByText('Battle')).toBeInTheDocument();
+    expect(screen.getByTestId('battle-screen')).toBeInTheDocument();
   });
 
   it('renders Results placeholder at /results when authenticated', () => {
