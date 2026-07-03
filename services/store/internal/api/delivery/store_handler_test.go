@@ -28,12 +28,13 @@ func setupEcho(t *testing.T) *echo.Echo {
 
 // wantProduct pins the expected JSON field values for a catalog product response.
 type wantProduct struct {
-	id         float64 // JSON numbers decode as float64
-	kind       string
-	tier       *float64 // nil means the JSON field should be null
-	name       string
-	priceCents float64
-	isFree     bool
+	id          float64 // JSON numbers decode as float64
+	kind        string
+	tier        *float64 // nil means the JSON field should be null
+	name        string
+	priceCents  float64
+	isFree      bool
+	pointsPrice *float64 // nil means the JSON field should be null (money-only)
 }
 
 func assertProduct(t *testing.T, got map[string]any, want wantProduct) {
@@ -69,6 +70,19 @@ func assertProduct(t *testing.T, got map[string]any, want wantProduct) {
 	if v, _ := got["is_free"].(bool); v != want.isFree {
 		t.Errorf("product is_free = %v, want %v", v, want.isFree)
 	}
+
+	// criterion: 1 — points_price is present and null for money-only products,
+	// or the numeric price for dual-priced ones.
+	if want.pointsPrice == nil {
+		if got["points_price"] != nil {
+			t.Errorf("product points_price = %v, want null", got["points_price"])
+		}
+	} else {
+		v, _ := got["points_price"].(float64)
+		if v != *want.pointsPrice {
+			t.Errorf("product points_price = %v, want %v", v, *want.pointsPrice)
+		}
+	}
 }
 
 func ptrF(v float64) *float64 { return &v }
@@ -77,9 +91,10 @@ func TestGetCatalog(t *testing.T) {
 	t.Parallel()
 
 	tier1 := 1
+	points50 := int64(50)
 	allProducts := []domain.Product{
-		{ID: 1, Kind: "distraction", Tier: &tier1, Name: "Spinner", PriceCents: 0, IsFree: true},
-		{ID: 2, Kind: "edit", Name: "Blur", PriceCents: 100, IsFree: false},
+		{ID: 1, Kind: "distraction", Tier: &tier1, Name: "Spinner", PriceCents: 0, IsFree: true, PointsPrice: &points50},
+		{ID: 2, Kind: "edit", Name: "Blur", PriceCents: 100, IsFree: false, PointsPrice: nil},
 	}
 
 	tests := []struct {
@@ -103,8 +118,8 @@ func TestGetCatalog(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantLen:    2,
 			wantProducts: []wantProduct{
-				{id: 1, kind: "distraction", tier: ptrF(1), name: "Spinner", priceCents: 0, isFree: true},
-				{id: 2, kind: "edit", tier: nil, name: "Blur", priceCents: 100, isFree: false},
+				{id: 1, kind: "distraction", tier: ptrF(1), name: "Spinner", priceCents: 0, isFree: true, pointsPrice: ptrF(50)},
+				{id: 2, kind: "edit", tier: nil, name: "Blur", priceCents: 100, isFree: false, pointsPrice: nil},
 			},
 		},
 		{

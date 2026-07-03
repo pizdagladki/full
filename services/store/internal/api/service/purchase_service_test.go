@@ -134,11 +134,12 @@ func TestPurchaseService_InitiatePurchase(t *testing.T) {
 
 			repo := repomocks.NewMockPurchaseRepository(ctrl)
 			prov := svcmocks.NewMockPaymentProvider(ctrl)
+			cache := repomocks.NewMockPointsCache(ctrl)
 
 			tt.setupRepo(repo)
 			tt.setupProv(prov)
 
-			svc := service.NewPurchaseService(repo, prov, zap.NewNop())
+			svc := service.NewPurchaseService(repo, prov, cache, zap.NewNop())
 			got, err := svc.InitiatePurchase(ctx, tt.userID, tt.productID)
 
 			if tt.wantErr != nil {
@@ -285,11 +286,12 @@ func TestPurchaseService_HandleWebhook(t *testing.T) {
 
 			repo := repomocks.NewMockPurchaseRepository(ctrl)
 			prov := svcmocks.NewMockPaymentProvider(ctrl)
+			cache := repomocks.NewMockPointsCache(ctrl)
 
 			tt.setupRepo(repo)
 			tt.setupProv(prov)
 
-			svc := service.NewPurchaseService(repo, prov, zap.NewNop())
+			svc := service.NewPurchaseService(repo, prov, cache, zap.NewNop())
 			err := svc.HandleWebhook(ctx, payload, sigHeader)
 
 			if tt.wantErr {
@@ -306,6 +308,186 @@ func TestPurchaseService_HandleWebhook(t *testing.T) {
 
 			if err != nil {
 				t.Fatalf("HandleWebhook() unexpected error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPurchaseService_PurchaseWithPoints(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	pointsPrice := int64(50)
+	distractionProduct := &domain.Product{
+		ID: 10, Kind: domain.KindDistraction, PriceCents: 200, PointsPrice: &pointsPrice,
+	}
+	editProduct := &domain.Product{
+		ID: 20, Kind: domain.KindEdit, PriceCents: 500, PointsPrice: &pointsPrice,
+	}
+	moneyOnlyProduct := &domain.Product{
+		ID: 30, Kind: domain.KindDistraction, PriceCents: 100, PointsPrice: nil,
+	}
+
+	tests := []struct {
+		name        string
+		userID      int64
+		productID   int64
+		setupRepo   func(r *repomocks.MockPurchaseRepository)
+		setupCache  func(c *repomocks.MockPointsCache)
+		wantBalance int64
+		wantErr     error
+	}{
+		{
+			// criterion: 2 — points purchase debits balance and grants inventory in one
+			// call, then invalidates the points cache.
+			name:      "success distraction product debits points and grants inventory",
+			userID:    1,
+			productID: 10,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(10)).Return(distractionProduct, nil)
+				r.EXPECT().PurchaseWithPoints(ctx, int64(1), int64(10), int64(50), domain.KindDistraction).
+					Return(int64(450), nil)
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {
+				c.EXPECT().DeleteBalance(ctx, int64(1)).Return(nil)
+			},
+			wantBalance: 450,
+		},
+		{
+			// criterion: 2 — edit product not yet owned is charged with points and granted.
+			name:      "success edit product not owned debits points and grants inventory",
+			userID:    1,
+			productID: 20,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(20)).Return(editProduct, nil)
+				r.EXPECT().IsOwned(ctx, int64(1), int64(20)).Return(false, nil)
+				r.EXPECT().PurchaseWithPoints(ctx, int64(1), int64(20), int64(50), domain.KindEdit).
+					Return(int64(450), nil)
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {
+				c.EXPECT().DeleteBalance(ctx, int64(1)).Return(nil)
+			},
+			wantBalance: 450,
+		},
+		{
+			// criterion: 3 — insufficient balance propagates ErrInsufficientPoints and
+			// nothing is invalidated/written (the repo already wrote nothing in its own tx).
+			name:      "insufficient balance returns ErrInsufficientPoints",
+			userID:    1,
+			productID: 10,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(10)).Return(distractionProduct, nil)
+				r.EXPECT().PurchaseWithPoints(ctx, int64(1), int64(10), int64(50), domain.KindDistraction).
+					Return(int64(0), domain.ErrInsufficientPoints)
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {},
+			wantErr:    domain.ErrInsufficientPoints,
+		},
+		{
+			// criterion: 3 — a money-only product (points_price nil) returns ErrMoneyOnly
+			// without ever calling the repo's points-spend path.
+			name:      "money only product returns ErrMoneyOnly",
+			userID:    1,
+			productID: 30,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(30)).Return(moneyOnlyProduct, nil)
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {},
+			wantErr:    domain.ErrMoneyOnly,
+		},
+		{
+			// criterion: 5 — an edit already owned is never charged points for again.
+			name:      "edit already owned returns ErrAlreadyOwned without charging points",
+			userID:    1,
+			productID: 20,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(20)).Return(editProduct, nil)
+				r.EXPECT().IsOwned(ctx, int64(1), int64(20)).Return(true, nil)
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {},
+			wantErr:    domain.ErrAlreadyOwned,
+		},
+		{
+			name:      "product not found returns ErrProductNotFound",
+			userID:    1,
+			productID: 99,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(99)).Return(nil, domain.ErrProductNotFound)
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {},
+			wantErr:    domain.ErrProductNotFound,
+		},
+		{
+			// cache invalidation failure is logged and swallowed — the purchase still
+			// succeeds and the (already-debited) balance is returned.
+			name:      "cache invalidate failure does not fail the request",
+			userID:    1,
+			productID: 10,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(10)).Return(distractionProduct, nil)
+				r.EXPECT().PurchaseWithPoints(ctx, int64(1), int64(10), int64(50), domain.KindDistraction).
+					Return(int64(450), nil)
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {
+				c.EXPECT().DeleteBalance(ctx, int64(1)).Return(errors.New("redis down"))
+			},
+			wantBalance: 450,
+		},
+		{
+			name:      "is owned check error propagates",
+			userID:    1,
+			productID: 20,
+			setupRepo: func(r *repomocks.MockPurchaseRepository) {
+				r.EXPECT().GetProduct(ctx, int64(20)).Return(editProduct, nil)
+				r.EXPECT().IsOwned(ctx, int64(1), int64(20)).Return(false, errors.New("db error"))
+			},
+			setupCache: func(c *repomocks.MockPointsCache) {},
+			wantErr:    errors.New("db error"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+
+			repo := repomocks.NewMockPurchaseRepository(ctrl)
+			prov := svcmocks.NewMockPaymentProvider(ctrl)
+			cache := repomocks.NewMockPointsCache(ctrl)
+
+			tt.setupRepo(repo)
+			tt.setupCache(cache)
+
+			svc := service.NewPurchaseService(repo, prov, cache, zap.NewNop())
+			got, err := svc.PurchaseWithPoints(ctx, tt.userID, tt.productID)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("PurchaseWithPoints() error = nil, want error")
+				}
+
+				sentinels := []error{
+					domain.ErrProductNotFound, domain.ErrMoneyOnly,
+					domain.ErrInsufficientPoints, domain.ErrAlreadyOwned,
+				}
+
+				for _, s := range sentinels {
+					if errors.Is(tt.wantErr, s) && !errors.Is(err, s) {
+						t.Errorf("PurchaseWithPoints() error = %v, want %v", err, s)
+					}
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("PurchaseWithPoints() unexpected error = %v", err)
+			}
+
+			if got != tt.wantBalance {
+				t.Errorf("PurchaseWithPoints() balance = %d, want %d", got, tt.wantBalance)
 			}
 		})
 	}

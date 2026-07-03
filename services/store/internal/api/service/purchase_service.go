@@ -14,16 +14,19 @@ import (
 type purchaseService struct {
 	repo     repository.PurchaseRepository
 	provider PaymentProvider
+	cache    repository.PointsCache
 	logger   *zap.Logger
 }
 
-// NewPurchaseService returns a PurchaseService wired to repo and provider.
+// NewPurchaseService returns a PurchaseService wired to repo, provider,
+// and the points cache (invalidated after a points purchase).
 func NewPurchaseService(
 	repo repository.PurchaseRepository,
 	provider PaymentProvider,
+	cache repository.PointsCache,
 	logger *zap.Logger,
 ) PurchaseService {
-	return &purchaseService{repo: repo, provider: provider, logger: logger}
+	return &purchaseService{repo: repo, provider: provider, cache: cache, logger: logger}
 }
 
 // InitiatePurchase creates a Stripe PaymentIntent and stores a pending purchase.
@@ -106,4 +109,51 @@ func (s *purchaseService) HandleWebhook(ctx context.Context, payload []byte, sig
 	}
 
 	return nil
+}
+
+// PurchaseWithPoints spends points on a product. For edit products it checks
+// ownership first (an already-owned edit is never charged for again).
+func (s *purchaseService) PurchaseWithPoints(ctx context.Context, userID, productID int64) (int64, error) {
+	product, err := s.repo.GetProduct(ctx, productID)
+	if err != nil {
+		if errors.Is(err, domain.ErrProductNotFound) {
+			return 0, domain.ErrProductNotFound
+		}
+
+		return 0, fmt.Errorf("get product: %w", err)
+	}
+
+	if product.PointsPrice == nil {
+		return 0, domain.ErrMoneyOnly
+	}
+
+	if product.Kind == domain.KindEdit {
+		owned, err := s.repo.IsOwned(ctx, userID, productID)
+		if err != nil {
+			return 0, fmt.Errorf("check ownership: %w", err)
+		}
+
+		if owned {
+			return 0, domain.ErrAlreadyOwned
+		}
+	}
+
+	balance, err := s.repo.PurchaseWithPoints(ctx, userID, productID, *product.PointsPrice, product.Kind)
+	if err != nil {
+		if errors.Is(err, domain.ErrInsufficientPoints) {
+			return 0, domain.ErrInsufficientPoints
+		}
+
+		return 0, fmt.Errorf("purchase with points: %w", err)
+	}
+
+	// Invalidate rather than write-through — mirrors pointsService.Credit: a
+	// failed delete is logged and swallowed, the next GetBalance repopulates
+	// the cache from Postgres (the source of truth).
+	err = s.cache.DeleteBalance(ctx, userID)
+	if err != nil {
+		s.logger.Warn("invalidate cached points balance after points purchase", zap.Int64("user_id", userID), zap.Error(err))
+	}
+
+	return balance, nil
 }

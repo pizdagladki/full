@@ -13,12 +13,13 @@ import (
 
 // productResponse is the JSON representation of a catalog product.
 type productResponse struct {
-	ID         int64  `json:"id"`
-	Kind       string `json:"kind"`
-	Tier       *int   `json:"tier"`
-	Name       string `json:"name"`
-	PriceCents int    `json:"price_cents"`
-	IsFree     bool   `json:"is_free"`
+	ID          int64  `json:"id"`
+	Kind        string `json:"kind"`
+	Tier        *int   `json:"tier"`
+	Name        string `json:"name"`
+	PriceCents  int    `json:"price_cents"`
+	IsFree      bool   `json:"is_free"`
+	PointsPrice *int64 `json:"points_price"` // null = money-only
 }
 
 // inventoryItemResponse is the JSON representation of an inventory entry.
@@ -72,12 +73,13 @@ func (h *storeHandler) GetCatalog(c echo.Context) error {
 
 	for _, p := range products {
 		resp = append(resp, productResponse{
-			ID:         p.ID,
-			Kind:       p.Kind,
-			Tier:       p.Tier,
-			Name:       p.Name,
-			PriceCents: p.PriceCents,
-			IsFree:     p.IsFree,
+			ID:          p.ID,
+			Kind:        p.Kind,
+			Tier:        p.Tier,
+			Name:        p.Name,
+			PriceCents:  p.PriceCents,
+			IsFree:      p.IsFree,
+			PointsPrice: p.PointsPrice,
 		})
 	}
 
