@@ -17,6 +17,8 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis"    validate:"required"`
 	Session  SessionConfig  `yaml:"session"`
 	Ranked   RankedConfig   `yaml:"ranked"   validate:"required"`
+	Store    StoreConfig    `yaml:"store"    validate:"required"`
+	Points   PointsConfig   `yaml:"points"   validate:"required"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -45,6 +47,21 @@ type SessionConfig struct {
 // Thresholds must be non-empty and strictly ascending — see validate.go.
 type RankedConfig struct {
 	Thresholds []int `yaml:"thresholds" validate:"required,min=1"`
+}
+
+// StoreConfig is the store service's base URL, targeted by PointsClient.
+type StoreConfig struct {
+	BaseURL string `yaml:"base_url" validate:"required"`
+}
+
+// PointsConfig holds the config-driven KotH award amounts (placeholders) plus
+// a mirrored reference for the PvP match_win amount used only to guard that
+// KotH awards stay strictly below it (per spec: solo gives points, but always
+// less than PvP).
+type PointsConfig struct {
+	WinAmount    int64 `yaml:"win_amount"     validate:"required,min=1"`
+	RankAmount   int64 `yaml:"rank_amount"    validate:"required,min=1"`
+	PvPWinAmount int64 `yaml:"pvp_win_amount" validate:"required,min=1"`
 }
 
 const (
@@ -92,6 +109,14 @@ func loadFromEnv() *Config {
 		},
 		Ranked: RankedConfig{
 			Thresholds: parseThresholds(os.Getenv("RANKED_THRESHOLDS_MS")),
+		},
+		Store: StoreConfig{
+			BaseURL: os.Getenv("STORE_BASE_URL"),
+		},
+		Points: PointsConfig{
+			WinAmount:    parseInt64(os.Getenv("KOTH_POINTS_WIN_AMOUNT"), 0),
+			RankAmount:   parseInt64(os.Getenv("KOTH_POINTS_RANK_AMOUNT"), 0),
+			PvPWinAmount: parseInt64(os.Getenv("KOTH_POINTS_PVP_WIN_AMOUNT"), 0),
 		},
 	}
 }
@@ -159,4 +184,20 @@ func parseThresholds(raw string) []int {
 	}
 
 	return thresholds
+}
+
+// parseInt64 parses raw as a base-10 int64, returning def when raw is empty
+// or malformed (validated as required, min=1 downstream, so an unset/bad env
+// var fails startup rather than silently defaulting to a hardcoded amount).
+func parseInt64(raw string, def int64) int64 {
+	if raw == "" {
+		return def
+	}
+
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return def
+	}
+
+	return v
 }
