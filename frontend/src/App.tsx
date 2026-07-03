@@ -5,6 +5,7 @@ import {
   Landing,
   Register,
   Home,
+  ModeSelect,
   Search,
   Battle,
   Results,
@@ -16,6 +17,17 @@ import {
   useAuth,
 } from './features';
 import { Consent } from './features/Consent';
+
+// Placeholder screens for routes owned by future issues (#106 invite-a-friend, #110
+// king-of-the-hill) — keeps mode-select navigation landing on a real route instead of the
+// `*` catch-all redirect. Replace with the real screens when those issues land.
+function InvitePlaceholder() {
+  return <div data-testid="invite-placeholder">Invite a friend — coming soon</div>;
+}
+
+function KothPlaceholder() {
+  return <div data-testid="koth-placeholder">King of the Hill — coming soon</div>;
+}
 
 // AuthRoute: checks auth (loading/user) but does NOT check consent (avoids /consent → /consent loop)
 function AuthRoute({ children }: { children: ReactNode }) {
@@ -62,10 +74,34 @@ export const routes: RouteObject[] = [
         ),
       },
       {
+        path: 'mode-select',
+        element: (
+          <ProtectedRoute>
+            <ModeSelect />
+          </ProtectedRoute>
+        ),
+      },
+      {
         path: 'search',
         element: (
           <ProtectedRoute>
             <Search />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'invite',
+        element: (
+          <ProtectedRoute>
+            <InvitePlaceholder />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'koth',
+        element: (
+          <ProtectedRoute>
+            <KothPlaceholder />
           </ProtectedRoute>
         ),
       },
