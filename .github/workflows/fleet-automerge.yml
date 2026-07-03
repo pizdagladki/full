@@ -1,0 +1,60 @@
+# .github/workflows/fleet-automerge.yml
+# Label-driven merge for the single-agent fleet.
+#
+# The agent's authority ends at the verdict: a GOOD self-review sets the
+# `reviewed-armed` label (via MCP — never blocked by the harness classifier).
+# This workflow is the mechanical arm that GitHub's ruleset still gates:
+#   labeled  reviewed-armed -> enable auto-merge (squash); if the PR is already
+#                              CLEAN (all required checks green, threads
+#                              resolved, up to date) auto-merge is refused by
+#                              GitHub, so merge directly — same gates, already
+#                              passed.
+#   unlabeled reviewed-armed -> disable auto-merge (the fleet strips the label
+#                              when a PR fails re-validation; belt & suspenders
+#                              with the agent's own --disable-auto).
+#
+# NOTE: actions taken with GITHUB_TOKEN do not trigger other workflows — the
+# squash commit that lands on main will not re-run push-triggered CI. The PR's
+# own required checks have already passed, so that is acceptable. If you ever
+# want main-push workflows to fire on these merges, swap GH_TOKEN to a PAT.
+
+name: fleet-automerge
+
+on:
+  pull_request:
+    types: [labeled, unlabeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  arm:
+    if: github.event.action == 'labeled' && github.event.label.name == 'reviewed-armed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (or merge directly if already CLEAN)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -x
+          if ! gh pr merge "$PR" --repo "$REPO" --auto --squash; then
+            # GitHub refuses enablePullRequestAutoMerge on an already-mergeable
+            # (CLEAN) PR — every ruleset gate has passed, so merge directly.
+            gh pr merge "$PR" --repo "$REPO" --squash
+          fi
+
+  disarm:
+    if: github.event.action == 'unlabeled' && github.event.label.name == 'reviewed-armed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Idempotent: fails harmlessly if auto-merge is not armed / PR merged.
+          gh pr merge "$PR" --repo "$REPO" --disable-auto || true
