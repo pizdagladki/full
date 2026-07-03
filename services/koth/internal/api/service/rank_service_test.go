@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"go.uber.org/mock/gomock"
+	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/services/koth/internal/api/domain"
 	repomocks "github.com/pizdagladki/full/services/koth/internal/api/repository/mocks"
 	"github.com/pizdagladki/full/services/koth/internal/api/service"
+	servicemocks "github.com/pizdagladki/full/services/koth/internal/api/service/mocks"
 
 	"github.com/pizdagladki/full/services/koth/internal/api/repository"
 )
@@ -25,10 +27,20 @@ func (c *fakeClock) Now() time.Time { return c.now }
 
 var testThresholds = []int{5000, 15000, 30000, 60000, 120000}
 
-// TestRankService_SubmitAttempt verifies criterion: 1 — SubmitAttempt
+const testRankAmount int64 = 3
+
+// noPointsCall returns a MockPointsClient with no .EXPECT() set — gomock
+// fails the test if Credit is ever called, asserting "no credit" for the
+// non-newly-reached / error paths.
+func noPointsCall(ctrl *gomock.Controller) *servicemocks.MockPointsClient {
+	return servicemocks.NewMockPointsClient(ctrl)
+}
+
+// TestRankService_SubmitAttempt verifies criteria 1 and 5 — SubmitAttempt
 // computes the achieved rank from the thresholds and, only when it exceeds
-// the stored rank, upserts the new rank + best_hold_ms; a worse attempt never
-// downgrades the stored rank.
+// the stored rank, upserts the new rank + best_hold_ms (a worse attempt never
+// downgrades the stored rank), crediting koth_rank points via PointsClient
+// only on a newly-reached rank, and never blocking on a PointsClient failure.
 func TestRankService_SubmitAttempt(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +51,7 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 		userID       int64
 		heldMs       int
 		setupRepo    func(m *repomocks.MockRankRepository)
+		setupPoints  func(m *servicemocks.MockPointsClient)
 		wantErr      error
 		wantAchieved int
 		wantCurrent  int
@@ -46,23 +59,27 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 	}{
 		{
 			// criterion: 5 — a non-positive held_ms is rejected with ErrInvalidHoldMs
-			name:      "zero held ms returns ErrInvalidHoldMs",
-			userID:    1,
-			heldMs:    0,
-			setupRepo: func(_ *repomocks.MockRankRepository) {},
-			wantErr:   domain.ErrInvalidHoldMs,
+			name:        "zero held ms returns ErrInvalidHoldMs",
+			userID:      1,
+			heldMs:      0,
+			setupRepo:   func(_ *repomocks.MockRankRepository) {},
+			setupPoints: func(_ *servicemocks.MockPointsClient) {},
+			wantErr:     domain.ErrInvalidHoldMs,
 		},
 		{
 			// criterion: 5 — a negative held_ms is rejected with ErrInvalidHoldMs
-			name:      "negative held ms returns ErrInvalidHoldMs",
-			userID:    1,
-			heldMs:    -100,
-			setupRepo: func(_ *repomocks.MockRankRepository) {},
-			wantErr:   domain.ErrInvalidHoldMs,
+			name:        "negative held ms returns ErrInvalidHoldMs",
+			userID:      1,
+			heldMs:      -100,
+			setupRepo:   func(_ *repomocks.MockRankRepository) {},
+			setupPoints: func(_ *servicemocks.MockPointsClient) {},
+			wantErr:     domain.ErrInvalidHoldMs,
 		},
 		{
-			// criterion: 1 — first attempt with no existing row records the new rank
-			name:   "first attempt with no existing row records new rank",
+			// criterion: 1 — first attempt with no existing row records the new
+			// rank AND credits PointsClient.Credit with
+			// {user_id, reason:"koth_rank", ref_id} keyed off day+achieved-rank.
+			name:   "first attempt with no existing row records new rank and credits koth_rank",
 			userID: 1,
 			heldMs: 16000,
 			setupRepo: func(m *repomocks.MockRankRepository) {
@@ -70,6 +87,14 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 					Return(nil, repository.ErrRankNotFound)
 				m.EXPECT().UpsertRank(gomock.Any(), int64(1), day, 2, 16000).
 					Return(nil)
+			},
+			setupPoints: func(m *servicemocks.MockPointsClient) {
+				m.EXPECT().Credit(gomock.Any(), service.CreditRequest{
+					UserID: 1,
+					Reason: "koth_rank",
+					RefID:  "2026-07-03:2",
+					Delta:  testRankAmount,
+				}).Return(nil)
 			},
 			wantAchieved: 2,
 			wantCurrent:  2,
@@ -86,13 +111,42 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 				m.EXPECT().UpsertRank(gomock.Any(), int64(2), day, 3, 31000).
 					Return(nil)
 			},
+			setupPoints: func(m *servicemocks.MockPointsClient) {
+				m.EXPECT().Credit(gomock.Any(), service.CreditRequest{
+					UserID: 2,
+					Reason: "koth_rank",
+					RefID:  "2026-07-03:3",
+					Delta:  testRankAmount,
+				}).Return(nil)
+			},
 			wantAchieved: 3,
 			wantCurrent:  3,
 			wantNew:      true,
 		},
 		{
-			// criterion: 1 — a worse attempt (lower achieved rank) does NOT downgrade the stored rank
-			name:   "worse attempt does not downgrade stored rank",
+			// criterion: 4 — a PointsClient failure on a rank-up is logged and
+			// does NOT block the outcome: SubmitAttempt still reports
+			// NewlyReached=true and nil error even though Credit failed.
+			name:   "points client failure on rank-up does not block outcome",
+			userID: 8,
+			heldMs: 16000,
+			setupRepo: func(m *repomocks.MockRankRepository) {
+				m.EXPECT().GetRank(gomock.Any(), int64(8), day).
+					Return(nil, repository.ErrRankNotFound)
+				m.EXPECT().UpsertRank(gomock.Any(), int64(8), day, 2, 16000).
+					Return(nil)
+			},
+			setupPoints: func(m *servicemocks.MockPointsClient) {
+				m.EXPECT().Credit(gomock.Any(), gomock.Any()).Return(errors.New("store unavailable"))
+			},
+			wantAchieved: 2,
+			wantCurrent:  2,
+			wantNew:      true,
+		},
+		{
+			// criterion: 1 — a worse attempt (lower achieved rank) does NOT
+			// downgrade the stored rank and does NOT credit points.
+			name:   "worse attempt does not downgrade stored rank or credit points",
 			userID: 3,
 			heldMs: 6000,
 			setupRepo: func(m *repomocks.MockRankRepository) {
@@ -100,19 +154,22 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 					Return(&domain.HillRank{UserID: 3, Day: day, Rank: 3, BestHoldMs: 31000}, nil)
 				// UpsertRank must NOT be called.
 			},
+			setupPoints:  func(_ *servicemocks.MockPointsClient) {},
 			wantAchieved: 1,
 			wantCurrent:  3,
 			wantNew:      false,
 		},
 		{
-			// criterion: 1 — an equal attempt (same achieved rank) does not re-trigger newly_reached
-			name:   "equal attempt does not re-trigger newly reached",
+			// criterion: 1 — an equal attempt (same achieved rank) does not
+			// re-trigger newly_reached and does not credit points again.
+			name:   "equal attempt does not re-trigger newly reached or credit points",
 			userID: 4,
 			heldMs: 16000,
 			setupRepo: func(m *repomocks.MockRankRepository) {
 				m.EXPECT().GetRank(gomock.Any(), int64(4), day).
 					Return(&domain.HillRank{UserID: 4, Day: day, Rank: 2, BestHoldMs: 20000}, nil)
 			},
+			setupPoints:  func(_ *servicemocks.MockPointsClient) {},
 			wantAchieved: 2,
 			wantCurrent:  2,
 			wantNew:      false,
@@ -125,7 +182,8 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 				m.EXPECT().GetRank(gomock.Any(), int64(5), day).
 					Return(nil, errors.New("db error"))
 			},
-			wantErr: errors.New("db error"),
+			setupPoints: func(_ *servicemocks.MockPointsClient) {},
+			wantErr:     errors.New("db error"),
 		},
 		{
 			name:   "upsert repo error propagates",
@@ -137,7 +195,8 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 				m.EXPECT().UpsertRank(gomock.Any(), int64(6), day, 1, 6000).
 					Return(errors.New("db error"))
 			},
-			wantErr: errors.New("db error"),
+			setupPoints: func(_ *servicemocks.MockPointsClient) {},
+			wantErr:     errors.New("db error"),
 		},
 	}
 
@@ -149,7 +208,10 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 			repoMock := repomocks.NewMockRankRepository(ctrl)
 			tt.setupRepo(repoMock)
 
-			svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds)
+			pointsMock := noPointsCall(ctrl)
+			tt.setupPoints(pointsMock)
+
+			svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds, pointsMock, testRankAmount, zap.NewNop())
 
 			got, err := svc.SubmitAttempt(context.Background(), tt.userID, tt.heldMs)
 
@@ -181,6 +243,48 @@ func TestRankService_SubmitAttempt(t *testing.T) {
 				t.Errorf("NewlyReached = %v, want %v", got.NewlyReached, tt.wantNew)
 			}
 		})
+	}
+}
+
+// TestRankService_SubmitAttempt_IdempotentRefID verifies criterion: 1 — a
+// repeated identical rank-up event (same day, same achieved rank) produces
+// the exact same ref_id both times, which is what makes the store's dedup
+// idempotent. A broken implementation that derived ref_id from something
+// non-stable (e.g. current time or a random ID) would send two different
+// ref_ids here and fail.
+func TestRankService_SubmitAttempt_IdempotentRefID(t *testing.T) {
+	t.Parallel()
+
+	day := time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)
+
+	ctrl := gomock.NewController(t)
+	repoMock := repomocks.NewMockRankRepository(ctrl)
+	pointsMock := servicemocks.NewMockPointsClient(ctrl)
+
+	repoMock.EXPECT().GetRank(gomock.Any(), int64(7), day).
+		Return(nil, repository.ErrRankNotFound).Times(2)
+	repoMock.EXPECT().UpsertRank(gomock.Any(), int64(7), day, 2, 16000).
+		Return(nil).Times(2)
+
+	wantCredit := service.CreditRequest{
+		UserID: 7,
+		Reason: "koth_rank",
+		RefID:  "2026-07-03:2",
+		Delta:  testRankAmount,
+	}
+	pointsMock.EXPECT().Credit(gomock.Any(), wantCredit).Return(nil).Times(2)
+
+	svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds, pointsMock, testRankAmount, zap.NewNop())
+
+	for i := range 2 {
+		got, err := svc.SubmitAttempt(context.Background(), 7, 16000)
+		if err != nil {
+			t.Fatalf("SubmitAttempt() call %d unexpected error = %v", i, err)
+		}
+
+		if !got.NewlyReached {
+			t.Fatalf("SubmitAttempt() call %d NewlyReached = false, want true", i)
+		}
 	}
 }
 
@@ -252,7 +356,9 @@ func TestRankService_Me(t *testing.T) {
 			repoMock := repomocks.NewMockRankRepository(ctrl)
 			tt.setupRepo(repoMock)
 
-			svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds)
+			pointsMock := noPointsCall(ctrl)
+
+			svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds, pointsMock, testRankAmount, zap.NewNop())
 
 			got, err := svc.Me(context.Background(), tt.userID)
 
@@ -319,7 +425,9 @@ func TestRankService_Leaderboard(t *testing.T) {
 			repoMock := repomocks.NewMockRankRepository(ctrl)
 			tt.setupRepo(repoMock)
 
-			svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds)
+			pointsMock := noPointsCall(ctrl)
+
+			svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds, pointsMock, testRankAmount, zap.NewNop())
 
 			got, err := svc.Leaderboard(context.Background())
 
@@ -361,14 +469,21 @@ func TestRankService_DailyReset(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	repoMock := repomocks.NewMockRankRepository(ctrl)
+	pointsMock := servicemocks.NewMockPointsClient(ctrl)
 
-	// Day one: player reaches rank 3.
+	// Day one: player reaches rank 3, crediting koth_rank points keyed to day one.
 	repoMock.EXPECT().GetRank(gomock.Any(), int64(1), dayOne).
 		Return(nil, repository.ErrRankNotFound)
 	repoMock.EXPECT().UpsertRank(gomock.Any(), int64(1), dayOne, 3, 31000).
 		Return(nil)
+	pointsMock.EXPECT().Credit(gomock.Any(), service.CreditRequest{
+		UserID: 1,
+		Reason: "koth_rank",
+		RefID:  "2026-07-02:3",
+		Delta:  testRankAmount,
+	}).Return(nil)
 
-	svc := service.NewRankService(repoMock, clock, testThresholds)
+	svc := service.NewRankService(repoMock, clock, testThresholds, pointsMock, testRankAmount, zap.NewNop())
 
 	got, err := svc.SubmitAttempt(context.Background(), 1, 31000)
 	if err != nil {

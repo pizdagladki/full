@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -16,6 +17,9 @@ import (
 	"github.com/pizdagladki/full/services/koth/internal/api/service"
 	"github.com/pizdagladki/full/services/koth/internal/config"
 )
+
+// pointsClientTimeout bounds a single points-credit HTTP call.
+const pointsClientTimeout = 10 * time.Second
 
 // App holds the service dependencies and drives its lifecycle.
 type App struct {

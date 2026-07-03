@@ -9,3 +9,9 @@ session:
   cookie_name: "session"
 ranked:
   thresholds: [5000, 15000, 30000, 60000, 120000]
+store:
+  base_url: "http://localhost:8083"
+points:
+  win_amount: 5
+  rank_amount: 3
+  pvp_win_amount: 16

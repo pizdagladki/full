@@ -15,6 +15,7 @@ import (
 	time "time"
 
 	domain "github.com/pizdagladki/full/services/koth/internal/api/domain"
+	service "github.com/pizdagladki/full/services/koth/internal/api/service"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -216,4 +217,42 @@ func (m *MockSessionService) ResolveSession(ctx context.Context, sessionID strin
 func (mr *MockSessionServiceMockRecorder) ResolveSession(ctx, sessionID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveSession", reflect.TypeOf((*MockSessionService)(nil).ResolveSession), ctx, sessionID)
+}
+
+// MockPointsClient is a mock of PointsClient interface.
+type MockPointsClient struct {
+	ctrl     *gomock.Controller
+	recorder *MockPointsClientMockRecorder
+	isgomock struct{}
+}
+
+// MockPointsClientMockRecorder is the mock recorder for MockPointsClient.
+type MockPointsClientMockRecorder struct {
+	mock *MockPointsClient
+}
+
+// NewMockPointsClient creates a new mock instance.
+func NewMockPointsClient(ctrl *gomock.Controller) *MockPointsClient {
+	mock := &MockPointsClient{ctrl: ctrl}
+	mock.recorder = &MockPointsClientMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPointsClient) EXPECT() *MockPointsClientMockRecorder {
+	return m.recorder
+}
+
+// Credit mocks base method.
+func (m *MockPointsClient) Credit(ctx context.Context, req service.CreditRequest) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Credit", ctx, req)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Credit indicates an expected call of Credit.
+func (mr *MockPointsClientMockRecorder) Credit(ctx, req any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Credit", reflect.TypeOf((*MockPointsClient)(nil).Credit), ctx, req)
 }

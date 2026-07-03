@@ -10,14 +10,19 @@ const (
 	validDSN        = "postgres://app:app@localhost:5432/app?sslmode=disable"
 	validRedisAddr  = "localhost:6379"
 	validThresholds = "5000,15000,30000,60000,120000"
+	validStoreURL   = "http://localhost:8083"
 )
 
 // fullEnv returns a map with all required environment variables set to valid values.
 func fullEnv() map[string]string {
 	return map[string]string{
-		"POSTGRES_DSN":         validDSN,
-		"REDIS_ADDR":           validRedisAddr,
-		"RANKED_THRESHOLDS_MS": validThresholds,
+		"POSTGRES_DSN":               validDSN,
+		"REDIS_ADDR":                 validRedisAddr,
+		"RANKED_THRESHOLDS_MS":       validThresholds,
+		"STORE_BASE_URL":             validStoreURL,
+		"KOTH_POINTS_WIN_AMOUNT":     "5",
+		"KOTH_POINTS_RANK_AMOUNT":    "3",
+		"KOTH_POINTS_PVP_WIN_AMOUNT": "16",
 	}
 }
 
@@ -31,7 +36,9 @@ func fullYAML(httpAddr string) string {
 	return "http:\n  addr: \"" + addr + "\"\n" +
 		"postgres:\n  dsn: \"" + validDSN + "\"\n" +
 		"redis:\n  addr: \"" + validRedisAddr + "\"\n" +
-		"ranked:\n  thresholds: [5000, 15000, 30000, 60000, 120000]\n"
+		"ranked:\n  thresholds: [5000, 15000, 30000, 60000, 120000]\n" +
+		"store:\n  base_url: \"" + validStoreURL + "\"\n" +
+		"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n"
 }
 
 func TestLoad(t *testing.T) {
@@ -144,6 +151,29 @@ func TestLoad(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			// criterion: 3 — store.base_url is validated at startup: missing it fails Load.
+			name: "file mode missing store base_url fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 15000]\n"+
+						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
+				)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — env mode fails validation when win_amount is not strictly less than pvp_win_amount
+			name:     "env mode win amount not less than pvp amount fails validation",
+			isDocker: true,
+			env: merge(fullEnv(), map[string]string{
+				"KOTH_POINTS_WIN_AMOUNT":     "20",
+				"KOTH_POINTS_PVP_WIN_AMOUNT": "16",
+			}),
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -191,6 +221,8 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000, 15000, 30000}},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 		},
 		{
@@ -200,6 +232,8 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -210,6 +244,8 @@ func TestValidateConfig(t *testing.T) {
 				HTTP:   HTTPConfig{Addr: ":8080"},
 				Redis:  RedisConfig{Addr: validRedisAddr},
 				Ranked: RankedConfig{Thresholds: []int{5000}},
+				Store:  StoreConfig{BaseURL: validStoreURL},
+				Points: PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -220,6 +256,8 @@ func TestValidateConfig(t *testing.T) {
 				HTTP:     HTTPConfig{Addr: ":8080"},
 				Postgres: PostgresConfig{DSN: validDSN},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -230,6 +268,8 @@ func TestValidateConfig(t *testing.T) {
 				HTTP:     HTTPConfig{Addr: ":8080"},
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -241,6 +281,60 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000, 5000, 30000}},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 3 — Store.BaseURL is required — PointsClient's HTTP impl
+			// targets it, and startup must fail fast when it's unset.
+			name: "missing store base_url fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — Points amounts are required config placeholders, not hardcoded
+			name: "missing points config fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — win_amount must be strictly less than pvp_win_amount
+			// (a config assertion guards KotH awards staying below PvP's match_win).
+			name: "win amount equal to pvp amount fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+				Points:   PointsConfig{WinAmount: 16, RankAmount: 3, PvPWinAmount: 16},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — rank_amount must be strictly less than pvp_win_amount
+			name: "rank amount greater than pvp amount fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreURL},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 20, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
