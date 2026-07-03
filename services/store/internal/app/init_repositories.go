@@ -7,4 +7,6 @@ func (a *App) initRepositories() {
 	a.inventoryRepo = repository.NewInventoryRepository(a.pgxPool)
 	a.sessionRepo = repository.NewSessionRepository(a.redisClient)
 	a.purchaseRepo = repository.NewPurchaseRepository(a.pgxPool)
+	a.pointsRepo = repository.NewPointsRepository(a.pgxPool)
+	a.pointsCache = repository.NewPointsCache(a.redisClient)
 }

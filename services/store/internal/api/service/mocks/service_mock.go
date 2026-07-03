@@ -243,3 +243,57 @@ func (mr *MockSessionServiceMockRecorder) ResolveSession(ctx, sessionID any) *go
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveSession", reflect.TypeOf((*MockSessionService)(nil).ResolveSession), ctx, sessionID)
 }
+
+// MockPointsService is a mock of PointsService interface.
+type MockPointsService struct {
+	ctrl     *gomock.Controller
+	recorder *MockPointsServiceMockRecorder
+	isgomock struct{}
+}
+
+// MockPointsServiceMockRecorder is the mock recorder for MockPointsService.
+type MockPointsServiceMockRecorder struct {
+	mock *MockPointsService
+}
+
+// NewMockPointsService creates a new mock instance.
+func NewMockPointsService(ctrl *gomock.Controller) *MockPointsService {
+	mock := &MockPointsService{ctrl: ctrl}
+	mock.recorder = &MockPointsServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPointsService) EXPECT() *MockPointsServiceMockRecorder {
+	return m.recorder
+}
+
+// Credit mocks base method.
+func (m *MockPointsService) Credit(ctx context.Context, in domain.PointsCredit) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Credit", ctx, in)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Credit indicates an expected call of Credit.
+func (mr *MockPointsServiceMockRecorder) Credit(ctx, in any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Credit", reflect.TypeOf((*MockPointsService)(nil).Credit), ctx, in)
+}
+
+// GetBalance mocks base method.
+func (m *MockPointsService) GetBalance(ctx context.Context, userID int64) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBalance", ctx, userID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBalance indicates an expected call of GetBalance.
+func (mr *MockPointsServiceMockRecorder) GetBalance(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBalance", reflect.TypeOf((*MockPointsService)(nil).GetBalance), ctx, userID)
+}

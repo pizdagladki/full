@@ -8,4 +8,5 @@ func (a *App) initServices() {
 	a.sessionSvc = service.NewSessionService(a.sessionRepo)
 	a.paymentProvider = service.NewStripePaymentProvider(a.cfg.Stripe.SecretKey, a.cfg.Stripe.WebhookSigningSecret)
 	a.purchaseSvc = service.NewPurchaseService(a.purchaseRepo, a.paymentProvider, a.logger)
+	a.pointsSvc = service.NewPointsService(a.pointsRepo, a.pointsCache, a.cfg.Points.Amounts, a.logger)
 }

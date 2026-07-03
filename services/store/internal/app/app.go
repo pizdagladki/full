@@ -32,16 +32,20 @@ type App struct {
 	inventoryRepo repository.InventoryRepository
 	sessionRepo   repository.SessionRepository
 	purchaseRepo  repository.PurchaseRepository
+	pointsRepo    repository.PointsRepository
+	pointsCache   repository.PointsCache
 
 	catalogSvc   service.CatalogService
 	inventorySvc service.InventoryService
 	sessionSvc   service.SessionService
 	purchaseSvc  service.PurchaseService
+	pointsSvc    service.PointsService
 
 	paymentProvider service.PaymentProvider
 
 	storeHandler    delivery.StoreHandler
 	purchaseHandler delivery.PurchaseHandler
+	pointsHandler   delivery.PointsHandler
 	authMiddleware  *middleware.AuthMiddleware
 }
 

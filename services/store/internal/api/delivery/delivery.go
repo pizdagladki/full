@@ -26,3 +26,11 @@ type PurchaseHandler interface {
 	// StripeWebhook handles POST /v1/store/stripe/webhook (public, no auth).
 	StripeWebhook(c echo.Context) error
 }
+
+// PointsHandler is the transport contract for the points resource.
+type PointsHandler interface {
+	// Credit handles POST /v1/points/credit (public, server-to-server).
+	Credit(c echo.Context) error
+	// GetBalance handles GET /v1/points/balance (requires auth).
+	GetBalance(c echo.Context) error
+}

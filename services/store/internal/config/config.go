@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -15,6 +16,14 @@ type Config struct {
 	Redis    RedisConfig    `yaml:"redis" validate:"required"`
 	Session  SessionConfig  `yaml:"session"`
 	Stripe   StripeConfig   `yaml:"stripe" validate:"required"`
+	Points   PointsConfig   `yaml:"points"`
+}
+
+// PointsConfig holds the config-driven points-per-reason amounts (e.g.
+// match_win, level_up). These are placeholders — extend the map as new
+// earning reasons are added, without hardcoding amounts in Go.
+type PointsConfig struct {
+	Amounts map[string]int64 `yaml:"amounts"`
 }
 
 // StripeConfig holds Stripe API credentials and webhook settings.
@@ -58,7 +67,10 @@ func Load(path string) (*Config, error) {
 	)
 
 	if os.Getenv("IS_DOCKER") != "" {
-		cfg = loadFromEnv()
+		cfg, err = loadFromEnv()
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		cfg, err = loadFromFile(path)
 		if err != nil {
@@ -74,7 +86,19 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-func loadFromEnv() *Config {
+// pointsAmountsEnvVar is the name of the env var carrying the points-per-reason
+// amounts as a JSON object, e.g. POINTS_AMOUNTS={"match_win":10,"level_up":25}.
+// Unset/empty is valid (an empty map — Credit then resolves any config-driven
+// reason to a non-positive delta and returns ErrInvalidCredit unless the
+// caller passes an explicit positive delta); malformed JSON fails config load.
+const pointsAmountsEnvVar = "POINTS_AMOUNTS"
+
+func loadFromEnv() (*Config, error) {
+	amounts, err := parsePointsAmountsEnv(os.Getenv(pointsAmountsEnvVar))
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		HTTP: HTTPConfig{Addr: getEnv("HTTP_ADDR", defaultAddr)},
 		Postgres: PostgresConfig{
@@ -91,7 +115,30 @@ func loadFromEnv() *Config {
 			SecretKey:            os.Getenv("STRIPE_SECRET_KEY"),
 			WebhookSigningSecret: os.Getenv("STRIPE_WEBHOOK_SIGNING_SECRET"),
 		},
+		Points: PointsConfig{
+			Amounts: amounts,
+		},
+	}, nil
+}
+
+// parsePointsAmountsEnv parses the POINTS_AMOUNTS env var (a JSON object of
+// reason -> amount, e.g. {"match_win":10,"level_up":25}). An empty string
+// returns an empty (non-nil) map — points amounts are config-driven, not
+// hardcoded in Go, and an absent config simply means no reason resolves to a
+// positive amount until configured. Malformed JSON is a config load error.
+func parsePointsAmountsEnv(raw string) (map[string]int64, error) {
+	if raw == "" {
+		return map[string]int64{}, nil
 	}
+
+	amounts := make(map[string]int64)
+
+	err := json.Unmarshal([]byte(raw), &amounts)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", pointsAmountsEnvVar, err)
+	}
+
+	return amounts, nil
 }
 
 func loadFromFile(path string) (*Config, error) {
