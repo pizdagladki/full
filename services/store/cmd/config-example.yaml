@@ -14,3 +14,6 @@ points:
   amounts:
     match_win: 10
     level_up: 25
+rewarded:
+  cap: 5
+  window_seconds: 3600

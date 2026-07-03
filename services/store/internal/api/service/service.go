@@ -82,3 +82,16 @@ type PointsService interface {
 	// cache and falling back to Postgres (the source of truth) on a miss.
 	GetBalance(ctx context.Context, userID int64) (int64, error)
 }
+
+// RewardedService is the business-logic contract for the rewarded-video
+// free-distraction grant.
+type RewardedService interface {
+	// GrantFreeDistraction grants one free distraction into userID's
+	// inventory after checking eligibility and the rate limit, and returns
+	// the resulting inventory quantity. Returns domain.ErrProductNotFound
+	// when the product does not exist, domain.ErrNotGrantable when it is not
+	// a free distraction (a paid item, or a non-distraction kind), and
+	// domain.ErrRateLimited when the caller has exceeded the configured
+	// per-user rate limit.
+	GrantFreeDistraction(ctx context.Context, userID, productID int64) (newQuantity int, err error)
+}

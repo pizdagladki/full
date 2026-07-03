@@ -34,3 +34,9 @@ type PointsHandler interface {
 	// GetBalance handles GET /v1/points/balance (requires auth).
 	GetBalance(c echo.Context) error
 }
+
+// RewardedHandler is the transport contract for the rewarded-video grant resource.
+type RewardedHandler interface {
+	// Grant handles POST /v1/store/rewarded/grant (requires auth).
+	Grant(c echo.Context) error
+}

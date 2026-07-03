@@ -125,7 +125,9 @@ func TestInitRepositories(t *testing.T) {
 
 	a := New("store")
 	// pgxPool and redisClient left nil; constructors only store the dep,
-	// they never dereference it during construction.
+	// they never dereference it during construction. cfg must be non-nil —
+	// initRepositories reads cfg.Rewarded to build the rate limiter.
+	a.cfg = &config.Config{}
 	a.initRepositories()
 
 	if a.catalogRepo == nil {
@@ -145,6 +147,12 @@ func TestInitRepositories(t *testing.T) {
 	}
 	if a.pointsCache == nil {
 		t.Fatal("pointsCache is nil after initRepositories")
+	}
+	if a.rewardedRepo == nil {
+		t.Fatal("rewardedRepo is nil after initRepositories")
+	}
+	if a.rewardedLimiter == nil {
+		t.Fatal("rewardedLimiter is nil after initRepositories")
 	}
 }
 
@@ -181,6 +189,9 @@ func TestInitServices(t *testing.T) {
 	if a.pointsSvc == nil {
 		t.Error("pointsSvc is nil after initServices")
 	}
+	if a.rewardedSvc == nil {
+		t.Error("rewardedSvc is nil after initServices")
+	}
 }
 
 // TestInitHandlers verifies that initHandlers wires storeHandler and purchaseHandler.
@@ -192,6 +203,7 @@ func TestInitHandlers(t *testing.T) {
 	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
 	purchaseMock := svcmocks.NewMockPurchaseService(ctrl)
 	pointsMock := svcmocks.NewMockPointsService(ctrl)
+	rewardedMock := svcmocks.NewMockRewardedService(ctrl)
 
 	a := New("store")
 	a.logger = zap.NewNop()
@@ -199,11 +211,16 @@ func TestInitHandlers(t *testing.T) {
 	a.inventorySvc = inventoryMock
 	a.purchaseSvc = purchaseMock
 	a.pointsSvc = pointsMock
+	a.rewardedSvc = rewardedMock
 
 	a.initHandlers()
 
 	if a.storeHandler == nil {
 		t.Fatal("storeHandler is nil after initHandlers")
+	}
+
+	if a.rewardedHandler == nil {
+		t.Fatal("rewardedHandler is nil after initHandlers")
 	}
 
 	if a.purchaseHandler == nil {
@@ -306,6 +323,7 @@ func newTestApp(t *testing.T, addr string) *App {
 	sessionMock := svcmocks.NewMockSessionService(ctrl)
 	purchaseMock := svcmocks.NewMockPurchaseService(ctrl)
 	pointsMock := svcmocks.NewMockPointsService(ctrl)
+	rewardedMock := svcmocks.NewMockRewardedService(ctrl)
 
 	a := New("store-test")
 	a.logger = zap.NewNop()
@@ -319,6 +337,7 @@ func newTestApp(t *testing.T, addr string) *App {
 	a.storeHandler = delivery.NewStoreHandler(catalogMock, inventoryMock, zap.NewNop())
 	a.purchaseHandler = delivery.NewPurchaseHandler(purchaseMock, zap.NewNop())
 	a.pointsHandler = delivery.NewPointsHandler(pointsMock, zap.NewNop())
+	a.rewardedHandler = delivery.NewRewardedHandler(rewardedMock, zap.NewNop())
 	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
 
 	return a

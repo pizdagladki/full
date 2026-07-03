@@ -1,6 +1,10 @@
 package app
 
-import "github.com/pizdagladki/full/services/store/internal/api/repository"
+import (
+	"time"
+
+	"github.com/pizdagladki/full/services/store/internal/api/repository"
+)
 
 func (a *App) initRepositories() {
 	a.catalogRepo = repository.NewCatalogRepository(a.pgxPool)
@@ -9,4 +13,8 @@ func (a *App) initRepositories() {
 	a.purchaseRepo = repository.NewPurchaseRepository(a.pgxPool)
 	a.pointsRepo = repository.NewPointsRepository(a.pgxPool)
 	a.pointsCache = repository.NewPointsCache(a.redisClient)
+	a.rewardedRepo = repository.NewRewardedRepository(a.pgxPool)
+	a.rewardedLimiter = repository.NewRewardedRateLimiter(
+		a.redisClient, a.cfg.Rewarded.Cap, time.Duration(a.cfg.Rewarded.WindowSeconds)*time.Second,
+	)
 }

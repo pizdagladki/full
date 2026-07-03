@@ -28,24 +28,28 @@ type App struct {
 	pgxPool     *pgxpool.Pool
 	redisClient *redis.Client
 
-	catalogRepo   repository.CatalogRepository
-	inventoryRepo repository.InventoryRepository
-	sessionRepo   repository.SessionRepository
-	purchaseRepo  repository.PurchaseRepository
-	pointsRepo    repository.PointsRepository
-	pointsCache   repository.PointsCache
+	catalogRepo     repository.CatalogRepository
+	inventoryRepo   repository.InventoryRepository
+	sessionRepo     repository.SessionRepository
+	purchaseRepo    repository.PurchaseRepository
+	pointsRepo      repository.PointsRepository
+	pointsCache     repository.PointsCache
+	rewardedRepo    repository.RewardedRepository
+	rewardedLimiter repository.RewardedRateLimiter
 
 	catalogSvc   service.CatalogService
 	inventorySvc service.InventoryService
 	sessionSvc   service.SessionService
 	purchaseSvc  service.PurchaseService
 	pointsSvc    service.PointsService
+	rewardedSvc  service.RewardedService
 
 	paymentProvider service.PaymentProvider
 
 	storeHandler    delivery.StoreHandler
 	purchaseHandler delivery.PurchaseHandler
 	pointsHandler   delivery.PointsHandler
+	rewardedHandler delivery.RewardedHandler
 	authMiddleware  *middleware.AuthMiddleware
 }
 

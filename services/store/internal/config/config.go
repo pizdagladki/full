@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,15 @@ type Config struct {
 	Session  SessionConfig  `yaml:"session"`
 	Stripe   StripeConfig   `yaml:"stripe" validate:"required"`
 	Points   PointsConfig   `yaml:"points"`
+	Rewarded RewardedConfig `yaml:"rewarded"`
+}
+
+// RewardedConfig holds the rewarded-video grant rate-limit settings: at most
+// Cap grants per user within WindowSeconds. Unset/zero values fall back to
+// the package defaults, applied in both loadFromEnv and loadFromFile.
+type RewardedConfig struct {
+	Cap           int `yaml:"cap"`
+	WindowSeconds int `yaml:"window_seconds"`
 }
 
 // PointsConfig holds the config-driven points-per-reason amounts (e.g.
@@ -56,6 +66,9 @@ type RedisConfig struct {
 const (
 	defaultAddr              = ":8083"
 	defaultSessionCookieName = "session"
+	defaultRewardedCap       = 5
+	// defaultRewardedWindowSeconds is one hour.
+	defaultRewardedWindowSeconds = 3600
 )
 
 // Load reads the config from environment variables when IS_DOCKER is set,
@@ -99,6 +112,16 @@ func loadFromEnv() (*Config, error) {
 		return nil, err
 	}
 
+	rewardedCap, err := getEnvInt("REWARDED_CAP", defaultRewardedCap)
+	if err != nil {
+		return nil, err
+	}
+
+	rewardedWindowSeconds, err := getEnvInt("REWARDED_WINDOW_SECONDS", defaultRewardedWindowSeconds)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		HTTP: HTTPConfig{Addr: getEnv("HTTP_ADDR", defaultAddr)},
 		Postgres: PostgresConfig{
@@ -118,7 +141,28 @@ func loadFromEnv() (*Config, error) {
 		Points: PointsConfig{
 			Amounts: amounts,
 		},
+		Rewarded: RewardedConfig{
+			Cap:           rewardedCap,
+			WindowSeconds: rewardedWindowSeconds,
+		},
 	}, nil
+}
+
+// getEnvInt reads an integer env var, falling back to def when unset/empty.
+// A set-but-malformed value is a config load error, like the other validated
+// fields.
+func getEnvInt(key string, def int) (int, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def, nil
+	}
+
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", key, err)
+	}
+
+	return v, nil
 }
 
 // parsePointsAmountsEnv parses the POINTS_AMOUNTS env var (a JSON object of
@@ -163,6 +207,14 @@ func loadFromFile(path string) (*Config, error) {
 
 	if cfg.Session.CookieName == "" {
 		cfg.Session.CookieName = defaultSessionCookieName
+	}
+
+	if cfg.Rewarded.Cap == 0 {
+		cfg.Rewarded.Cap = defaultRewardedCap
+	}
+
+	if cfg.Rewarded.WindowSeconds == 0 {
+		cfg.Rewarded.WindowSeconds = defaultRewardedWindowSeconds
 	}
 
 	return cfg, nil

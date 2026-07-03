@@ -312,3 +312,42 @@ func (mr *MockPointsServiceMockRecorder) GetBalance(ctx, userID any) *gomock.Cal
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBalance", reflect.TypeOf((*MockPointsService)(nil).GetBalance), ctx, userID)
 }
+
+// MockRewardedService is a mock of RewardedService interface.
+type MockRewardedService struct {
+	ctrl     *gomock.Controller
+	recorder *MockRewardedServiceMockRecorder
+	isgomock struct{}
+}
+
+// MockRewardedServiceMockRecorder is the mock recorder for MockRewardedService.
+type MockRewardedServiceMockRecorder struct {
+	mock *MockRewardedService
+}
+
+// NewMockRewardedService creates a new mock instance.
+func NewMockRewardedService(ctrl *gomock.Controller) *MockRewardedService {
+	mock := &MockRewardedService{ctrl: ctrl}
+	mock.recorder = &MockRewardedServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRewardedService) EXPECT() *MockRewardedServiceMockRecorder {
+	return m.recorder
+}
+
+// GrantFreeDistraction mocks base method.
+func (m *MockRewardedService) GrantFreeDistraction(ctx context.Context, userID, productID int64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GrantFreeDistraction", ctx, userID, productID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GrantFreeDistraction indicates an expected call of GrantFreeDistraction.
+func (mr *MockRewardedServiceMockRecorder) GrantFreeDistraction(ctx, userID, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GrantFreeDistraction", reflect.TypeOf((*MockRewardedService)(nil).GrantFreeDistraction), ctx, userID, productID)
+}

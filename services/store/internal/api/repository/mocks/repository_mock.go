@@ -384,3 +384,96 @@ func (mr *MockPointsCacheMockRecorder) SetBalance(ctx, userID, balance any) *gom
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetBalance", reflect.TypeOf((*MockPointsCache)(nil).SetBalance), ctx, userID, balance)
 }
+
+// MockRewardedRepository is a mock of RewardedRepository interface.
+type MockRewardedRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockRewardedRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockRewardedRepositoryMockRecorder is the mock recorder for MockRewardedRepository.
+type MockRewardedRepositoryMockRecorder struct {
+	mock *MockRewardedRepository
+}
+
+// NewMockRewardedRepository creates a new mock instance.
+func NewMockRewardedRepository(ctrl *gomock.Controller) *MockRewardedRepository {
+	mock := &MockRewardedRepository{ctrl: ctrl}
+	mock.recorder = &MockRewardedRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRewardedRepository) EXPECT() *MockRewardedRepositoryMockRecorder {
+	return m.recorder
+}
+
+// GetProduct mocks base method.
+func (m *MockRewardedRepository) GetProduct(ctx context.Context, productID int64) (*domain.Product, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetProduct", ctx, productID)
+	ret0, _ := ret[0].(*domain.Product)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetProduct indicates an expected call of GetProduct.
+func (mr *MockRewardedRepositoryMockRecorder) GetProduct(ctx, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetProduct", reflect.TypeOf((*MockRewardedRepository)(nil).GetProduct), ctx, productID)
+}
+
+// GrantFreeDistraction mocks base method.
+func (m *MockRewardedRepository) GrantFreeDistraction(ctx context.Context, userID, productID int64) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GrantFreeDistraction", ctx, userID, productID)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GrantFreeDistraction indicates an expected call of GrantFreeDistraction.
+func (mr *MockRewardedRepositoryMockRecorder) GrantFreeDistraction(ctx, userID, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GrantFreeDistraction", reflect.TypeOf((*MockRewardedRepository)(nil).GrantFreeDistraction), ctx, userID, productID)
+}
+
+// MockRewardedRateLimiter is a mock of RewardedRateLimiter interface.
+type MockRewardedRateLimiter struct {
+	ctrl     *gomock.Controller
+	recorder *MockRewardedRateLimiterMockRecorder
+	isgomock struct{}
+}
+
+// MockRewardedRateLimiterMockRecorder is the mock recorder for MockRewardedRateLimiter.
+type MockRewardedRateLimiterMockRecorder struct {
+	mock *MockRewardedRateLimiter
+}
+
+// NewMockRewardedRateLimiter creates a new mock instance.
+func NewMockRewardedRateLimiter(ctrl *gomock.Controller) *MockRewardedRateLimiter {
+	mock := &MockRewardedRateLimiter{ctrl: ctrl}
+	mock.recorder = &MockRewardedRateLimiterMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockRewardedRateLimiter) EXPECT() *MockRewardedRateLimiterMockRecorder {
+	return m.recorder
+}
+
+// Allow mocks base method.
+func (m *MockRewardedRateLimiter) Allow(ctx context.Context, userID int64) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Allow", ctx, userID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Allow indicates an expected call of Allow.
+func (mr *MockRewardedRateLimiterMockRecorder) Allow(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Allow", reflect.TypeOf((*MockRewardedRateLimiter)(nil).Allow), ctx, userID)
+}
