@@ -57,6 +57,16 @@ type HillRepository interface {
 	Challenge(
 		ctx context.Context, hillType domain.HillType, userID int64, survivedMs int, newClipID string,
 	) (domain.ChallengeOutcome, error)
+	// CloseIfStale closes the current reign for hillType if it started before
+	// periodStart (i.e. it belongs to a prior day/month and the boundary has
+	// rolled over), returning the closed reign for reward/expiry handling.
+	// Returns (nil, nil) when there is no current reign (already unseeded) OR
+	// the current reign already started within the current period (already
+	// reset, or freshly (re)seeded this period — nothing to do). This makes
+	// repeated calls for the same period a no-op: idempotent-per-period falls
+	// out of comparing StartedAt to periodStart rather than needing separate
+	// persisted "last processed period" state.
+	CloseIfStale(ctx context.Context, hillType domain.HillType, periodStart time.Time) (*domain.KingReign, error)
 }
 
 // SessionRepository resolves Redis session keys to user IDs.

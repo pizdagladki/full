@@ -11,7 +11,7 @@ type worker func(ctx context.Context, a *App) error
 // runWorkers starts every worker as a goroutine under a shared WaitGroup and
 // blocks until they all finish, returning the first error seen.
 func (a *App) runWorkers(ctx context.Context) error {
-	workers := []worker{workerHTTP}
+	workers := []worker{workerHTTP, workerReset}
 
 	var (
 		wg       sync.WaitGroup

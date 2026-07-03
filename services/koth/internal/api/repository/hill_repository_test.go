@@ -251,6 +251,154 @@ func TestHillRepository_Challenge(t *testing.T) {
 	}
 }
 
+// TestHillRepository_CloseIfStale verifies criteria 1, 2, and 4 — CloseIfStale
+// closes the current reign and returns its pre-close snapshot when it started
+// before periodStart (the boundary has rolled over), and is a no-op (nil,
+// nil) both when the hill is unseeded and when the current reign already
+// started within the current period (idempotent-per-period re-run).
+func TestHillRepository_CloseIfStale(t *testing.T) {
+	t.Parallel()
+
+	periodStart := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
+	staleStarted := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	freshStarted := time.Date(2026, 7, 4, 1, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name        string
+		hillType    domain.HillType
+		periodStart time.Time
+		setup       func(m pgxmock.PgxPoolIface)
+		wantKing    *domain.KingReign
+		wantErr     bool
+	}{
+		{
+			// criterion: 4 — no current reign is a no-op (nil, nil); nothing to close
+			name:        "no current reign is a no-op",
+			hillType:    domain.HillTypeDaily,
+			periodStart: periodStart,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectExec(`pg_advisory_xact_lock`).WithArgs("daily").
+					WillReturnResult(pgxmock.NewResult("SELECT", 0))
+				m.ExpectQuery(`SELECT`).WithArgs("daily").WillReturnError(pgx.ErrNoRows)
+				m.ExpectCommit()
+			},
+			wantKing: nil,
+		},
+		{
+			// criterion: 1 — a stale daily reign (started before the day boundary) is
+			// closed and returned so the caller can award the final-placement reward
+			// and expire the clip.
+			name:        "stale daily reign is closed and returned",
+			hillType:    domain.HillTypeDaily,
+			periodStart: periodStart,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectExec(`pg_advisory_xact_lock`).WithArgs("daily").
+					WillReturnResult(pgxmock.NewResult("SELECT", 0))
+				m.ExpectQuery(`SELECT`).WithArgs("daily").
+					WillReturnRows(pgxmock.NewRows(kingCols).AddRow(int64(1), int64(42), "clip-1", 8000, staleStarted))
+				m.ExpectExec(`UPDATE king_reigns`).WithArgs(int64(1)).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+				m.ExpectCommit()
+			},
+			wantKing: &domain.KingReign{
+				ID: 1, HillType: domain.HillTypeDaily, UserID: 42, ClipID: "clip-1",
+				BlinkTsMs: 8000, StartedAt: staleStarted,
+			},
+		},
+		{
+			// criterion: 2 — a stale monthly reign is closed and returned identically
+			// (the monthly boundary is just a different periodStart).
+			name:        "stale monthly reign is closed and returned",
+			hillType:    domain.HillTypeMonthly,
+			periodStart: periodStart,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectExec(`pg_advisory_xact_lock`).WithArgs("monthly").
+					WillReturnResult(pgxmock.NewResult("SELECT", 0))
+				m.ExpectQuery(`SELECT`).WithArgs("monthly").
+					WillReturnRows(pgxmock.NewRows(kingCols).AddRow(int64(3), int64(7), "clip-mo", 12000, staleStarted))
+				m.ExpectExec(`UPDATE king_reigns`).WithArgs(int64(3)).
+					WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+				m.ExpectCommit()
+			},
+			wantKing: &domain.KingReign{
+				ID: 3, HillType: domain.HillTypeMonthly, UserID: 7, ClipID: "clip-mo",
+				BlinkTsMs: 12000, StartedAt: staleStarted,
+			},
+		},
+		{
+			// criterion: 4 — a reign that already started within the current period
+			// (already reset, or freshly (re)seeded) is left untouched: re-running
+			// CloseIfStale for the same period must NOT close it again.
+			name:        "fresh reign within the period is a no-op (idempotent re-run)",
+			hillType:    domain.HillTypeDaily,
+			periodStart: periodStart,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectExec(`pg_advisory_xact_lock`).WithArgs("daily").
+					WillReturnResult(pgxmock.NewResult("SELECT", 0))
+				m.ExpectQuery(`SELECT`).WithArgs("daily").
+					WillReturnRows(pgxmock.NewRows(kingCols).AddRow(int64(2), int64(50), "clip-2", 9000, freshStarted))
+				m.ExpectCommit()
+			},
+			wantKing: nil,
+		},
+		{
+			name:        "begin tx error propagated",
+			hillType:    domain.HillTypeDaily,
+			periodStart: periodStart,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin().WillReturnError(errors.New("pool exhausted"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock := newHillPool(t)
+			tt.setup(mock)
+
+			repo := repository.NewHillRepository(mock)
+			got, err := repo.CloseIfStale(context.Background(), tt.hillType, tt.periodStart)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("CloseIfStale() error = nil, want error")
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("CloseIfStale() unexpected error = %v", err)
+			}
+
+			if tt.wantKing == nil {
+				if got != nil {
+					t.Errorf("CloseIfStale() = %+v, want nil (no-op)", got)
+				}
+			} else {
+				if got == nil {
+					t.Fatal("CloseIfStale() = nil, want a closed reign")
+				}
+
+				if *got != *tt.wantKing {
+					t.Errorf("CloseIfStale() = %+v, want %+v", got, tt.wantKing)
+				}
+			}
+
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unfulfilled expectations: %v", err)
+			}
+		})
+	}
+}
+
 // TestHillRepository_Challenge_ConcurrentSerialization verifies criterion: 4 —
 // two "simultaneous" winning challenges against the same hill_type must result
 // in EXACTLY ONE crown transfer: the advisory lock serializes the two calls

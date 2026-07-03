@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/services/koth/internal/api/delivery"
+	"github.com/pizdagladki/full/services/koth/internal/api/domain"
 	"github.com/pizdagladki/full/services/koth/internal/api/middleware"
 	svcmocks "github.com/pizdagladki/full/services/koth/internal/api/service/mocks"
 	"github.com/pizdagladki/full/services/koth/internal/config"
@@ -163,8 +164,25 @@ func TestRunWorkers_WorkerError(t *testing.T) {
 	// A bind address with no port makes e.Start fail, surfacing a worker error.
 	a := newTestApp(t, "not-a-valid-bind-addr")
 
-	if err := a.runWorkers(context.Background()); err == nil {
-		t.Fatal("runWorkers() error = nil, want the worker's start error")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- a.runWorkers(ctx) }()
+
+	// workerHTTP fails fast; workerReset's ticker loop only exits on
+	// ctx.Done(), so cancel once workerHTTP has had a chance to fail, letting
+	// runWorkers's shared WaitGroup complete.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("runWorkers() error = nil, want the worker's start error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runWorkers did not return after ctx cancel")
 	}
 }
 
@@ -212,14 +230,22 @@ func newTestApp(t *testing.T, addr string) *App {
 	a.cfg = &config.Config{
 		HTTP:    config.HTTPConfig{Addr: addr},
 		Session: config.SessionConfig{CookieName: "session"},
+		// Long interval: workerReset's first (immediate) tick fires once via
+		// checkReset in workerReset's own call, and the ticker itself won't
+		// fire again within these tests' short lifetimes.
+		Reset: config.ResetConfig{CheckInterval: time.Hour},
 	}
 
 	hillMock := svcmocks.NewMockHillService(ctrl)
+	resetMock := svcmocks.NewMockResetService(ctrl)
+	resetMock.EXPECT().CloseStaleReign(gomock.Any(), domain.HillTypeDaily).Return(nil).AnyTimes()
+	resetMock.EXPECT().CloseStaleReign(gomock.Any(), domain.HillTypeMonthly).Return(nil).AnyTimes()
 
 	// Wire stub handlers and middleware so registerHTTPRoutes works.
 	a.rankHandler = delivery.NewRankHandler(rankMock, zap.NewNop())
 	a.hillHandler = delivery.NewHillHandler(hillMock, zap.NewNop())
 	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
+	a.resetSvc = resetMock
 
 	return a
 }

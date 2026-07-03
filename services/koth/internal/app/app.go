@@ -35,6 +35,7 @@ type App struct {
 	rankSvc    service.RankService
 	hillSvc    service.HillService
 	sessionSvc service.SessionService
+	resetSvc   service.ResetService
 
 	rankHandler delivery.RankHandler
 	hillHandler delivery.HillHandler
