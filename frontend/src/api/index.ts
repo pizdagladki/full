@@ -19,3 +19,14 @@ export type {
   MoneyPurchaseResult,
   PointsPurchaseResult,
 } from './store';
+export { KingClipsApiClient, defaultKingClipsApi } from './kingClips';
+export type { KingClipsApi, CurrentKingClip, KingClipUploadResult } from './kingClips';
+export { KothApiClient, defaultKothApi } from './koth';
+export type {
+  KothApi,
+  ChallengeHillRequest,
+  ChallengeHillResult,
+  KingInfo,
+  RankedAttemptRequest,
+  RankedAttemptResult,
+} from './koth';
