@@ -12,6 +12,15 @@ const KindEdit = "edit"
 // ErrInvalidKind is returned when an unrecognized product kind is supplied.
 var ErrInvalidKind = errors.New("invalid product kind")
 
+// ErrNotGrantable is returned when a rewarded-video grant is attempted on a
+// product that is not a free distraction (a paid item, or a non-distraction
+// kind such as an edit).
+var ErrNotGrantable = errors.New("product is not a grantable free distraction")
+
+// ErrRateLimited is returned when a user has exceeded the configured
+// rewarded-video grant rate limit.
+var ErrRateLimited = errors.New("rewarded grant rate limit exceeded")
+
 // ValidKind reports whether s is a recognized product kind.
 func ValidKind(s string) bool {
 	return s == KindDistraction || s == KindEdit

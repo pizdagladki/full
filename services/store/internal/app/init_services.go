@@ -9,4 +9,5 @@ func (a *App) initServices() {
 	a.paymentProvider = service.NewStripePaymentProvider(a.cfg.Stripe.SecretKey, a.cfg.Stripe.WebhookSigningSecret)
 	a.purchaseSvc = service.NewPurchaseService(a.purchaseRepo, a.paymentProvider, a.pointsCache, a.logger)
 	a.pointsSvc = service.NewPointsService(a.pointsRepo, a.pointsCache, a.cfg.Points.Amounts, a.logger)
+	a.rewardedSvc = service.NewRewardedService(a.rewardedRepo, a.rewardedLimiter, a.logger)
 }

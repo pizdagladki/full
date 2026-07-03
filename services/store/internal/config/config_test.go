@@ -296,6 +296,122 @@ func TestLoad_PointsAmounts(t *testing.T) {
 	}
 }
 
+func TestLoad_RewardedConfig(t *testing.T) {
+	const (
+		validDSN  = "postgres://app:app@localhost:5432/app?sslmode=disable"
+		validAddr = "localhost:6379"
+	)
+
+	stripeEnv := map[string]string{
+		"STRIPE_SECRET_KEY":             "sk_test_valid",
+		"STRIPE_WEBHOOK_SIGNING_SECRET": "whsec_valid",
+	}
+	stripeYAML := "stripe:\n  secret_key: \"sk_test_valid\"\n  webhook_signing_secret: \"whsec_valid\"\n"
+
+	tests := []struct {
+		name           string
+		isDocker       bool
+		env            map[string]string
+		setup          func(t *testing.T) string
+		wantCap        int
+		wantWindowSecs int
+		wantErr        bool
+	}{
+		{
+			// criterion: rewarded-config — an unset REWARDED_CAP/REWARDED_WINDOW_SECONDS
+			// falls back to the package defaults, so the limiter always gets a
+			// positive cap and window even when unconfigured.
+			name:           "env mode unset falls back to defaults",
+			isDocker:       true,
+			env:            mergeMaps(map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr}, stripeEnv),
+			wantCap:        5,
+			wantWindowSecs: 3600,
+		},
+		{
+			// criterion: rewarded-config — explicit env values override the defaults.
+			name:     "env mode explicit values override defaults",
+			isDocker: true,
+			env: mergeMaps(map[string]string{
+				"POSTGRES_DSN":            validDSN,
+				"REDIS_ADDR":              validAddr,
+				"REWARDED_CAP":            "3",
+				"REWARDED_WINDOW_SECONDS": "120",
+			}, stripeEnv),
+			wantCap:        3,
+			wantWindowSecs: 120,
+		},
+		{
+			// criterion: rewarded-config — a malformed REWARDED_CAP fails config
+			// load fast at startup, like the other validated env vars.
+			name:     "env mode malformed REWARDED_CAP fails load",
+			isDocker: true,
+			env: mergeMaps(map[string]string{
+				"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "REWARDED_CAP": "not-a-number",
+			}, stripeEnv),
+			wantErr: true,
+		},
+		{
+			// criterion: rewarded-config — YAML mode reads rewarded.cap /
+			// rewarded.window_seconds from the file, not hardcoded in Go.
+			name: "file mode reads rewarded section from yaml",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n"+
+						stripeYAML+"rewarded:\n  cap: 7\n  window_seconds: 600\n")
+			},
+			wantCap:        7,
+			wantWindowSecs: 600,
+		},
+		{
+			// criterion: rewarded-config — an absent rewarded section in the YAML
+			// falls back to the package defaults, guaranteeing a positive window.
+			name: "file mode without rewarded section falls back to defaults",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n"+stripeYAML)
+			},
+			wantCap:        5,
+			wantWindowSecs: 3600,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.isDocker {
+				t.Setenv("IS_DOCKER", "1")
+			}
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			path := ""
+			if tt.setup != nil {
+				path = tt.setup(t)
+			}
+
+			cfg, err := Load(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error")
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if cfg.Rewarded.Cap != tt.wantCap {
+				t.Errorf("Rewarded.Cap = %d, want %d", cfg.Rewarded.Cap, tt.wantCap)
+			}
+
+			if cfg.Rewarded.WindowSeconds != tt.wantWindowSecs {
+				t.Errorf("Rewarded.WindowSeconds = %d, want %d", cfg.Rewarded.WindowSeconds, tt.wantWindowSecs)
+			}
+		})
+	}
+}
+
 func writeTempConfig(t *testing.T, body string) string {
 	t.Helper()
 

@@ -94,3 +94,22 @@ type PointsCache interface {
 	// DeleteBalance invalidates the cached balance for userID.
 	DeleteBalance(ctx context.Context, userID int64) error
 }
+
+// RewardedRepository is the data-access contract for the rewarded-video
+// free-distraction grant.
+type RewardedRepository interface {
+	// GetProduct fetches a product by ID. Returns ErrProductNotFound when absent.
+	GetProduct(ctx context.Context, productID int64) (*domain.Product, error)
+	// GrantFreeDistraction upserts one unit of productID into userID's
+	// inventory, incrementing quantity on conflict, and returns the resulting
+	// quantity.
+	GrantFreeDistraction(ctx context.Context, userID, productID int64) (newQuantity int, err error)
+}
+
+// RewardedRateLimiter caps how many rewarded-video grants a user may make per
+// configured window.
+type RewardedRateLimiter interface {
+	// Allow reports whether a grant is permitted under the per-user cap and
+	// records the attempt (i.e. calling Allow itself counts toward the cap).
+	Allow(ctx context.Context, userID int64) (allowed bool, err error)
+}

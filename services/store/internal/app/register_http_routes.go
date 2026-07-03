@@ -30,6 +30,7 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	v1 := e.Group("/v1", a.authMiddleware.RequireAuth)
 	v1.GET("/store/inventory", a.storeHandler.GetInventory)
 	v1.POST("/store/purchase", a.purchaseHandler.CreatePurchase)
+	v1.POST("/store/rewarded/grant", a.rewardedHandler.Grant)
 	v1.GET("/points/balance", a.pointsHandler.GetBalance)
 
 	return e
