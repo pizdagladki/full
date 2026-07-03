@@ -7,6 +7,8 @@ import (
 
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/pizdagladki/full/services/koth/internal/api/domain"
 	repomocks "github.com/pizdagladki/full/services/koth/internal/api/repository/mocks"
@@ -16,7 +18,7 @@ import (
 	"github.com/pizdagladki/full/services/koth/internal/api/repository"
 )
 
-const testWinAmount int64 = 5
+const testWinAmount int64 = 7
 
 // TestHillService_CurrentKing verifies criteria 1 and 5 — CurrentKing parses
 // hill_type (400/ErrInvalidHillType on a bad value) and returns
@@ -315,5 +317,46 @@ func TestHillService_Challenge_IdempotentRefID(t *testing.T) {
 		if !got.Won {
 			t.Fatalf("Challenge() call %d Won = false, want true", i)
 		}
+	}
+}
+
+// TestHillService_Challenge_LogsPointsClientFailure verifies criterion: 4 —
+// a PointsClient failure on a crown take is actually logged (zap, error
+// level), not merely swallowed silently.
+func TestHillService_Challenge_LogsPointsClientFailure(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	repoMock := repomocks.NewMockHillRepository(ctrl)
+	repoMock.EXPECT().Challenge(gomock.Any(), domain.HillTypeDaily, int64(99), 9000, "clip-new").
+		Return(domain.ChallengeOutcome{
+			Won:  true,
+			King: domain.KingReign{ID: 502, UserID: 99, ClipID: "clip-new", BlinkTsMs: 9000},
+		}, nil)
+
+	pointsMock := servicemocks.NewMockPointsClient(ctrl)
+	pointsMock.EXPECT().Credit(gomock.Any(), gomock.Any()).Return(errors.New("store unavailable"))
+
+	core, logs := observer.New(zapcore.ErrorLevel)
+	logger := zap.New(core)
+
+	svc := service.NewHillService(repoMock, pointsMock, testWinAmount, logger)
+
+	got, err := svc.Challenge(context.Background(), "daily", 99, 9000, "clip-new")
+	if err != nil {
+		t.Fatalf("Challenge() unexpected error = %v", err)
+	}
+
+	if !got.Won {
+		t.Fatalf("Challenge() Won = false, want true")
+	}
+
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("len(logged entries) = %d, want 1", len(entries))
+	}
+
+	if entries[0].Level != zapcore.ErrorLevel {
+		t.Errorf("logged entry level = %v, want %v", entries[0].Level, zapcore.ErrorLevel)
 	}
 }

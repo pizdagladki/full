@@ -8,6 +8,8 @@ import (
 
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/pizdagladki/full/services/koth/internal/api/domain"
 	repomocks "github.com/pizdagladki/full/services/koth/internal/api/repository/mocks"
@@ -27,7 +29,7 @@ func (c *fakeClock) Now() time.Time { return c.now }
 
 var testThresholds = []int{5000, 15000, 30000, 60000, 120000}
 
-const testRankAmount int64 = 3
+const testRankAmount int64 = 4
 
 // noPointsCall returns a MockPointsClient with no .EXPECT() set — gomock
 // fails the test if Credit is ever called, asserting "no credit" for the
@@ -508,5 +510,47 @@ func TestRankService_DailyReset(t *testing.T) {
 
 	if meDayTwo.CurrentRank != 0 {
 		t.Errorf("day two CurrentRank = %d, want 0 (daily reset, no leak from day one)", meDayTwo.CurrentRank)
+	}
+}
+
+// TestRankService_SubmitAttempt_LogsPointsClientFailure verifies criterion: 4
+// — a PointsClient failure on a rank-up is actually logged (zap, error
+// level), not merely swallowed silently.
+func TestRankService_SubmitAttempt_LogsPointsClientFailure(t *testing.T) {
+	t.Parallel()
+
+	day := time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)
+
+	ctrl := gomock.NewController(t)
+	repoMock := repomocks.NewMockRankRepository(ctrl)
+	repoMock.EXPECT().GetRank(gomock.Any(), int64(8), day).
+		Return(nil, repository.ErrRankNotFound)
+	repoMock.EXPECT().UpsertRank(gomock.Any(), int64(8), day, 2, 16000).
+		Return(nil)
+
+	pointsMock := servicemocks.NewMockPointsClient(ctrl)
+	pointsMock.EXPECT().Credit(gomock.Any(), gomock.Any()).Return(errors.New("store unavailable"))
+
+	core, logs := observer.New(zapcore.ErrorLevel)
+	logger := zap.New(core)
+
+	svc := service.NewRankService(repoMock, &fakeClock{now: day}, testThresholds, pointsMock, testRankAmount, logger)
+
+	got, err := svc.SubmitAttempt(context.Background(), 8, 16000)
+	if err != nil {
+		t.Fatalf("SubmitAttempt() unexpected error = %v", err)
+	}
+
+	if !got.NewlyReached {
+		t.Fatalf("SubmitAttempt() NewlyReached = false, want true")
+	}
+
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("len(logged entries) = %d, want 1", len(entries))
+	}
+
+	if entries[0].Level != zapcore.ErrorLevel {
+		t.Errorf("logged entry level = %v, want %v", entries[0].Level, zapcore.ErrorLevel)
 	}
 }
