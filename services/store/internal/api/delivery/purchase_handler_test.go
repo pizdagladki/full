@@ -35,16 +35,19 @@ func newEcho() *echo.Echo {
 	return e
 }
 
+func ptrInt64(v int64) *int64 { return &v }
+
 func TestPurchaseHandler_CreatePurchase(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		userID     any    // set in context; nil means not set (unauthenticated)
-		body       string // raw JSON body
-		setupSvc   func(m *svcmocks.MockPurchaseService)
-		wantStatus int
-		wantSecret string // non-empty: assert client_secret in response
+		name        string
+		userID      any    // set in context; nil means not set (unauthenticated)
+		body        string // raw JSON body
+		setupSvc    func(m *svcmocks.MockPurchaseService)
+		wantStatus  int
+		wantSecret  string // non-empty: assert client_secret in response
+		wantBalance *int64 // non-nil: assert balance in a points-purchase response
 	}{
 		{
 			// criterion: 13 — CreatePurchase returns 201 with client_secret on success
@@ -58,6 +61,116 @@ func TestPurchaseHandler_CreatePurchase(t *testing.T) {
 			},
 			wantStatus: http.StatusCreated,
 			wantSecret: "cs_test",
+		},
+		{
+			// criterion: 4 — pay_with omitted (empty) defaults to the money path and
+			// still hits InitiatePurchase (Stripe), unchanged.
+			name:   "pay_with omitted defaults to money path",
+			userID: int64(5),
+			body:   `{"product_id":10}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					InitiatePurchase(gomock.Any(), int64(5), int64(10)).
+					Return("cs_default", nil)
+			},
+			wantStatus: http.StatusCreated,
+			wantSecret: "cs_default",
+		},
+		{
+			// criterion: 4 — pay_with="money" explicitly still hits InitiatePurchase
+			// (Stripe) unchanged, with the same 201 + client_secret response.
+			name:   "pay_with money explicit still hits InitiatePurchase",
+			userID: int64(5),
+			body:   `{"product_id":10,"pay_with":"money"}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					InitiatePurchase(gomock.Any(), int64(5), int64(10)).
+					Return("cs_money", nil)
+			},
+			wantStatus: http.StatusCreated,
+			wantSecret: "cs_money",
+		},
+		{
+			// criterion: 2 — pay_with="points" success returns 201 with the new balance
+			// and routes to PurchaseWithPoints, never InitiatePurchase.
+			name:   "pay_with points success returns 201 with balance",
+			userID: int64(5),
+			body:   `{"product_id":10,"pay_with":"points"}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					PurchaseWithPoints(gomock.Any(), int64(5), int64(10)).
+					Return(int64(450), nil)
+			},
+			wantStatus:  http.StatusCreated,
+			wantBalance: ptrInt64(450),
+		},
+		{
+			// criterion: 3 — pay_with="points" with insufficient balance returns 402.
+			name:   "pay_with points insufficient balance returns 402",
+			userID: int64(5),
+			body:   `{"product_id":10,"pay_with":"points"}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					PurchaseWithPoints(gomock.Any(), int64(5), int64(10)).
+					Return(int64(0), domain.ErrInsufficientPoints)
+			},
+			wantStatus: http.StatusPaymentRequired,
+		},
+		{
+			// criterion: 3 — pay_with="points" on a money-only product (points_price
+			// null) returns 400.
+			name:   "pay_with points on money-only product returns 400",
+			userID: int64(5),
+			body:   `{"product_id":30,"pay_with":"points"}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					PurchaseWithPoints(gomock.Any(), int64(5), int64(30)).
+					Return(int64(0), domain.ErrMoneyOnly)
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// pay_with="points" on an already-owned edit returns 409.
+			name:   "pay_with points already owned edit returns 409",
+			userID: int64(5),
+			body:   `{"product_id":20,"pay_with":"points"}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					PurchaseWithPoints(gomock.Any(), int64(5), int64(20)).
+					Return(int64(0), domain.ErrAlreadyOwned)
+			},
+			wantStatus: http.StatusConflict,
+		},
+		{
+			// pay_with="points" on a missing product returns 404.
+			name:   "pay_with points product not found returns 404",
+			userID: int64(5),
+			body:   `{"product_id":99,"pay_with":"points"}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					PurchaseWithPoints(gomock.Any(), int64(5), int64(99)).
+					Return(int64(0), domain.ErrProductNotFound)
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:   "pay_with points internal error returns 500",
+			userID: int64(5),
+			body:   `{"product_id":10,"pay_with":"points"}`,
+			setupSvc: func(m *svcmocks.MockPurchaseService) {
+				m.EXPECT().
+					PurchaseWithPoints(gomock.Any(), int64(5), int64(10)).
+					Return(int64(0), errors.New("db exploded"))
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			// invalid pay_with value fails validation -> 400, never reaches the service.
+			name:       "invalid pay_with value returns 400",
+			userID:     int64(5),
+			body:       `{"product_id":10,"pay_with":"bitcoin"}`,
+			setupSvc:   func(m *svcmocks.MockPurchaseService) {},
+			wantStatus: http.StatusBadRequest,
 		},
 		{
 			// criterion: 14 — CreatePurchase returns 401 when user not authenticated
@@ -157,6 +270,19 @@ func TestPurchaseHandler_CreatePurchase(t *testing.T) {
 				got, ok := resp["client_secret"].(string)
 				if !ok || got != tt.wantSecret {
 					t.Errorf("client_secret = %q, want %q", got, tt.wantSecret)
+				}
+			}
+
+			// criterion: 2 — a successful points purchase response carries the new balance.
+			if tt.wantBalance != nil {
+				var resp map[string]any
+				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+					t.Fatalf("unmarshal response: %v", err)
+				}
+
+				got, ok := resp["balance"].(float64)
+				if !ok || int64(got) != *tt.wantBalance {
+					t.Errorf("balance = %v, want %d", resp["balance"], *tt.wantBalance)
 				}
 			}
 		})

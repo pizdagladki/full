@@ -31,6 +31,15 @@ type PurchaseRepository interface {
 	// ConfirmAndGrant atomically marks the purchase as paid (set stripe_event_id)
 	// and upserts inventory: distractions increment quantity; edits use DO NOTHING.
 	ConfirmAndGrant(ctx context.Context, providerRef, eventID, kind string, userID, productID int64) error
+	// PurchaseWithPoints atomically, in a SINGLE transaction: conditionally
+	// debits the user's points balance (no-op — returns domain.ErrInsufficientPoints
+	// — when the balance is insufficient), records a paid purchase, appends a
+	// points_ledger row (reason=shop_spend, delta=-pointsPrice), and grants
+	// inventory (distractions increment quantity; edits use DO NOTHING).
+	// Returns the resulting points balance.
+	PurchaseWithPoints(
+		ctx context.Context, userID, productID, pointsPrice int64, kind string,
+	) (newBalance int64, err error)
 }
 
 // ErrSessionNotFound is returned by SessionRepository when the session key is

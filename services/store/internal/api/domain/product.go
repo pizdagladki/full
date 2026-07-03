@@ -19,12 +19,13 @@ func ValidKind(s string) bool {
 
 // Product is the domain model for a store product.
 type Product struct {
-	ID         int64
-	Kind       string
-	Tier       *int
-	Name       string
-	PriceCents int
-	IsFree     bool
+	ID          int64
+	Kind        string
+	Tier        *int
+	Name        string
+	PriceCents  int
+	IsFree      bool
+	PointsPrice *int64 // nil = money-only; non-nil = purchasable with points
 }
 
 // InventoryItem is the domain model for an item in a user's inventory.

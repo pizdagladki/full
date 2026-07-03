@@ -23,12 +23,20 @@ func NewPurchaseHandler(purchaseSvc service.PurchaseService, logger *zap.Logger)
 }
 
 type createPurchaseRequest struct {
-	ProductID int64 `json:"product_id" validate:"required,min=1"`
+	ProductID int64  `json:"product_id" validate:"required,min=1"`
+	PayWith   string `json:"pay_with" validate:"omitempty,oneof=money points"`
 }
 
 type createPurchaseResponse struct {
 	ClientSecret string `json:"client_secret"`
 	ProductID    int64  `json:"product_id"`
+}
+
+// pointsPurchaseResponse is the JSON representation of a successful
+// pay_with=points purchase.
+type pointsPurchaseResponse struct {
+	ProductID int64 `json:"product_id"`
+	Balance   int64 `json:"balance"`
 }
 
 // CreatePurchase handles POST /v1/store/purchase. Requires auth.
@@ -50,6 +58,12 @@ func (h *purchaseHandler) CreatePurchase(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad request"})
 	}
 
+	if req.PayWith == domain.PayWithPoints {
+		return h.createPointsPurchase(c, userID, req.ProductID)
+	}
+
+	// Default (empty/omitted pay_with) and the explicit "money" value both
+	// route through the existing Stripe path — unchanged.
 	clientSecret, err := h.purchaseSvc.InitiatePurchase(c.Request().Context(), userID, req.ProductID)
 	if err != nil {
 		switch {
@@ -92,4 +106,30 @@ func (h *purchaseHandler) StripeWebhook(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// createPointsPurchase handles the pay_with=points branch of CreatePurchase.
+func (h *purchaseHandler) createPointsPurchase(c echo.Context, userID, productID int64) error {
+	balance, err := h.purchaseSvc.PurchaseWithPoints(c.Request().Context(), userID, productID)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrProductNotFound):
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "product not found"})
+		case errors.Is(err, domain.ErrMoneyOnly):
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "product is money-only"})
+		case errors.Is(err, domain.ErrInsufficientPoints):
+			return c.JSON(http.StatusPaymentRequired, map[string]string{"error": "insufficient points"})
+		case errors.Is(err, domain.ErrAlreadyOwned):
+			return c.JSON(http.StatusConflict, map[string]string{"error": "already owned"})
+		default:
+			h.logger.Error("purchase with points", zap.Error(err))
+
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		}
+	}
+
+	return c.JSON(http.StatusCreated, pointsPurchaseResponse{
+		ProductID: productID,
+		Balance:   balance,
+	})
 }

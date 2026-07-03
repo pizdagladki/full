@@ -127,6 +127,21 @@ func (mr *MockPurchaseServiceMockRecorder) InitiatePurchase(ctx, userID, product
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InitiatePurchase", reflect.TypeOf((*MockPurchaseService)(nil).InitiatePurchase), ctx, userID, productID)
 }
 
+// PurchaseWithPoints mocks base method.
+func (m *MockPurchaseService) PurchaseWithPoints(ctx context.Context, userID, productID int64) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PurchaseWithPoints", ctx, userID, productID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PurchaseWithPoints indicates an expected call of PurchaseWithPoints.
+func (mr *MockPurchaseServiceMockRecorder) PurchaseWithPoints(ctx, userID, productID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PurchaseWithPoints", reflect.TypeOf((*MockPurchaseService)(nil).PurchaseWithPoints), ctx, userID, productID)
+}
+
 // MockCatalogService is a mock of CatalogService interface.
 type MockCatalogService struct {
 	ctrl     *gomock.Controller

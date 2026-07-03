@@ -40,6 +40,12 @@ type PurchaseService interface {
 	// signature, checks idempotency, and calls ConfirmAndGrant on success.
 	// Non-success events are silently acknowledged (nil error).
 	HandleWebhook(ctx context.Context, payload []byte, sigHeader string) error
+	// PurchaseWithPoints spends points on a product: atomically debits the
+	// user's points balance and grants inventory. Returns ErrProductNotFound
+	// when the product does not exist, ErrMoneyOnly when the product has no
+	// points_price, ErrAlreadyOwned when the user already owns an edit
+	// product, and ErrInsufficientPoints when the balance is too low.
+	PurchaseWithPoints(ctx context.Context, userID, productID int64) (newBalance int64, err error)
 }
 
 // CatalogService is the business-logic contract for catalog operations.

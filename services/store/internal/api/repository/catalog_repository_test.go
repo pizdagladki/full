@@ -16,8 +16,9 @@ func ptr[T any](v T) *T { return &v }
 func TestCatalogRepository_ListProducts(t *testing.T) {
 	t.Parallel()
 
-	cols := []string{"id", "kind", "tier", "name", "price_cents", "is_free"}
+	cols := []string{"id", "kind", "tier", "name", "price_cents", "is_free", "points_price"}
 	tier1 := 1
+	points50 := int64(50)
 
 	tests := []struct {
 		name         string
@@ -29,19 +30,20 @@ func TestCatalogRepository_ListProducts(t *testing.T) {
 	}{
 		{
 			// criterion: 1 — "all products returned when kind is nil" asserts scanned field values:
-			// id, kind, tier (nil for edit, non-nil for distraction), name, price_cents, is_free.
+			// id, kind, tier (nil for edit, non-nil for distraction), name, price_cents, is_free,
+			// and points_price (non-nil for the priced product, null for the money-only one).
 			name: "all products returned when kind is nil",
 			kind: nil,
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols).
-					AddRow(int64(1), "distraction", &tier1, "Spinner", 0, true).
-					AddRow(int64(2), "edit", nil, "Blur", 100, false)
+					AddRow(int64(1), "distraction", &tier1, "Spinner", 0, true, &points50).
+					AddRow(int64(2), "edit", nil, "Blur", 100, false, nil)
 				m.ExpectQuery(`SELECT`).WillReturnRows(rows)
 			},
 			wantLen: 2,
 			wantProducts: []domain.Product{
-				{ID: 1, Kind: "distraction", Tier: ptr(1), Name: "Spinner", PriceCents: 0, IsFree: true},
-				{ID: 2, Kind: "edit", Tier: nil, Name: "Blur", PriceCents: 100, IsFree: false},
+				{ID: 1, Kind: "distraction", Tier: ptr(1), Name: "Spinner", PriceCents: 0, IsFree: true, PointsPrice: ptr(int64(50))},
+				{ID: 2, Kind: "edit", Tier: nil, Name: "Blur", PriceCents: 100, IsFree: false, PointsPrice: nil},
 			},
 		},
 		{
@@ -49,7 +51,7 @@ func TestCatalogRepository_ListProducts(t *testing.T) {
 			kind: ptr("distraction"),
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols).
-					AddRow(int64(1), "distraction", &tier1, "Spinner", 0, true)
+					AddRow(int64(1), "distraction", &tier1, "Spinner", 0, true, &points50)
 				m.ExpectQuery(`SELECT`).WithArgs("distraction").WillReturnRows(rows)
 			},
 			wantLen: 1,
@@ -156,6 +158,16 @@ func TestCatalogRepository_ListProducts(t *testing.T) {
 
 				if p.IsFree != want.IsFree {
 					t.Errorf("products[%d].IsFree = %v, want %v", i, p.IsFree, want.IsFree)
+				}
+
+				// criterion: 1 — points_price is scanned as null (money-only) or the priced value.
+				switch {
+				case want.PointsPrice == nil && p.PointsPrice != nil:
+					t.Errorf("products[%d].PointsPrice = %v, want nil", i, *p.PointsPrice)
+				case want.PointsPrice != nil && p.PointsPrice == nil:
+					t.Errorf("products[%d].PointsPrice = nil, want %d", i, *want.PointsPrice)
+				case want.PointsPrice != nil && p.PointsPrice != nil && *p.PointsPrice != *want.PointsPrice:
+					t.Errorf("products[%d].PointsPrice = %d, want %d", i, *p.PointsPrice, *want.PointsPrice)
 				}
 			}
 

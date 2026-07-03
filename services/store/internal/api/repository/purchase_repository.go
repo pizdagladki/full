@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -33,7 +34,7 @@ func NewPurchaseRepository(pool purchasePoolIface) PurchaseRepository {
 }
 
 const getProductSQL = `
-SELECT id, kind, tier, name, price_cents, is_free
+SELECT id, kind, tier, name, price_cents, is_free, points_price
 FROM products
 WHERE id = $1`
 
@@ -41,7 +42,7 @@ func (r *purchaseRepository) GetProduct(ctx context.Context, productID int64) (*
 	var p domain.Product
 
 	err := r.pool.QueryRow(ctx, getProductSQL, productID).
-		Scan(&p.ID, &p.Kind, &p.Tier, &p.Name, &p.PriceCents, &p.IsFree)
+		Scan(&p.ID, &p.Kind, &p.Tier, &p.Name, &p.PriceCents, &p.IsFree, &p.PointsPrice)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrProductNotFound
@@ -179,4 +180,83 @@ func (r *purchaseRepository) ConfirmAndGrant(
 	}
 
 	return nil
+}
+
+const debitPointsBalanceSQL = `
+UPDATE points_balance SET balance = balance - $1, updated_at = now()
+WHERE user_id = $2 AND balance >= $1
+RETURNING balance`
+
+const insertPointsPurchaseSQL = `
+INSERT INTO purchases (user_id, product_id, provider, provider_ref, amount_cents, status)
+VALUES ($1, $2, 'points', NULL, 0, 'paid')
+RETURNING id`
+
+const insertPointsLedgerSQL = `
+INSERT INTO points_ledger (user_id, delta, reason, ref_id)
+VALUES ($1, $2, 'shop_spend', $3)`
+
+// PurchaseWithPoints atomically debits the user's points balance, records a
+// paid purchase, appends a points_ledger row, and grants inventory — all in
+// a single transaction. Returns domain.ErrInsufficientPoints (and writes
+// nothing) when the balance is lower than pointsPrice.
+func (r *purchaseRepository) PurchaseWithPoints(
+	ctx context.Context,
+	userID, productID, pointsPrice int64,
+	kind string,
+) (int64, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var newBalance int64
+
+	err = tx.QueryRow(ctx, debitPointsBalanceSQL, pointsPrice, userID).Scan(&newBalance)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Insufficient balance (or no points_balance row at all): the deferred
+			// rollback below undoes the (empty) tx — nothing was written.
+			return 0, domain.ErrInsufficientPoints
+		}
+
+		return 0, fmt.Errorf("debit points balance: %w", err)
+	}
+
+	var purchaseID int64
+
+	err = tx.QueryRow(ctx, insertPointsPurchaseSQL, userID, productID).Scan(&purchaseID)
+	if err != nil {
+		return 0, fmt.Errorf("create points purchase: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, insertPointsLedgerSQL, userID, -pointsPrice, strconv.FormatInt(purchaseID, 10))
+	if err != nil {
+		return 0, fmt.Errorf("insert points ledger: %w", err)
+	}
+
+	var upsertSQL string
+	if kind == domain.KindDistraction {
+		upsertSQL = upsertInventoryDistractionSQL
+	} else {
+		upsertSQL = upsertInventoryEditSQL
+	}
+
+	_, err = tx.Exec(ctx, upsertSQL, userID, productID)
+	if err != nil {
+		return 0, fmt.Errorf("upsert inventory: %w", err)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return newBalance, nil
 }
