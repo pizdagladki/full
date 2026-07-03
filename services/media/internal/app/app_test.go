@@ -36,6 +36,22 @@ func (noopClipHandler) GetMP4(c echo.Context) error   { return c.NoContent(http.
 
 var _ delivery.ClipHandler = noopClipHandler{}
 
+// noopKingClipHandler is a minimal KingClipHandler for tests that only
+// exercise the HTTP worker lifecycle, not the king-clip routes.
+type noopKingClipHandler struct{}
+
+func (noopKingClipHandler) Upload(c echo.Context) error {
+	return c.NoContent(http.StatusNotImplemented)
+}
+func (noopKingClipHandler) Current(c echo.Context) error {
+	return c.NoContent(http.StatusNotImplemented)
+}
+func (noopKingClipHandler) Delete(c echo.Context) error {
+	return c.NoContent(http.StatusNotImplemented)
+}
+
+var _ delivery.KingClipHandler = noopKingClipHandler{}
+
 func TestNew(t *testing.T) {
 	t.Parallel()
 
@@ -231,6 +247,10 @@ func TestInitHandlers_Wires(t *testing.T) {
 	if a.clipHandler == nil {
 		t.Fatal("clipHandler is nil after initHandlers")
 	}
+
+	if a.kingClipHandler == nil {
+		t.Fatal("kingClipHandler is nil after initHandlers")
+	}
 }
 
 func TestInitMiddleware_Wires(t *testing.T) {
@@ -296,6 +316,7 @@ func newTestApp(addr string) *App {
 	}
 	a.authMiddleware = middleware.NewAuthMiddleware(noopSessionSvc{}, "session", zap.NewNop())
 	a.clipHandler = noopClipHandler{}
+	a.kingClipHandler = noopKingClipHandler{}
 
 	return a
 }

@@ -30,15 +30,18 @@ type App struct {
 	minioClient *minio.Client
 	redisClient *redis.Client
 
-	clipRepo    repository.ClipRepository
-	sessionRepo repository.SessionRepository
-	objectStore service.ObjectStore
+	clipRepo     repository.ClipRepository
+	sessionRepo  repository.SessionRepository
+	kingClipRepo repository.KingClipRepository
+	objectStore  service.ObjectStore
 
-	clipSvc    service.ClipService
-	sessionSvc service.SessionService
+	clipSvc     service.ClipService
+	sessionSvc  service.SessionService
+	kingClipSvc service.KingClipService
 
-	clipHandler    delivery.ClipHandler
-	authMiddleware *middleware.AuthMiddleware
+	clipHandler     delivery.ClipHandler
+	kingClipHandler delivery.KingClipHandler
+	authMiddleware  *middleware.AuthMiddleware
 }
 
 // New returns an empty App for the given service name.

@@ -6,4 +6,5 @@ import (
 
 func (a *App) initHandlers() {
 	a.clipHandler = delivery.NewClipHandler(a.clipSvc, a.cfg.Clips.MaxUploadBytes, a.logger)
+	a.kingClipHandler = delivery.NewKingClipHandler(a.kingClipSvc, a.cfg.Clips.MaxUploadBytes, a.logger)
 }

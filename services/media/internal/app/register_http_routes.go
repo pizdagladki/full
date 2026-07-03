@@ -25,6 +25,13 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	v1.POST("/clips/:id/convert", a.clipHandler.Convert)
 	v1.GET("/clips/:id/mp4", a.clipHandler.GetMP4)
 
+	// Protected king-of-the-hill clip endpoints — session required. King clips
+	// are a category separate from clips (win-clips): own storage prefix, own
+	// table, no keep-last-10 FIFO.
+	v1.POST("/king-clips", a.kingClipHandler.Upload)
+	v1.GET("/king-clips/current", a.kingClipHandler.Current)
+	v1.DELETE("/king-clips/:id", a.kingClipHandler.Delete)
+
 	return e
 }
 

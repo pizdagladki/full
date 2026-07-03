@@ -276,3 +276,72 @@ func (mr *MockSessionServiceMockRecorder) ResolveSession(ctx, sessionID any) *go
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveSession", reflect.TypeOf((*MockSessionService)(nil).ResolveSession), ctx, sessionID)
 }
+
+// MockKingClipService is a mock of KingClipService interface.
+type MockKingClipService struct {
+	ctrl     *gomock.Controller
+	recorder *MockKingClipServiceMockRecorder
+	isgomock struct{}
+}
+
+// MockKingClipServiceMockRecorder is the mock recorder for MockKingClipService.
+type MockKingClipServiceMockRecorder struct {
+	mock *MockKingClipService
+}
+
+// NewMockKingClipService creates a new mock instance.
+func NewMockKingClipService(ctrl *gomock.Controller) *MockKingClipService {
+	mock := &MockKingClipService{ctrl: ctrl}
+	mock.recorder = &MockKingClipServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockKingClipService) EXPECT() *MockKingClipServiceMockRecorder {
+	return m.recorder
+}
+
+// CurrentURL mocks base method.
+func (m *MockKingClipService) CurrentURL(ctx context.Context, hillType string) (string, int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CurrentURL", ctx, hillType)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(int64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// CurrentURL indicates an expected call of CurrentURL.
+func (mr *MockKingClipServiceMockRecorder) CurrentURL(ctx, hillType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentURL", reflect.TypeOf((*MockKingClipService)(nil).CurrentURL), ctx, hillType)
+}
+
+// Delete mocks base method.
+func (m *MockKingClipService) Delete(ctx context.Context, userID, id int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Delete", ctx, userID, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockKingClipServiceMockRecorder) Delete(ctx, userID, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockKingClipService)(nil).Delete), ctx, userID, id)
+}
+
+// Upload mocks base method.
+func (m *MockKingClipService) Upload(ctx context.Context, userID int64, hillType string, blinkTsMs int64, contentType string, size int64, r io.Reader) (domain.KingClip, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Upload", ctx, userID, hillType, blinkTsMs, contentType, size, r)
+	ret0, _ := ret[0].(domain.KingClip)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Upload indicates an expected call of Upload.
+func (mr *MockKingClipServiceMockRecorder) Upload(ctx, userID, hillType, blinkTsMs, contentType, size, r any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Upload", reflect.TypeOf((*MockKingClipService)(nil).Upload), ctx, userID, hillType, blinkTsMs, contentType, size, r)
+}

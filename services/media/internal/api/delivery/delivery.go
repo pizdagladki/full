@@ -24,3 +24,15 @@ type ClipHandler interface {
 	// GetMP4 handles GET /v1/clips/:id/mp4.
 	GetMP4(c echo.Context) error
 }
+
+// KingClipHandler is the transport contract for the king-of-the-hill clips
+// resource. King clips are a category separate from clips (win-clips): their
+// own routes, own storage prefix, no keep-last-10 FIFO.
+type KingClipHandler interface {
+	// Upload handles POST /v1/king-clips.
+	Upload(c echo.Context) error
+	// Current handles GET /v1/king-clips/current.
+	Current(c echo.Context) error
+	// Delete handles DELETE /v1/king-clips/:id.
+	Delete(c echo.Context) error
+}

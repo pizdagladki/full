@@ -66,3 +66,30 @@ type SessionService interface {
 	// Returns the repository.ErrSessionNotFound sentinel when absent/expired.
 	ResolveSession(ctx context.Context, sessionID string) (int64, error)
 }
+
+// KingClipService is the business-logic contract for king-of-the-hill clip
+// operations. King clips are a category separate from win-clips (ClipService):
+// they are not subject to the per-user keep-last-10 FIFO rotation, and their
+// lifecycle is tied to a hill term (ExpiresAt) instead.
+type KingClipService interface {
+	// Upload validates, stores, and records a new king clip for userID on the
+	// given hill. Returns domain.ErrInvalidHillType, domain.ErrInvalidContentType,
+	// domain.ErrTooLarge, or domain.ErrInvalidBlinkTs on bad input. On success the
+	// prior king clip(s) for that hill_type are superseded (object + metadata
+	// removed, best-effort).
+	Upload(
+		ctx context.Context, userID int64, hillType string, blinkTsMs int64,
+		contentType string, size int64, r io.Reader,
+	) (domain.KingClip, error)
+
+	// CurrentURL returns a pre-signed download URL and the blink_ts_ms for the
+	// current (latest non-expired) king clip on hillType. Returns
+	// domain.ErrInvalidHillType on an unknown hill type, and
+	// repository.ErrKingClipNotFound when no king clip is currently live.
+	CurrentURL(ctx context.Context, hillType string) (url string, blinkTsMs int64, err error)
+
+	// Delete removes the king clip identified by id, owned by userID (object +
+	// metadata). Returns repository.ErrKingClipNotFound when the clip doesn't
+	// exist or belongs to a different user.
+	Delete(ctx context.Context, userID, id int64) error
+}

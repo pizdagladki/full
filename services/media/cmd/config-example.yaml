@@ -16,3 +16,7 @@ session:
 clips:
   max_upload_bytes: 52428800
   download_url_ttl: "15m"
+king_clips:
+  daily_ttl: "24h"
+  monthly_ttl: "720h"
+  ranked_ttl: "24h"
