@@ -11,6 +11,8 @@ import {
   Results,
   Profile,
   Store,
+  KothBattle,
+  KothResults,
   AuthProvider,
   Login,
   ProtectedRoute,
@@ -110,6 +112,22 @@ export const routes: RouteObject[] = [
         element: (
           <ProtectedRoute>
             <Battle />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'koth/battle',
+        element: (
+          <ProtectedRoute>
+            <KothBattle />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'koth/results',
+        element: (
+          <ProtectedRoute>
+            <KothResults />
           </ProtectedRoute>
         ),
       },
