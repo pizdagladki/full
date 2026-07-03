@@ -115,6 +115,21 @@ func (mr *MockPurchaseRepositoryMockRecorder) IsOwned(ctx, userID, productID any
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsOwned", reflect.TypeOf((*MockPurchaseRepository)(nil).IsOwned), ctx, userID, productID)
 }
 
+// PurchaseWithPoints mocks base method.
+func (m *MockPurchaseRepository) PurchaseWithPoints(ctx context.Context, userID, productID, pointsPrice int64, kind string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PurchaseWithPoints", ctx, userID, productID, pointsPrice, kind)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PurchaseWithPoints indicates an expected call of PurchaseWithPoints.
+func (mr *MockPurchaseRepositoryMockRecorder) PurchaseWithPoints(ctx, userID, productID, pointsPrice, kind any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PurchaseWithPoints", reflect.TypeOf((*MockPurchaseRepository)(nil).PurchaseWithPoints), ctx, userID, productID, pointsPrice, kind)
+}
+
 // WebhookEventExists mocks base method.
 func (m *MockPurchaseRepository) WebhookEventExists(ctx context.Context, eventID string) (bool, error) {
 	m.ctrl.T.Helper()

@@ -28,16 +28,19 @@ func newPool(t *testing.T) pgxmock.PgxPoolIface {
 func TestPurchaseRepository_GetProduct(t *testing.T) {
 	t.Parallel()
 
-	cols := []string{"id", "kind", "tier", "name", "price_cents", "is_free"}
+	cols := []string{"id", "kind", "tier", "name", "price_cents", "is_free", "points_price"}
+	points50 := int64(50)
 
 	tests := []struct {
-		name      string
-		productID int64
-		setup     func(m pgxmock.PgxPoolIface)
-		wantID    int64
-		wantKind  string
-		wantErr   bool
-		wantErrIs error
+		name        string
+		productID   int64
+		setup       func(m pgxmock.PgxPoolIface)
+		wantID      int64
+		wantKind    string
+		wantErr     bool
+		wantErrIs   error
+		wantPoints  *int64 // non-nil (incl explicit nil-check via wantPointsSet) checked below
+		checkPoints bool
 	}{
 		{
 			// criterion: 1 — GetProduct returns product fields correctly when found
@@ -45,11 +48,27 @@ func TestPurchaseRepository_GetProduct(t *testing.T) {
 			productID: 42,
 			setup: func(m pgxmock.PgxPoolIface) {
 				rows := pgxmock.NewRows(cols).
-					AddRow(int64(42), "edit", nil, "Blur", 500, false)
+					AddRow(int64(42), "edit", nil, "Blur", 500, false, nil)
 				m.ExpectQuery(`SELECT`).WithArgs(int64(42)).WillReturnRows(rows)
 			},
-			wantID:   42,
-			wantKind: "edit",
+			wantID:      42,
+			wantKind:    "edit",
+			checkPoints: true,
+			wantPoints:  nil,
+		},
+		{
+			// criterion: 1 — GetProduct scans a non-null points_price for a dual-priced product
+			name:      "found returns product with points price",
+			productID: 43,
+			setup: func(m pgxmock.PgxPoolIface) {
+				rows := pgxmock.NewRows(cols).
+					AddRow(int64(43), "distraction", nil, "Spinner", 100, false, &points50)
+				m.ExpectQuery(`SELECT`).WithArgs(int64(43)).WillReturnRows(rows)
+			},
+			wantID:      43,
+			wantKind:    "distraction",
+			checkPoints: true,
+			wantPoints:  &points50,
 		},
 		{
 			// criterion: 1 — GetProduct returns ErrProductNotFound for pgx.ErrNoRows
@@ -103,6 +122,18 @@ func TestPurchaseRepository_GetProduct(t *testing.T) {
 
 			if got.Kind != tt.wantKind {
 				t.Errorf("product.Kind = %q, want %q", got.Kind, tt.wantKind)
+			}
+
+			// criterion: 1 — points_price is scanned as null or the priced value.
+			if tt.checkPoints {
+				switch {
+				case tt.wantPoints == nil && got.PointsPrice != nil:
+					t.Errorf("product.PointsPrice = %v, want nil", *got.PointsPrice)
+				case tt.wantPoints != nil && got.PointsPrice == nil:
+					t.Errorf("product.PointsPrice = nil, want %d", *tt.wantPoints)
+				case tt.wantPoints != nil && got.PointsPrice != nil && *got.PointsPrice != *tt.wantPoints:
+					t.Errorf("product.PointsPrice = %d, want %d", *got.PointsPrice, *tt.wantPoints)
+				}
 			}
 
 			if err = mock.ExpectationsWereMet(); err != nil {
@@ -551,6 +582,219 @@ func TestPurchaseRepository_FindByProviderRef(t *testing.T) {
 
 			if got.UserID != tt.wantUserID {
 				t.Errorf("purchase.UserID = %d, want %d", got.UserID, tt.wantUserID)
+			}
+
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unfulfilled expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestPurchaseRepository_PurchaseWithPoints(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		userID      int64
+		productID   int64
+		pointsPrice int64
+		kind        string
+		setup       func(m pgxmock.PgxPoolIface)
+		wantBalance int64
+		wantErr     bool
+		wantErrIs   error
+	}{
+		{
+			// criterion: 2 — a single transaction debits points_balance, records the
+			// purchase, appends a negative-delta ledger row keyed by the purchase id,
+			// and increments inventory quantity for a distraction.
+			name:        "distraction debits balance appends ledger and increments inventory",
+			userID:      1,
+			productID:   10,
+			pointsPrice: 50,
+			kind:        domain.KindDistraction,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectQuery(`UPDATE points_balance`).
+					WithArgs(int64(50), int64(1)).
+					WillReturnRows(pgxmock.NewRows([]string{"balance"}).AddRow(int64(450)))
+				m.ExpectQuery(`INSERT INTO purchases`).
+					WithArgs(int64(1), int64(10)).
+					WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(7)))
+				m.ExpectExec(`INSERT INTO points_ledger`).
+					WithArgs(int64(1), int64(-50), "7").
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				m.ExpectExec(`INSERT INTO inventory`).
+					WithArgs(int64(1), int64(10)).
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				m.ExpectCommit()
+			},
+			wantBalance: 450,
+		},
+		{
+			// criterion: 2 — an edit product uses DO NOTHING (own-forever) instead of
+			// incrementing quantity.
+			name:        "edit debits balance appends ledger and grants own-forever",
+			userID:      2,
+			productID:   20,
+			pointsPrice: 30,
+			kind:        domain.KindEdit,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectQuery(`UPDATE points_balance`).
+					WithArgs(int64(30), int64(2)).
+					WillReturnRows(pgxmock.NewRows([]string{"balance"}).AddRow(int64(70)))
+				m.ExpectQuery(`INSERT INTO purchases`).
+					WithArgs(int64(2), int64(20)).
+					WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(8)))
+				m.ExpectExec(`INSERT INTO points_ledger`).
+					WithArgs(int64(2), int64(-30), "8").
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				m.ExpectExec(`INSERT INTO inventory`).
+					WithArgs(int64(2), int64(20)).
+					WillReturnResult(pgxmock.NewResult("INSERT", 0))
+				m.ExpectCommit()
+			},
+			wantBalance: 70,
+		},
+		{
+			// criterion: 3 — insufficient balance: the conditional UPDATE returns no
+			// rows, the tx is rolled back, and NOTHING past the debit is written
+			// (no purchase insert, no ledger insert, no inventory grant expected here).
+			name:        "insufficient balance returns ErrInsufficientPoints and writes nothing",
+			userID:      3,
+			productID:   10,
+			pointsPrice: 999,
+			kind:        domain.KindDistraction,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectQuery(`UPDATE points_balance`).
+					WithArgs(int64(999), int64(3)).
+					WillReturnError(pgx.ErrNoRows)
+				m.ExpectRollback()
+				// NOTE: no ExpectQuery for purchases, no ExpectExec for ledger/inventory —
+				// asserting these are never called is enforced by mock.ExpectationsWereMet().
+			},
+			wantErr:   true,
+			wantErrIs: domain.ErrInsufficientPoints,
+		},
+		{
+			name:        "debit query error propagates and rolls back",
+			userID:      4,
+			productID:   10,
+			pointsPrice: 10,
+			kind:        domain.KindDistraction,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectQuery(`UPDATE points_balance`).
+					WithArgs(int64(10), int64(4)).
+					WillReturnError(errors.New("db down"))
+				m.ExpectRollback()
+			},
+			wantErr: true,
+		},
+		{
+			name:        "create purchase error propagates and rolls back",
+			userID:      5,
+			productID:   10,
+			pointsPrice: 10,
+			kind:        domain.KindDistraction,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectQuery(`UPDATE points_balance`).
+					WithArgs(int64(10), int64(5)).
+					WillReturnRows(pgxmock.NewRows([]string{"balance"}).AddRow(int64(0)))
+				m.ExpectQuery(`INSERT INTO purchases`).
+					WithArgs(int64(5), int64(10)).
+					WillReturnError(errors.New("db down"))
+				m.ExpectRollback()
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 5 — a failed ledger insert rolls back the whole transaction,
+			// including the points debit that already happened in-tx.
+			name:        "ledger insert error rolls back the points debit",
+			userID:      6,
+			productID:   10,
+			pointsPrice: 10,
+			kind:        domain.KindDistraction,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectQuery(`UPDATE points_balance`).
+					WithArgs(int64(10), int64(6)).
+					WillReturnRows(pgxmock.NewRows([]string{"balance"}).AddRow(int64(0)))
+				m.ExpectQuery(`INSERT INTO purchases`).
+					WithArgs(int64(6), int64(10)).
+					WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(9)))
+				m.ExpectExec(`INSERT INTO points_ledger`).
+					WithArgs(int64(6), int64(-10), "9").
+					WillReturnError(errors.New("db down"))
+				m.ExpectRollback()
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 5 — a failed inventory grant rolls back the points debit —
+			// atomicity: the whole spend is undone, not just the inventory step.
+			name:        "inventory upsert error rolls back the points debit",
+			userID:      7,
+			productID:   10,
+			pointsPrice: 10,
+			kind:        domain.KindDistraction,
+			setup: func(m pgxmock.PgxPoolIface) {
+				m.ExpectBegin()
+				m.ExpectQuery(`UPDATE points_balance`).
+					WithArgs(int64(10), int64(7)).
+					WillReturnRows(pgxmock.NewRows([]string{"balance"}).AddRow(int64(0)))
+				m.ExpectQuery(`INSERT INTO purchases`).
+					WithArgs(int64(7), int64(10)).
+					WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(11)))
+				m.ExpectExec(`INSERT INTO points_ledger`).
+					WithArgs(int64(7), int64(-10), "11").
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+				m.ExpectExec(`INSERT INTO inventory`).
+					WithArgs(int64(7), int64(10)).
+					WillReturnError(errors.New("db down"))
+				m.ExpectRollback()
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock := newPool(t)
+			tt.setup(mock)
+
+			repo := repository.NewPurchaseRepository(mock)
+			got, err := repo.PurchaseWithPoints(context.Background(), tt.userID, tt.productID, tt.pointsPrice, tt.kind)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("PurchaseWithPoints() error = nil, want error")
+				}
+
+				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("PurchaseWithPoints() error = %v, want %v", err, tt.wantErrIs)
+				}
+
+				if err = mock.ExpectationsWereMet(); err != nil {
+					t.Errorf("unfulfilled expectations: %v", err)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("PurchaseWithPoints() unexpected error = %v", err)
+			}
+
+			if got != tt.wantBalance {
+				t.Errorf("PurchaseWithPoints() balance = %d, want %d", got, tt.wantBalance)
 			}
 
 			if err = mock.ExpectationsWereMet(); err != nil {

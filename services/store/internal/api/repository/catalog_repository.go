@@ -27,12 +27,12 @@ func NewCatalogRepository(pool rowsQuerier) CatalogRepository {
 }
 
 const listProductsAllSQL = `
-SELECT id, kind, tier, name, price_cents, is_free
+SELECT id, kind, tier, name, price_cents, is_free, points_price
 FROM products
 ORDER BY id`
 
 const listProductsByKindSQL = `
-SELECT id, kind, tier, name, price_cents, is_free
+SELECT id, kind, tier, name, price_cents, is_free, points_price
 FROM products
 WHERE kind = $1
 ORDER BY id`
@@ -59,7 +59,7 @@ func (r *catalogRepository) ListProducts(ctx context.Context, kind *string) ([]d
 	for rows.Next() {
 		var p domain.Product
 
-		err = rows.Scan(&p.ID, &p.Kind, &p.Tier, &p.Name, &p.PriceCents, &p.IsFree)
+		err = rows.Scan(&p.ID, &p.Kind, &p.Tier, &p.Name, &p.PriceCents, &p.IsFree, &p.PointsPrice)
 		if err != nil {
 			return nil, fmt.Errorf("scan product: %w", err)
 		}
