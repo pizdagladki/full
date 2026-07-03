@@ -7,4 +7,5 @@ import (
 func (a *App) initRepositories() {
 	a.sessionRepo = repository.NewSessionRepository(a.redisClient)
 	a.roomRepo = repository.NewRoomRepository(a.redisClient, a.cfg.Signaling.RoomTTL)
+	a.roomCodeRepo = repository.NewRoomCodeRepository(a.redisClient, a.cfg.Signaling.RoomCodeTTL)
 }

@@ -143,6 +143,12 @@ func (h *signalingHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 			joinedRoomID = env.RoomID
 
+		case domain.TypeCreateRoom:
+			h.handleCreateRoom(ctx, conn, adapted, userID, &joinedRoomID)
+
+		case domain.TypeJoinRoom:
+			h.handleJoinRoom(ctx, conn, adapted, userID, env.Code, &joinedRoomID)
+
 		case domain.TypeSDP, domain.TypeICE:
 			relayErr := h.svc.Relay(ctx, adapted, env.RoomID, raw)
 			if relayErr != nil {
@@ -230,6 +236,101 @@ func (h *signalingHandler) handleJoinError(
 	}
 
 	_ = joinedRoomID // joinedRoomID unchanged on failure
+}
+
+// handleCreateRoom processes a create_room message: enforces the
+// one-room-per-connection invariant, calls svc.CreateRoom, and on success
+// writes a room_created frame and records the new joinedRoomID.
+func (h *signalingHandler) handleCreateRoom(
+	ctx context.Context,
+	conn *websocket.Conn,
+	adapted service.Conn,
+	userID int64,
+	joinedRoomID *string,
+) {
+	if *joinedRoomID != "" {
+		sendErrorFrame(ctx, conn, domain.ErrAlreadyInRoom.Error())
+
+		return
+	}
+
+	roomID, code, createErr := h.svc.CreateRoom(ctx, adapted)
+	if createErr != nil {
+		h.logger.Error("create_room failed",
+			zap.Int64("user_id", userID),
+			zap.Error(createErr),
+		)
+		sendErrorFrame(ctx, conn, internalError)
+
+		return
+	}
+
+	*joinedRoomID = roomID
+
+	writeErr := conn.Write(ctx, websocket.MessageText, domain.RoomCreatedBytes(roomID, code))
+	if writeErr != nil {
+		h.logger.Debug("write room_created failed",
+			zap.Int64("user_id", userID),
+			zap.Error(writeErr),
+		)
+	}
+}
+
+// handleJoinRoom processes a join_room message: enforces the
+// one-room-per-connection invariant, calls svc.JoinByCode, and on success
+// writes a room_joined frame and records the new joinedRoomID.
+func (h *signalingHandler) handleJoinRoom(
+	ctx context.Context,
+	conn *websocket.Conn,
+	adapted service.Conn,
+	userID int64,
+	code string,
+	joinedRoomID *string,
+) {
+	if *joinedRoomID != "" {
+		sendErrorFrame(ctx, conn, domain.ErrAlreadyInRoom.Error())
+
+		return
+	}
+
+	roomID, joinErr := h.svc.JoinByCode(ctx, adapted, code)
+	if joinErr != nil {
+		h.handleJoinByCodeError(ctx, conn, joinErr)
+
+		return
+	}
+
+	*joinedRoomID = roomID
+
+	writeErr := conn.Write(ctx, websocket.MessageText, domain.RoomJoinedBytes(roomID))
+	if writeErr != nil {
+		h.logger.Debug("write room_joined failed",
+			zap.Int64("user_id", userID),
+			zap.Error(writeErr),
+		)
+	}
+}
+
+// handleJoinByCodeError sends an appropriate error frame for a join_room
+// failure. ErrInvalidCode keeps the connection open (the client may retry
+// with a corrected code); ErrRoomFull closes it, mirroring handleJoinError.
+func (h *signalingHandler) handleJoinByCodeError(ctx context.Context, conn *websocket.Conn, joinErr error) {
+	var msg string
+
+	switch {
+	case errors.Is(joinErr, domain.ErrInvalidCode):
+		msg = domain.ErrInvalidCode.Error()
+	case errors.Is(joinErr, domain.ErrRoomFull):
+		msg = domain.ErrRoomFull.Error()
+	default:
+		msg = internalError
+	}
+
+	sendErrorFrame(ctx, conn, msg)
+
+	if errors.Is(joinErr, domain.ErrRoomFull) {
+		_ = conn.Close(websocket.StatusPolicyViolation, "room full")
+	}
 }
 
 // leaveOnDisconnect calls svc.Leave with a fresh context detached from the

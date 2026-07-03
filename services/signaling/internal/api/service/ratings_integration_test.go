@@ -73,6 +73,7 @@ func newRatingsFixture(t *testing.T, spy *spyRatingsClient, times []time.Time, c
 	ct := &capturedTimer{}
 	af := fakeAfterFunc(ct)
 
+	roomCodeRepo := repomocks.NewMockRoomCodeRepository(ctrl)
 	svc := NewSignalingService(
 		zap.NewNop(),
 		roomRepo,
@@ -80,6 +81,8 @@ func newRatingsFixture(t *testing.T, spy *spyRatingsClient, times []time.Time, c
 		af,
 		confirmBuf,
 		spy,
+		roomCodeRepo,
+		newTestRoomIDGen(),
 	).(*signalingService)
 
 	return svc, ct

@@ -20,6 +20,7 @@ func TestLoad(t *testing.T) {
 		wantAddr              string
 		wantCookie            string
 		wantRoomTTL           time.Duration
+		wantRoomCodeTTL       time.Duration
 		wantKeepaliveInterval time.Duration
 		wantKeepalivePingTO   time.Duration
 		wantRatingsURL        string
@@ -68,6 +69,30 @@ func TestLoad(t *testing.T) {
 			wantAddr:    defaultAddr,
 			wantCookie:  "my_session",
 			wantRoomTTL: time.Hour,
+		},
+		{
+			// criterion: room-code-1 — env mode room_code_ttl default when unset
+			name:            "env mode default room code TTL",
+			isDocker:        true,
+			env:             map[string]string{"REDIS_ADDR": validAddr, "RATINGS_BASE_URL": validRatingsURL},
+			wantAddr:        defaultAddr,
+			wantCookie:      defaultSessionCookie,
+			wantRoomTTL:     defaultRoomTTL,
+			wantRoomCodeTTL: defaultRoomCodeTTL,
+		},
+		{
+			// criterion: room-code-1 — env mode custom room_code_ttl overrides the default
+			name:     "env mode custom room code TTL",
+			isDocker: true,
+			env: map[string]string{
+				"REDIS_ADDR":        validAddr,
+				"SIG_ROOM_CODE_TTL": "5m",
+				"RATINGS_BASE_URL":  validRatingsURL,
+			},
+			wantAddr:        defaultAddr,
+			wantCookie:      defaultSessionCookie,
+			wantRoomTTL:     defaultRoomTTL,
+			wantRoomCodeTTL: 5 * time.Minute,
 		},
 		{
 			name:     "env mode custom keepalive settings",
@@ -148,6 +173,42 @@ func TestLoad(t *testing.T) {
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
 					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  room_ttl: \"not-a-duration\"\n",
+				)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: room-code-1 — file mode reads room_code_ttl
+			name: "file mode reads room_code_ttl",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  room_code_ttl: \"5m\"\n",
+				)
+			},
+			wantAddr:        ":8081",
+			wantCookie:      defaultSessionCookie,
+			wantRoomTTL:     defaultRoomTTL,
+			wantRoomCodeTTL: 5 * time.Minute,
+		},
+		{
+			// criterion: room-code-1 — file mode room_code_ttl falls back to default when unset
+			name: "file mode empty room_code_ttl falls back to default",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\n",
+				)
+			},
+			wantAddr:        ":8081",
+			wantCookie:      defaultSessionCookie,
+			wantRoomTTL:     defaultRoomTTL,
+			wantRoomCodeTTL: defaultRoomCodeTTL,
+		},
+		{
+			// criterion: room-code-1 — fails if an invalid room_code_ttl does not fail Load
+			name: "file mode invalid room_code_ttl duration errors",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"http:\n  addr: \":8081\"\nredis:\n  addr: \""+validAddr+"\"\nratings_base_url: \""+validRatingsURL+"\"\nsignaling:\n  room_code_ttl: \"not-a-duration\"\n",
 				)
 			},
 			wantErr: true,
@@ -249,6 +310,10 @@ func TestLoad(t *testing.T) {
 
 			if tt.wantRoomTTL != 0 && cfg.Signaling.RoomTTL != tt.wantRoomTTL {
 				t.Errorf("room_ttl = %v, want %v", cfg.Signaling.RoomTTL, tt.wantRoomTTL)
+			}
+
+			if tt.wantRoomCodeTTL != 0 && cfg.Signaling.RoomCodeTTL != tt.wantRoomCodeTTL {
+				t.Errorf("room_code_ttl = %v, want %v", cfg.Signaling.RoomCodeTTL, tt.wantRoomCodeTTL) // criterion: room-code-1
 			}
 
 			if tt.wantKeepaliveInterval != 0 && cfg.Signaling.KeepaliveInterval != tt.wantKeepaliveInterval {

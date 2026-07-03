@@ -43,6 +43,16 @@ type (
 		// Returns ErrNotMember if conn is not in the room, or ErrMatchFinished if
 		// an outcome was already decided (idempotent).
 		ReportEvent(ctx context.Context, conn Conn, roomID string, eventType string) error
+
+		// CreateRoom generates a fresh room_id, registers the creator as member 1 of a
+		// new UNRANKED private room, stores an invite code→room mapping, and returns the
+		// room_id and the shareable code.
+		CreateRoom(ctx context.Context, conn Conn) (roomID string, code string, err error)
+
+		// JoinByCode resolves an invite code to its room_id and joins the caller as the
+		// second member (unranked). Returns ErrInvalidCode for an unknown/expired code,
+		// ErrRoomFull if the room already has two members.
+		JoinByCode(ctx context.Context, conn Conn, code string) (roomID string, err error)
 	}
 
 	// RatingsClient posts the decided match result to the ratings service.

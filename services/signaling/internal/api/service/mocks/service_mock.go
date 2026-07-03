@@ -105,6 +105,22 @@ func (m *MockSignalingService) EXPECT() *MockSignalingServiceMockRecorder {
 	return m.recorder
 }
 
+// CreateRoom mocks base method.
+func (m *MockSignalingService) CreateRoom(ctx context.Context, conn service.Conn) (string, string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateRoom", ctx, conn)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(string)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// CreateRoom indicates an expected call of CreateRoom.
+func (mr *MockSignalingServiceMockRecorder) CreateRoom(ctx, conn any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateRoom", reflect.TypeOf((*MockSignalingService)(nil).CreateRoom), ctx, conn)
+}
+
 // Join mocks base method.
 func (m *MockSignalingService) Join(ctx context.Context, conn service.Conn, roomID, mode string) error {
 	m.ctrl.T.Helper()
@@ -117,6 +133,21 @@ func (m *MockSignalingService) Join(ctx context.Context, conn service.Conn, room
 func (mr *MockSignalingServiceMockRecorder) Join(ctx, conn, roomID, mode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Join", reflect.TypeOf((*MockSignalingService)(nil).Join), ctx, conn, roomID, mode)
+}
+
+// JoinByCode mocks base method.
+func (m *MockSignalingService) JoinByCode(ctx context.Context, conn service.Conn, code string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "JoinByCode", ctx, conn, code)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// JoinByCode indicates an expected call of JoinByCode.
+func (mr *MockSignalingServiceMockRecorder) JoinByCode(ctx, conn, code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "JoinByCode", reflect.TypeOf((*MockSignalingService)(nil).JoinByCode), ctx, conn, code)
 }
 
 // Leave mocks base method.

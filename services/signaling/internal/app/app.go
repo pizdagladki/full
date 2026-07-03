@@ -23,8 +23,9 @@ type App struct {
 
 	redisClient *redis.Client
 
-	sessionRepo repository.SessionRepository
-	roomRepo    repository.RoomRepository
+	sessionRepo  repository.SessionRepository
+	roomRepo     repository.RoomRepository
+	roomCodeRepo repository.RoomCodeRepository
 
 	signalingSvc service.SignalingService
 
