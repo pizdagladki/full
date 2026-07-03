@@ -43,11 +43,15 @@ func (s *pointsService) Credit(ctx context.Context, in domain.PointsCredit) (int
 		return 0, fmt.Errorf("credit points: %w", err)
 	}
 
-	err = s.cache.SetBalance(ctx, in.UserID, balance)
+	// Invalidate rather than write-through: concurrent credits' out-of-tx
+	// writes have no ordering, so writing the balance here could leave the
+	// cache stuck at a stale intermediate value forever. Deleting forces the
+	// next GetBalance to repopulate from Postgres (the source of truth). A
+	// failed delete is logged and swallowed — the bounded TTL on the read
+	// path's SetBalance time-boxes any resulting staleness.
+	err = s.cache.DeleteBalance(ctx, in.UserID)
 	if err != nil {
-		// Postgres remains the source of truth; a cache write failure must
-		// not fail the credit.
-		s.logger.Warn("set cached points balance after credit", zap.Int64("user_id", in.UserID), zap.Error(err))
+		s.logger.Warn("invalidate cached points balance after credit", zap.Int64("user_id", in.UserID), zap.Error(err))
 	}
 
 	return balance, nil

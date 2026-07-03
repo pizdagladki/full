@@ -191,15 +191,41 @@ func TestLoad_PointsAmounts(t *testing.T) {
 		wantMatch   int64
 		wantLevel   int64
 		wantMissing bool // reason absent from the map entirely
+		wantErr     bool
 	}{
 		{
-			// criterion: points-config — env mode populates placeholder amounts
-			// (match_win, level_up) since per-reason env vars aren't required.
-			name:      "env mode populates placeholder points amounts",
-			isDocker:  true,
-			env:       mergeMaps(map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr}, stripeEnv),
-			wantMatch: 10,
-			wantLevel: 25,
+			// criterion: points-config — env mode reads amounts from the
+			// POINTS_AMOUNTS JSON env var, NOT a hardcoded Go literal.
+			name:     "env mode reads points amounts from POINTS_AMOUNTS json",
+			isDocker: true,
+			env: mergeMaps(map[string]string{
+				"POSTGRES_DSN":   validDSN,
+				"REDIS_ADDR":     validAddr,
+				"POINTS_AMOUNTS": `{"match_win":7,"level_up":8}`,
+			}, stripeEnv),
+			wantMatch: 7,
+			wantLevel: 8,
+		},
+		{
+			// criterion: points-config — an unset POINTS_AMOUNTS is valid and
+			// yields an empty map (not an error, not a hardcoded default);
+			// a config-driven reason then resolves to a non-positive delta.
+			name:        "env mode unset POINTS_AMOUNTS yields empty map",
+			isDocker:    true,
+			env:         mergeMaps(map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr}, stripeEnv),
+			wantMissing: true,
+		},
+		{
+			// criterion: points-config — malformed POINTS_AMOUNTS JSON fails
+			// config load fast at startup, like the other validated fields.
+			name:     "env mode malformed POINTS_AMOUNTS json fails load",
+			isDocker: true,
+			env: mergeMaps(map[string]string{
+				"POSTGRES_DSN":   validDSN,
+				"REDIS_ADDR":     validAddr,
+				"POINTS_AMOUNTS": `{not-valid-json`,
+			}, stripeEnv),
+			wantErr: true,
 		},
 		{
 			// criterion: points-config — YAML mode reads points.amounts from the file,
@@ -240,6 +266,13 @@ func TestLoad_PointsAmounts(t *testing.T) {
 			}
 
 			cfg, err := Load(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error")
+				}
+
+				return
+			}
 			if err != nil {
 				t.Fatalf("Load() error = %v", err)
 			}

@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -112,6 +113,17 @@ func TestPointsCache_SetBalance(t *testing.T) {
 
 	if val != "99" {
 		t.Errorf("stored value = %q, want %q", val, "99")
+	}
+
+	// criterion: cache-ttl — SetBalance must set a bounded TTL (FIX 1), not a
+	// value that never expires, so any residual staleness is time-boxed.
+	ttl := mr.TTL("points:balance:10")
+	if ttl <= 0 {
+		t.Errorf("TTL on points:balance:10 = %v, want a positive bounded TTL", ttl)
+	}
+
+	if ttl > 5*time.Minute {
+		t.Errorf("TTL on points:balance:10 = %v, want <= 5m", ttl)
 	}
 }
 

@@ -4,11 +4,18 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
 const pointsBalanceKeyPrefix = "points:balance:"
+
+// pointsBalanceCacheTTL bounds how long a cached balance can live. The write
+// path invalidates (deletes) on every credit rather than writing a
+// potentially-stale value, but a failed delete (or any other cause of
+// staleness) is time-boxed by this TTL rather than sticking forever.
+const pointsBalanceCacheTTL = 5 * time.Minute
 
 type pointsCacheRepository struct {
 	client *redis.Client
@@ -42,7 +49,7 @@ func (r *pointsCacheRepository) GetBalance(ctx context.Context, userID int64) (i
 }
 
 func (r *pointsCacheRepository) SetBalance(ctx context.Context, userID, balance int64) error {
-	err := r.client.Set(ctx, pointsBalanceKey(userID), balance, 0).Err()
+	err := r.client.Set(ctx, pointsBalanceKey(userID), balance, pointsBalanceCacheTTL).Err()
 	if err != nil {
 		return fmt.Errorf("set cached points balance: %w", err)
 	}

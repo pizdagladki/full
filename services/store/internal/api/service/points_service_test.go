@@ -33,14 +33,15 @@ func TestPointsService_Credit(t *testing.T) {
 		{
 			// criterion: 1, 4 — config-driven amount is resolved by reason (match_win)
 			// when no explicit delta is given, and the credit appends+increments via
-			// the repository in one call, then the cache is updated.
+			// the repository in one call, then the cache is INVALIDATED (not
+			// write-through) so the next read repopulates from Postgres.
 			name: "config driven amount resolved for reason with no explicit delta",
 			in:   domain.PointsCredit{UserID: 1, Reason: "match_win", RefID: "m-1"},
 			setupRepo: func(r *repomocks.MockPointsRepository) {
 				r.EXPECT().Credit(ctx, int64(1), int64(10), "match_win", "m-1").Return(int64(10), true, nil)
 			},
 			setupCache: func(c *repomocks.MockPointsCache) {
-				c.EXPECT().SetBalance(ctx, int64(1), int64(10)).Return(nil)
+				c.EXPECT().DeleteBalance(ctx, int64(1)).Return(nil)
 			},
 			wantBalance: 10,
 		},
@@ -53,7 +54,7 @@ func TestPointsService_Credit(t *testing.T) {
 				r.EXPECT().Credit(ctx, int64(2), int64(25), "level_up", "l-1").Return(int64(25), true, nil)
 			},
 			setupCache: func(c *repomocks.MockPointsCache) {
-				c.EXPECT().SetBalance(ctx, int64(2), int64(25)).Return(nil)
+				c.EXPECT().DeleteBalance(ctx, int64(2)).Return(nil)
 			},
 			wantBalance: 25,
 		},
@@ -65,21 +66,22 @@ func TestPointsService_Credit(t *testing.T) {
 				r.EXPECT().Credit(ctx, int64(3), int64(999), "match_win", "m-2").Return(int64(999), true, nil)
 			},
 			setupCache: func(c *repomocks.MockPointsCache) {
-				c.EXPECT().SetBalance(ctx, int64(3), int64(999)).Return(nil)
+				c.EXPECT().DeleteBalance(ctx, int64(3)).Return(nil)
 			},
 			wantBalance: 999,
 		},
 		{
 			// criterion: 2 — a duplicate ref (idempotent hit at the repo layer)
 			// returns the existing balance from the repository, and the cache is
-			// still refreshed to that (unchanged) value.
+			// still invalidated (a no-op if it was already consistent, but safe
+			// if a prior write left it stale).
 			name: "idempotent duplicate returns existing balance from repo",
 			in:   domain.PointsCredit{UserID: 4, Reason: "match_win", RefID: "m-dup"},
 			setupRepo: func(r *repomocks.MockPointsRepository) {
 				r.EXPECT().Credit(ctx, int64(4), int64(10), "match_win", "m-dup").Return(int64(50), false, nil)
 			},
 			setupCache: func(c *repomocks.MockPointsCache) {
-				c.EXPECT().SetBalance(ctx, int64(4), int64(50)).Return(nil)
+				c.EXPECT().DeleteBalance(ctx, int64(4)).Return(nil)
 			},
 			wantBalance: 50,
 		},
@@ -121,16 +123,19 @@ func TestPointsService_Credit(t *testing.T) {
 			wantErr:    errors.New("db error"),
 		},
 		{
-			// criterion: cache-invalidation — a cache write failure on credit is
-			// logged and swallowed; Postgres remains authoritative and the balance
-			// is still returned successfully.
-			name: "cache set failure on credit does not fail the request",
+			// criterion: cache-invalidation — a cache DELETE (invalidate) failure on
+			// credit is logged and swallowed; Postgres remains authoritative and the
+			// balance is still returned successfully. This is the scenario FIX 1
+			// specifically targets: a transient Redis error on the credit's
+			// invalidate must not leave the request failing NOR must it write a
+			// possibly-stale value (it simply doesn't write at all).
+			name: "cache invalidate failure on credit does not fail the request",
 			in:   domain.PointsCredit{UserID: 9, Reason: "match_win", RefID: "m-4"},
 			setupRepo: func(r *repomocks.MockPointsRepository) {
 				r.EXPECT().Credit(ctx, int64(9), int64(10), "match_win", "m-4").Return(int64(10), true, nil)
 			},
 			setupCache: func(c *repomocks.MockPointsCache) {
-				c.EXPECT().SetBalance(ctx, int64(9), int64(10)).Return(errors.New("redis down"))
+				c.EXPECT().DeleteBalance(ctx, int64(9)).Return(errors.New("redis down"))
 			},
 			wantBalance: 10,
 		},
