@@ -85,6 +85,9 @@ function makeKothApi(options: {
         : vi.fn().mockResolvedValue(challenge),
     submitRankedAttempt:
       ranked instanceof Error ? vi.fn().mockRejectedValue(ranked) : vi.fn().mockResolvedValue(ranked),
+    getKing: vi.fn().mockResolvedValue(null),
+    getRankedLeaderboard: vi.fn().mockResolvedValue([]),
+    getRankedMe: vi.fn().mockResolvedValue({ current_rank: 0, next_target_ms: 0 }),
   };
 }
 

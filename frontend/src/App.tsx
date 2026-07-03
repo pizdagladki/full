@@ -13,6 +13,9 @@ import {
   Store,
   KothBattle,
   KothResults,
+  KothHillSelect,
+  KothMountain,
+  KothRanked,
   AuthProvider,
   Login,
   ProtectedRoute,
@@ -20,15 +23,11 @@ import {
 } from './features';
 import { Consent } from './features/Consent';
 
-// Placeholder screens for routes owned by future issues (#106 invite-a-friend, #110
-// king-of-the-hill) — keeps mode-select navigation landing on a real route instead of the
-// `*` catch-all redirect. Replace with the real screens when those issues land.
+// Placeholder screen for the route owned by future issue #106 invite-a-friend — keeps mode-select
+// navigation landing on a real route instead of the `*` catch-all redirect. Replace with the real
+// screen when that issue lands.
 function InvitePlaceholder() {
   return <div data-testid="invite-placeholder">Invite a friend — coming soon</div>;
-}
-
-function KothPlaceholder() {
-  return <div data-testid="koth-placeholder">King of the Hill — coming soon</div>;
 }
 
 // AuthRoute: checks auth (loading/user) but does NOT check consent (avoids /consent → /consent loop)
@@ -103,7 +102,23 @@ export const routes: RouteObject[] = [
         path: 'koth',
         element: (
           <ProtectedRoute>
-            <KothPlaceholder />
+            <KothHillSelect />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'koth/mountain',
+        element: (
+          <ProtectedRoute>
+            <KothMountain />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'koth/ranked',
+        element: (
+          <ProtectedRoute>
+            <KothRanked />
           </ProtectedRoute>
         ),
       },
