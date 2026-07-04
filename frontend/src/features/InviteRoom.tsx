@@ -159,8 +159,12 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
   }, [code]);
 
   // Unmount cleanup — mirrors Battle.tsx's teardown pattern: close the WS unconditionally (guarded
-  // by teardownRef so it only runs once) whether a connection was opened or not.
+  // by teardownRef so it only runs once) whether a connection was opened or not. The guard MUST be
+  // re-armed in the effect body: under React.StrictMode the mount effect runs setup → synthetic
+  // cleanup → setup on the same refs, and without the reset the latched guard turns every later
+  // teardown into a no-op — leaving a ghost WS/room on Leave/navigate (criterion 4).
   useEffect(() => {
+    teardownRef.current = false;
     return () => teardown();
   }, [teardown]);
 

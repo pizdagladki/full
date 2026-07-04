@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -61,6 +62,20 @@ function renderInviteRoom(wsClient: WsClientApi) {
         <Route path="/battle" element={<BattleProbe />} />
       </Routes>
     </MemoryRouter>,
+  );
+}
+
+/** Same as renderInviteRoom, but wrapped in React.StrictMode (mount→cleanup→mount in dev). */
+function renderInviteRoomStrict(wsClient: WsClientApi) {
+  return render(
+    <StrictMode>
+      <MemoryRouter initialEntries={['/invite']}>
+        <Routes>
+          <Route path="/invite" element={<InviteRoom wsClient={wsClient} />} />
+          <Route path="/battle" element={<BattleProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </StrictMode>,
   );
 }
 
@@ -281,6 +296,23 @@ describe('InviteRoom', () => {
     const { unmount } = renderInviteRoom(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
+    unmount();
+
+    expect(ws.close).toHaveBeenCalled();
+  });
+
+  // criterion: 4 (violation guard, StrictMode) — the mount effect's synthetic cleanup latches the
+  // teardown guard; without re-arming it in the effect body every later teardown is a no-op and
+  // the WS survives unmount as a ghost room. Renders under StrictMode like main.tsx does.
+  it('leave cleanup (StrictMode): unmounting after creating a room still closes the WS', () => {
+    const ws = new MockWs();
+    const { unmount } = renderInviteRoomStrict(ws);
+
+    fireEvent.click(screen.getByTestId('create-room-button'));
+    // StrictMode's synthetic cleanup already called close() once BEFORE the connection existed —
+    // discard those calls so the assertion below can only be satisfied by the REAL unmount
+    // teardown (otherwise a latched guard leaks the live WS while the test stays green).
+    vi.mocked(ws.close).mockClear();
     unmount();
 
     expect(ws.close).toHaveBeenCalled();
