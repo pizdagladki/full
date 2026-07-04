@@ -14,5 +14,13 @@ export { KothHillSelect } from './KothHillSelect';
 export { KothMountain } from './KothMountain';
 export type { MountainHillType } from './KothMountain';
 export { KothRanked } from './KothRanked';
+export { Distraction, makeEmptyBattleMeta, DEFAULT_TIER_CONFIGS } from './Distraction';
+export type {
+  DistractionTier,
+  DistractionTierConfig,
+  DistractionMeta,
+  BattleMeta,
+  DistractionProps,
+} from './Distraction';
 export { AuthProvider, AuthContext, useAuth, Login, ProtectedRoute } from './auth';
 export type { AuthState } from './auth';
