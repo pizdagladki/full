@@ -3,6 +3,7 @@ export { Register } from './Register';
 export { Home } from './Home';
 export { ModeSelect } from './ModeSelect';
 export { Search } from './Search';
+export { InviteRoom } from './InviteRoom';
 export { Battle } from './Battle';
 export { Results } from './Results';
 export { Profile } from './Profile';

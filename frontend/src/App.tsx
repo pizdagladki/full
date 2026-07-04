@@ -7,6 +7,7 @@ import {
   Home,
   ModeSelect,
   Search,
+  InviteRoom,
   Battle,
   Results,
   Profile,
@@ -22,13 +23,6 @@ import {
   useAuth,
 } from './features';
 import { Consent } from './features/Consent';
-
-// Placeholder screen for the route owned by future issue #106 invite-a-friend — keeps mode-select
-// navigation landing on a real route instead of the `*` catch-all redirect. Replace with the real
-// screen when that issue lands.
-function InvitePlaceholder() {
-  return <div data-testid="invite-placeholder">Invite a friend — coming soon</div>;
-}
 
 // AuthRoute: checks auth (loading/user) but does NOT check consent (avoids /consent → /consent loop)
 function AuthRoute({ children }: { children: ReactNode }) {
@@ -94,7 +88,7 @@ export const routes: RouteObject[] = [
         path: 'invite',
         element: (
           <ProtectedRoute>
-            <InvitePlaceholder />
+            <InviteRoom />
           </ProtectedRoute>
         ),
       },
