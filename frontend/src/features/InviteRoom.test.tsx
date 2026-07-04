@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { InviteRoom } from './InviteRoom';
 import type { WsClientApi } from '../api/ws';
+import type { FaceLandmarkResult, LandmarkRunner } from '../cv';
 
 // ---------------------------------------------------------------------------
 // Mock WS client — hand-rolled class implementing WsClientApi, capturing the
@@ -44,6 +45,69 @@ class MockWs implements WsClientApi {
   }
 }
 
+// ---------------------------------------------------------------------------
+// RAF stub — same pattern as Search.test.tsx / CvComponent.test.tsx: collect
+// scheduled callbacks and tick them manually so frames are driven
+// deterministically (needed to drive the real CvEngine behind the face gate).
+// ---------------------------------------------------------------------------
+
+let rafCallbacks: FrameRequestCallback[] = [];
+
+beforeEach(() => {
+  rafCallbacks = [];
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }),
+  );
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
+  Object.defineProperty(globalThis.navigator, 'clipboard', {
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    writable: true,
+    configurable: true,
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+function makeCvRunner(): {
+  runner: LandmarkRunner;
+  setResult: (r: FaceLandmarkResult) => void;
+} {
+  let nextResult: FaceLandmarkResult = { faceLandmarks: [] };
+  const runner: LandmarkRunner = {
+    detectForVideo: vi.fn(() => nextResult),
+  };
+  return {
+    runner,
+    setResult: (r: FaceLandmarkResult) => {
+      nextResult = r;
+    },
+  };
+}
+
+const FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [[{ x: 0, y: 0, z: 0 }]] };
+const NO_FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [] };
+
+/** Sets the next detection result, then ticks the latest pending RAF callback. */
+function tickFrame(
+  setResult: (r: FaceLandmarkResult) => void,
+  result: FaceLandmarkResult,
+  ts = 0,
+): void {
+  setResult(result);
+  const cb = rafCallbacks[rafCallbacks.length - 1];
+  act(() => {
+    cb(ts);
+  });
+}
+
 function BattleProbe() {
   const location = useLocation();
   const state = location.state as { roomId?: string } | null;
@@ -54,46 +118,59 @@ function BattleProbe() {
   );
 }
 
-function renderInviteRoom(wsClient: WsClientApi) {
+function HomeProbe() {
+  return <div data-testid="home-probe">HOME</div>;
+}
+
+function renderInviteRoom(wsClient: WsClientApi, cvRunner?: LandmarkRunner) {
   return render(
     <MemoryRouter initialEntries={['/invite']}>
       <Routes>
-        <Route path="/invite" element={<InviteRoom wsClient={wsClient} />} />
+        <Route path="/invite" element={<InviteRoom wsClient={wsClient} cvRunner={cvRunner} />} />
         <Route path="/battle" element={<BattleProbe />} />
+        <Route path="/home" element={<HomeProbe />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 /** Same as renderInviteRoom, but wrapped in React.StrictMode (mount→cleanup→mount in dev). */
-function renderInviteRoomStrict(wsClient: WsClientApi) {
+function renderInviteRoomStrict(wsClient: WsClientApi, cvRunner?: LandmarkRunner) {
   return render(
     <StrictMode>
       <MemoryRouter initialEntries={['/invite']}>
         <Routes>
-          <Route path="/invite" element={<InviteRoom wsClient={wsClient} />} />
+          <Route path="/invite" element={<InviteRoom wsClient={wsClient} cvRunner={cvRunner} />} />
           <Route path="/battle" element={<BattleProbe />} />
+          <Route path="/home" element={<HomeProbe />} />
         </Routes>
       </MemoryRouter>
     </StrictMode>,
   );
 }
 
+/**
+ * Renders InviteRoom with a face already present (ticks one FACE_FRAME through a real CvEngine).
+ * This is the default setup for tests that aren't specifically about the face gate itself
+ * (criteria 1/2/4) — those flows now require a present face before Create/Join can proceed.
+ */
+function renderInviteRoomFacePresent(wsClient: WsClientApi) {
+  const { runner, setResult } = makeCvRunner();
+  const rendered = renderInviteRoom(wsClient, runner);
+  tickFrame(setResult, FACE_FRAME);
+  return rendered;
+}
+
+function renderInviteRoomStrictFacePresent(wsClient: WsClientApi) {
+  const { runner, setResult } = makeCvRunner();
+  const rendered = renderInviteRoomStrict(wsClient, runner);
+  tickFrame(setResult, FACE_FRAME);
+  return rendered;
+}
+
 function sentMessages(ws: WsClientApi): unknown[] {
   return vi.mocked(ws.send).mock.calls.map((call) => JSON.parse(call[0] as string) as unknown);
 }
-
-beforeEach(() => {
-  Object.defineProperty(globalThis.navigator, 'clipboard', {
-    value: { writeText: vi.fn().mockResolvedValue(undefined) },
-    writable: true,
-    configurable: true,
-  });
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 // ---------------------------------------------------------------------------
 // Tests — one named case per acceptance criterion
@@ -113,7 +190,7 @@ describe('InviteRoom', () => {
   // criterion: 1 — "Create room" sends {type:"create_room"} and shows a copyable invite code.
   it('create-shows-code: clicking Create room sends create_room and renders the code from room_created', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
 
@@ -140,7 +217,7 @@ describe('InviteRoom', () => {
   // must only send from inside onOpen.
   it('create-shows-code violation guard: create_room is sent only after the WS actually opens, not synchronously on click', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
 
@@ -157,7 +234,7 @@ describe('InviteRoom', () => {
   // a screen that fakes the code before the server confirms it would fail this.
   it('create-shows-code violation guard: no code renders until room_created actually arrives', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
 
@@ -169,7 +246,7 @@ describe('InviteRoom', () => {
   // peer-joined notice to the creator) navigates to /battle carrying the room_id.
   it('create-shows-code: Start Battle navigates to /battle with the created room_id', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
@@ -187,7 +264,7 @@ describe('InviteRoom', () => {
   // the battle screen carrying the shared room_id.
   it('join-by-code-transitions-to-battle: submitting a code sends join_room and room_joined navigates to /battle', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'FRIEND1' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
@@ -212,7 +289,7 @@ describe('InviteRoom', () => {
   // opens. Catches the same InvalidStateError regression as the create_room case.
   it('join-by-code-transitions-to-battle violation guard: join_room is sent only after the WS actually opens, not synchronously on click', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'FRIEND1' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
@@ -235,7 +312,7 @@ describe('InviteRoom', () => {
 
   it.each(errorCases)('$name', ({ error }) => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'BADCODE' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
@@ -253,7 +330,7 @@ describe('InviteRoom', () => {
   // navigate away from the joining screen.
   it('invalid-code error violation guard: a malformed frame does not crash and does not navigate', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'CODE1' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
@@ -275,7 +352,7 @@ describe('InviteRoom', () => {
   // not stuck in a dead error state.
   it('invalid-code error: Try again resets to the menu so the user can retry', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'BADCODE' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
@@ -293,7 +370,7 @@ describe('InviteRoom', () => {
   // criterion: 4 — leaving (unmount) closes the WS: no ghost room.
   it('leave cleanup: unmounting after creating a room closes the WS', () => {
     const ws = new MockWs();
-    const { unmount } = renderInviteRoom(ws);
+    const { unmount } = renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     unmount();
@@ -306,7 +383,7 @@ describe('InviteRoom', () => {
   // the WS survives unmount as a ghost room. Renders under StrictMode like main.tsx does.
   it('leave cleanup (StrictMode): unmounting after creating a room still closes the WS', () => {
     const ws = new MockWs();
-    const { unmount } = renderInviteRoomStrict(ws);
+    const { unmount } = renderInviteRoomStrictFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     // StrictMode's synthetic cleanup already called close() once BEFORE the connection existed —
@@ -322,7 +399,7 @@ describe('InviteRoom', () => {
   // WS and return to the menu (not just leave it hanging as a ghost connection).
   it('leave cleanup: clicking Leave during waiting closes the WS and resets to the menu', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
@@ -349,7 +426,7 @@ describe('InviteRoom', () => {
   // Copy button: writes the code to the clipboard when available, and never crashes when it isn't.
   it('copy-code-button writes the invite code to the clipboard', async () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
@@ -370,7 +447,7 @@ describe('InviteRoom', () => {
     });
 
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoomFacePresent(ws);
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
@@ -379,5 +456,157 @@ describe('InviteRoom', () => {
     });
 
     expect(() => fireEvent.click(screen.getByTestId('copy-code-button'))).not.toThrow();
+  });
+
+  // -------------------------------------------------------------------------
+  // criterion: 3 — face gate (start-gate half + continuous-gate half)
+  // -------------------------------------------------------------------------
+
+  const startActions: { name: string; act: () => void }[] = [
+    {
+      name: 'Create room',
+      act: () => fireEvent.click(screen.getByTestId('create-room-button')),
+    },
+    {
+      name: 'Join by code',
+      act: () => {
+        fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'CODE1' } });
+        fireEvent.click(screen.getByTestId('join-room-button'));
+      },
+    },
+  ];
+
+  // criterion: 3 (start-gate, violation guard) — with no face present, clicking Create room /
+  // Join by code must send NOTHING over the WS (not even connect()) and must show the face
+  // prompt instead. A screen that ignores the face gate and connects/sends anyway fails this.
+  it.each(startActions)(
+    'no-face-blocks-start: clicking $name with no face present sends nothing over the WS and shows the face prompt',
+    ({ act: doAction }) => {
+      const ws = new MockWs();
+      // No cvRunner override — defaults to InviteRoom's PLACEHOLDER_RUNNER, which always reports
+      // no face, so facePresentRef.current stays false.
+      renderInviteRoom(ws);
+
+      doAction();
+
+      expect(ws.connect).not.toHaveBeenCalled();
+      expect(ws.send).not.toHaveBeenCalled();
+      expect(screen.getByTestId('invite-face-prompt')).toBeInTheDocument();
+      expect(screen.getByTestId('invite-menu')).toBeInTheDocument();
+    },
+  );
+
+  // criterion: 3 (start-gate) — once a face is present, Create room / Join by code proceed
+  // exactly as before (connect + send), and the face prompt never appears.
+  it.each(startActions)(
+    'no-face-blocks-start violation guard: clicking $name WITH a face present connects the WS and shows no face prompt',
+    ({ act: doAction }) => {
+      const ws = new MockWs();
+      renderInviteRoomFacePresent(ws);
+
+      doAction();
+
+      expect(ws.connect).toHaveBeenCalledWith('/ws');
+      expect(screen.queryByTestId('invite-face-prompt')).not.toBeInTheDocument();
+    },
+  );
+
+  // criterion: 3 (continuous gate) — losing the face while waiting for a friend to join tears the
+  // room down (closes the WS) and navigates home, exactly like Search.tsx's onFaceLost.
+  it('face-lost-while-waiting-resets: losing the face while waiting for a friend closes the WS and returns home', () => {
+    const ws = new MockWs();
+    const { runner, setResult } = makeCvRunner();
+    renderInviteRoom(ws, runner);
+
+    tickFrame(setResult, FACE_FRAME); // opens the start-gate
+
+    fireEvent.click(screen.getByTestId('create-room-button'));
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage(JSON.stringify({ type: 'room_created', room_id: 'room-1', code: 'ABC123' }));
+    });
+    expect(screen.getByTestId('invite-waiting')).toBeInTheDocument();
+
+    // Discard the close() calls (if any) from setup so the assertion below can only be satisfied
+    // by the face-lost teardown — mirrors the file's existing StrictMode mockClear() pattern.
+    vi.mocked(ws.close).mockClear();
+
+    // NO_FACE_WINDOW = 3 consecutive no-face frames trigger onFaceLost.
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+
+    expect(ws.close).toHaveBeenCalled();
+    expect(screen.getByTestId('home-probe')).toBeInTheDocument();
+  });
+
+  // criterion: 3 (continuous gate, violation guard) — fewer than the required consecutive
+  // no-face frames must NOT tear the room down; a screen that fires on the first no-face frame
+  // would fail this (the room would be gone/home would render prematurely).
+  it('face-lost-while-waiting-resets violation guard: fewer than 3 consecutive no-face frames does not tear down', () => {
+    const ws = new MockWs();
+    const { runner, setResult } = makeCvRunner();
+    renderInviteRoom(ws, runner);
+
+    tickFrame(setResult, FACE_FRAME);
+    fireEvent.click(screen.getByTestId('create-room-button'));
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage(JSON.stringify({ type: 'room_created', room_id: 'room-1', code: 'ABC123' }));
+    });
+
+    vi.mocked(ws.close).mockClear();
+
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('home-probe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('invite-waiting')).toBeInTheDocument();
+  });
+
+  // criterion: 3 (continuous gate, violation guard) — in the `menu` phase (nothing in flight) a
+  // face-lost event must be a no-op: no WS close, no navigation. A screen that tears down
+  // unconditionally on every face-lost event (ignoring phase) would fail this.
+  it('face-lost-in-menu-is-noop: losing the face while still on the menu does not close the WS or navigate', () => {
+    const ws = new MockWs();
+    const { runner, setResult } = makeCvRunner();
+    renderInviteRoom(ws, runner);
+
+    tickFrame(setResult, FACE_FRAME); // face present, but user hasn't started anything (still menu)
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('home-probe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('invite-menu')).toBeInTheDocument();
+  });
+
+  // criterion: 3 (continuous gate, violation guard) — in the `error` phase a face-lost event must
+  // also be a no-op: no WS close, no navigation away from the error screen.
+  it('face-lost-in-error-is-noop: losing the face on the error screen does not close the WS or navigate', () => {
+    const ws = new MockWs();
+    const { runner, setResult } = makeCvRunner();
+    renderInviteRoom(ws, runner);
+
+    tickFrame(setResult, FACE_FRAME);
+    fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'BADCODE' } });
+    fireEvent.click(screen.getByTestId('join-room-button'));
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage(JSON.stringify({ type: 'error', error: 'invalid or expired code' }));
+    });
+    expect(screen.getByTestId('invite-error-screen')).toBeInTheDocument();
+
+    vi.mocked(ws.close).mockClear();
+
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('home-probe')).not.toBeInTheDocument();
+    expect(screen.getByTestId('invite-error-screen')).toBeInTheDocument();
   });
 });

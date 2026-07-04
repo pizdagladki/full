@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CvComponent } from '../cv';
+import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
 import { WsClient } from '../api/ws';
 import type { WsClientApi } from '../api/ws';
 
@@ -29,6 +31,14 @@ const SIGNALING_WS_PATH = '/ws';
 
 type Phase = 'menu' | 'creating' | 'waiting' | 'joining' | 'error';
 
+// TODO: wire real MediaPipe FaceLandmarker runner (separate task). Until then this placeholder
+// always reports NO face — the honest-scaffold approach also used by Search/Battle/Home's
+// placeholders: it keeps the face gate truthful (never fakes a pass) rather than pretending CV is
+// wired up before it actually is.
+const PLACEHOLDER_RUNNER: LandmarkRunner = {
+  detectForVideo: () => ({ faceLandmarks: [] }),
+};
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -36,14 +46,19 @@ type Phase = 'menu' | 'creating' | 'waiting' | 'joining' | 'error';
 export interface InviteRoomProps {
   /** Injectable WS client (swap with a mock in tests). Defaults to a lazily-built WsClient. */
   wsClient?: WsClientApi;
+  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the placeholder. */
+  cvRunner?: LandmarkRunner;
 }
 
 // ---------------------------------------------------------------------------
 // InviteRoom component — invite-a-friend private room: create/copy a code, or
-// join by code, then hand off to the battle screen (unranked).
+// join by code, then hand off to the battle screen (unranked). Gated by a
+// continuous face-presence check (criterion 3): starting a create/join needs a
+// face present, and losing the face while creating/waiting/joining tears the
+// room down and sends the player home.
 // ---------------------------------------------------------------------------
 
-export function InviteRoom({ wsClient }: InviteRoomProps) {
+export function InviteRoom({ wsClient, cvRunner = PLACEHOLDER_RUNNER }: InviteRoomProps) {
   const navigate = useNavigate();
 
   // Lazily build the default WsClient once — never rebuilt on re-render (same seam as
@@ -53,8 +68,19 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
     wsRef.current = wsClient ?? new WsClient();
   }
 
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cvRef = useRef<CvHandleRef>(null);
+
   // Guards teardown so it only runs once per connection (mirrors Battle.tsx's teardown pattern).
   const teardownRef = useRef(false);
+
+  // Ref (not state) gates both the create/join start AND the continuous in-flight check — the
+  // cv callbacks below are registered ONCE (CvComponent builds its engine on first render) and
+  // would otherwise see a stale closure over state. Mirrors Search.tsx's facePresentRef.
+  const facePresentRef = useRef(false);
+  // Mirrors facePresentRef's rationale: onFaceLost is a stable (frozen-at-mount) callback, so it
+  // needs a ref to read the CURRENT phase rather than a stale one.
+  const phaseRef = useRef<Phase>('menu');
 
   const [phase, setPhase] = useState<Phase>('menu');
   const [code, setCode] = useState('');
@@ -62,6 +88,11 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [copyLabel, setCopyLabel] = useState('Copy');
+  const [showFacePrompt, setShowFacePrompt] = useState(false);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   const teardown = useCallback(() => {
     if (teardownRef.current) return;
@@ -123,7 +154,15 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
     [handleMessage],
   );
 
+  // Criterion 3 (start-gate): a create/join must only actually connect + send once a face is
+  // present. With no face, nothing is sent over the WS — the "show your face" prompt is shown
+  // instead, mirroring Search.tsx's face-gated join.
   const handleCreateRoom = useCallback(() => {
+    if (!facePresentRef.current) {
+      setShowFacePrompt(true);
+      return;
+    }
+    setShowFacePrompt(false);
     setPhase('creating');
     setErrorMessage('');
     startConnection(() => {
@@ -135,6 +174,11 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
   const handleJoinSubmit = useCallback(() => {
     const trimmed = joinCodeInput.trim();
     if (!trimmed) return;
+    if (!facePresentRef.current) {
+      setShowFacePrompt(true);
+      return;
+    }
+    setShowFacePrompt(false);
     setPhase('joining');
     setErrorMessage('');
     startConnection(() => {
@@ -158,18 +202,54 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
       });
   }, [code]);
 
+  const onFacePresent = useCallback(() => {
+    facePresentRef.current = true;
+    setShowFacePrompt(false);
+  }, []);
+
+  // Criterion 3 (continuous gate): losing the face while actively creating/waiting/joining a room
+  // tears the room down (closes the WS) and sends the player home — mirrors Search.tsx's
+  // onFaceLost. In `menu` or `error` (nothing in flight, or already stopped) it is a no-op.
+  const onFaceLost = useCallback(() => {
+    facePresentRef.current = false;
+    const activePhase =
+      phaseRef.current === 'creating' || phaseRef.current === 'waiting' || phaseRef.current === 'joining';
+    if (activePhase) {
+      teardown();
+      navigate('/home');
+    }
+    // Intentionally stable ([]): CvComponent freezes this callback on first render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const cvCallbacks = useMemo<CvCallbacks>(
+    () => ({ onFacePresent, onFaceLost }),
+    // Intentionally stable ([]): passed to CvComponent, which builds its engine ONCE.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // Unmount cleanup — mirrors Battle.tsx's teardown pattern: close the WS unconditionally (guarded
   // by teardownRef so it only runs once) whether a connection was opened or not. The guard MUST be
   // re-armed in the effect body: under React.StrictMode the mount effect runs setup → synthetic
   // cleanup → setup on the same refs, and without the reset the latched guard turns every later
-  // teardown into a no-op — leaving a ghost WS/room on Leave/navigate (criterion 4).
+  // teardown into a no-op — leaving a ghost WS/room on Leave/navigate (criterion 4). The face-gate
+  // ref is reset here too for the same StrictMode-safety reason (mirrors Search.tsx); it can only
+  // ever be flipped true by the async, RAF-driven onFacePresent callback, which cannot fire inside
+  // this synchronous mount→cleanup→mount window.
   useEffect(() => {
     teardownRef.current = false;
+    facePresentRef.current = false;
+    if (videoRef.current && cvRef.current) {
+      cvRef.current.start(videoRef.current);
+    }
     return () => teardown();
   }, [teardown]);
 
   return (
     <div data-testid="invite-room-screen">
+      <CvComponent ref={cvRef} runner={cvRunner} callbacks={cvCallbacks} />
+      <video ref={videoRef} autoPlay muted playsInline data-testid="invite-preview" />
       {phase === 'menu' && (
         <div data-testid="invite-menu">
           <button type="button" data-testid="create-room-button" onClick={handleCreateRoom}>
@@ -187,6 +267,9 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
               Join by code
             </button>
           </div>
+          {showFacePrompt && (
+            <div data-testid="invite-face-prompt">Show your face to continue</div>
+          )}
         </div>
       )}
 
