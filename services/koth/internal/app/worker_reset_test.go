@@ -69,11 +69,17 @@ func TestWorkerReset_ImmediateCheck(t *testing.T) {
 	resetMock := svcmocks.NewMockResetService(ctrl)
 
 	done := make(chan struct{})
-	callCount := 0
+	// Signal the first daily check via a buffered channel instead of a shared
+	// counter — the mock callback runs on the workerReset goroutine, so a plain
+	// int here is a data race under -race (same pattern as TestWorkerReset_TicksAgain).
+	firstCheck := make(chan struct{}, 1)
 
 	resetMock.EXPECT().CloseStaleReign(gomock.Any(), domain.HillTypeDaily).DoAndReturn(
 		func(context.Context, domain.HillType) error {
-			callCount++
+			select {
+			case firstCheck <- struct{}{}:
+			default:
+			}
 
 			return nil
 		}).AnyTimes()
@@ -95,12 +101,12 @@ func TestWorkerReset_ImmediateCheck(t *testing.T) {
 		close(done)
 	}()
 
-	// The immediate check happens synchronously before the ticker loop, so a
-	// short wait is enough to observe it without depending on the (1-hour)
-	// ticker interval.
-	time.Sleep(50 * time.Millisecond)
-
-	if callCount == 0 {
+	// The immediate check happens synchronously before the ticker loop — wait
+	// for its signal (no sleep, no shared counter) without depending on the
+	// (1-hour) ticker interval.
+	select {
+	case <-firstCheck:
+	case <-time.After(2 * time.Second):
 		t.Fatal("workerReset did not run an immediate check on start")
 	}
 
