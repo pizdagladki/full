@@ -9,6 +9,8 @@ export interface Clip {
 export interface ClipsApi {
   getClips(): Promise<Clip[]>;
   getClipDownloadUrl(id: string): string;
+  uploadClip(blob: Blob): Promise<{ id: string }>;
+  convertClip(id: string): Promise<void>;
 }
 
 export class ClipsApiClient implements ClipsApi {
@@ -31,6 +33,29 @@ export class ClipsApiClient implements ClipsApi {
 
   getClipDownloadUrl(id: string): string {
     return `${this.baseUrl}/v1/clips/${id}/download`;
+  }
+
+  async uploadClip(blob: Blob): Promise<{ id: string }> {
+    const res = await fetch(`${this.baseUrl}/v1/clips`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': blob.type || 'video/webm' },
+      body: blob,
+    });
+    if (!res.ok) {
+      throw new Error(`POST /v1/clips failed: ${res.status} ${res.statusText}`);
+    }
+    return res.json() as Promise<{ id: string }>;
+  }
+
+  async convertClip(id: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/v1/clips/${id}/convert`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      throw new Error(`POST /v1/clips/${id}/convert failed: ${res.status} ${res.statusText}`);
+    }
   }
 }
 
