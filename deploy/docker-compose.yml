@@ -1,5 +1,9 @@
 # deploy/docker-compose.yml — local infra dependencies (+ services as they are created, Phase C+).
 # Base stack: PostgreSQL (pgx), Redis (go-redis), MinIO (minio-go).
+# App services (Phase C+) must include the shared internal S2S token (issues #142-#145):
+#   env_file:
+#     - env/internal.env     # real file, gitignored; template: env/internal.env.example
+
 services:
   postgres:
     image: postgres:17
