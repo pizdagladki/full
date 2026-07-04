@@ -10,16 +10,39 @@ import (
 // strictly ascending.
 var ErrThresholdsNotAscending = errors.New("ranked.thresholds must be strictly ascending")
 
+// ErrPointsAmountNotLessThanPvP is returned when a configured KotH award
+// amount (win or rank) is not strictly less than the PvP match_win amount —
+// KotH points must always stay below PvP, per spec.
+var ErrPointsAmountNotLessThanPvP = errors.New(
+	"points.win_amount and points.rank_amount must be strictly less than points.pvp_win_amount",
+)
+
 // ValidateConfig checks required config fields (HTTP addr, Postgres DSN, Redis
-// addr, ranked thresholds), failing fast at startup when any is unset or
-// malformed.
+// addr, ranked thresholds, points amounts), failing fast at startup when any
+// is unset or malformed.
 func ValidateConfig(cfg *Config) error {
 	err := validator.New().Struct(cfg)
 	if err != nil {
 		return err
 	}
 
-	return validateThresholdsAscending(cfg.Ranked.Thresholds)
+	err = validateThresholdsAscending(cfg.Ranked.Thresholds)
+	if err != nil {
+		return err
+	}
+
+	return validatePointsLessThanPvP(cfg.Points)
+}
+
+// validatePointsLessThanPvP reports ErrPointsAmountNotLessThanPvP unless both
+// the win and rank award amounts are strictly less than the PvP match_win
+// amount.
+func validatePointsLessThanPvP(points PointsConfig) error {
+	if points.WinAmount >= points.PvPWinAmount || points.RankAmount >= points.PvPWinAmount {
+		return ErrPointsAmountNotLessThanPvP
+	}
+
+	return nil
 }
 
 // validateThresholdsAscending reports an error unless thresholds is strictly

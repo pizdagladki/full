@@ -22,8 +22,8 @@ func NewHTTPPointsClient(baseURL string, httpClient *http.Client) PointsClient {
 
 // Credit calls the store's POST /v1/points/credit. A non-2xx status or a
 // transport/marshal error is returned wrapped; the caller decides whether to
-// treat it as fatal (the reset service treats it as non-blocking: log and
-// continue).
+// treat it as fatal (koth treats it as non-blocking: log and continue, both
+// for rank/win credits and for the reset service's final-placement reward).
 func (c *httpPointsClient) Credit(ctx context.Context, req CreditRequest) error {
 	body, err := json.Marshal(req)
 	if err != nil {

@@ -15,3 +15,7 @@ media:
   base_url: "http://localhost:8082"
 reset:
   check_interval: "1m"
+points:
+  win_amount: 5
+  rank_amount: 3
+  pvp_win_amount: 16

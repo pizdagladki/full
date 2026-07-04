@@ -19,12 +19,15 @@ const (
 // fullEnv returns a map with all required environment variables set to valid values.
 func fullEnv() map[string]string {
 	return map[string]string{
-		"POSTGRES_DSN":         validDSN,
-		"REDIS_ADDR":           validRedisAddr,
-		"RANKED_THRESHOLDS_MS": validThresholds,
-		"STORE_BASE_URL":       validStoreBaseURL,
-		"MEDIA_BASE_URL":       validMediaBaseURL,
-		"RESET_CHECK_INTERVAL": validResetInterval,
+		"POSTGRES_DSN":               validDSN,
+		"REDIS_ADDR":                 validRedisAddr,
+		"RANKED_THRESHOLDS_MS":       validThresholds,
+		"STORE_BASE_URL":             validStoreBaseURL,
+		"MEDIA_BASE_URL":             validMediaBaseURL,
+		"RESET_CHECK_INTERVAL":       validResetInterval,
+		"KOTH_POINTS_WIN_AMOUNT":     "5",
+		"KOTH_POINTS_RANK_AMOUNT":    "3",
+		"KOTH_POINTS_PVP_WIN_AMOUNT": "16",
 	}
 }
 
@@ -41,7 +44,8 @@ func fullYAML(httpAddr string) string {
 		"ranked:\n  thresholds: [5000, 15000, 30000, 60000, 120000]\n" +
 		"store:\n  base_url: \"" + validStoreBaseURL + "\"\n" +
 		"media:\n  base_url: \"" + validMediaBaseURL + "\"\n" +
-		"reset:\n  check_interval: \"" + validResetInterval + "\"\n"
+		"reset:\n  check_interval: \"" + validResetInterval + "\"\n" +
+		"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n"
 }
 
 func TestLoad(t *testing.T) {
@@ -196,7 +200,18 @@ func TestLoad(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			// criterion: file mode fails validation when store.base_url is missing
+			// criterion: 2 — env mode fails validation when the KotH win amount is not
+			// strictly less than the PvP match_win amount
+			name:     "env mode win amount not less than pvp amount fails validation",
+			isDocker: true,
+			env: merge(fullEnv(), map[string]string{
+				"KOTH_POINTS_WIN_AMOUNT":     "20",
+				"KOTH_POINTS_PVP_WIN_AMOUNT": "16",
+			}),
+			wantErr: true,
+		},
+		{
+			// criterion: 3 — store.base_url is validated at startup: missing it fails Load.
 			name: "file mode missing store base url fails validation",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
@@ -204,13 +219,14 @@ func TestLoad(t *testing.T) {
 						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
 						"ranked:\n  thresholds: [5000, 15000]\n"+
 						"media:\n  base_url: \""+validMediaBaseURL+"\"\n"+
-						"reset:\n  check_interval: \""+validResetInterval+"\"\n",
+						"reset:\n  check_interval: \""+validResetInterval+"\"\n"+
+						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
 				)
 			},
 			wantErr: true,
 		},
 		{
-			// criterion: file mode fails validation when media.base_url is missing
+			// criterion: 3 — file mode fails validation when media.base_url is missing
 			name: "file mode missing media base url fails validation",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
@@ -218,13 +234,14 @@ func TestLoad(t *testing.T) {
 						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
 						"ranked:\n  thresholds: [5000, 15000]\n"+
 						"store:\n  base_url: \""+validStoreBaseURL+"\"\n"+
-						"reset:\n  check_interval: \""+validResetInterval+"\"\n",
+						"reset:\n  check_interval: \""+validResetInterval+"\"\n"+
+						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
 				)
 			},
 			wantErr: true,
 		},
 		{
-			// criterion: file mode fails validation when reset.check_interval is missing
+			// criterion: 4 — file mode fails validation when reset.check_interval is missing
 			name: "file mode missing reset check interval fails validation",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t,
@@ -232,7 +249,23 @@ func TestLoad(t *testing.T) {
 						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
 						"ranked:\n  thresholds: [5000, 15000]\n"+
 						"store:\n  base_url: \""+validStoreBaseURL+"\"\n"+
-						"media:\n  base_url: \""+validMediaBaseURL+"\"\n",
+						"media:\n  base_url: \""+validMediaBaseURL+"\"\n"+
+						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
+				)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — file mode fails validation when points config is missing
+			name: "file mode missing points config fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 15000]\n"+
+						"store:\n  base_url: \""+validStoreBaseURL+"\"\n"+
+						"media:\n  base_url: \""+validMediaBaseURL+"\"\n"+
+						"reset:\n  check_interval: \""+validResetInterval+"\"\n",
 				)
 			},
 			wantErr: true,
@@ -287,6 +320,7 @@ func TestValidateConfig(t *testing.T) {
 				Store:    StoreConfig{BaseURL: validStoreBaseURL},
 				Media:    MediaConfig{BaseURL: validMediaBaseURL},
 				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 		},
 		{
@@ -299,6 +333,7 @@ func TestValidateConfig(t *testing.T) {
 				Store:    StoreConfig{BaseURL: validStoreBaseURL},
 				Media:    MediaConfig{BaseURL: validMediaBaseURL},
 				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -312,6 +347,7 @@ func TestValidateConfig(t *testing.T) {
 				Store:  StoreConfig{BaseURL: validStoreBaseURL},
 				Media:  MediaConfig{BaseURL: validMediaBaseURL},
 				Reset:  ResetConfig{CheckInterval: time.Minute},
+				Points: PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -325,6 +361,7 @@ func TestValidateConfig(t *testing.T) {
 				Store:    StoreConfig{BaseURL: validStoreBaseURL},
 				Media:    MediaConfig{BaseURL: validMediaBaseURL},
 				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -338,6 +375,7 @@ func TestValidateConfig(t *testing.T) {
 				Store:    StoreConfig{BaseURL: validStoreBaseURL},
 				Media:    MediaConfig{BaseURL: validMediaBaseURL},
 				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -352,11 +390,13 @@ func TestValidateConfig(t *testing.T) {
 				Store:    StoreConfig{BaseURL: validStoreBaseURL},
 				Media:    MediaConfig{BaseURL: validMediaBaseURL},
 				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
 		{
-			// criterion: 4 — StoreConfig.BaseURL is required (the reset job's reward-credit target)
+			// criterion: 4 — StoreConfig.BaseURL is required (the reset job's reward-credit
+			// target, and the target PointsClient POSTs credits to)
 			name: "missing store base url fails",
 			cfg: &Config{
 				HTTP:     HTTPConfig{Addr: ":8080"},
@@ -365,6 +405,7 @@ func TestValidateConfig(t *testing.T) {
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
 				Media:    MediaConfig{BaseURL: validMediaBaseURL},
 				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -378,6 +419,7 @@ func TestValidateConfig(t *testing.T) {
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
 				Store:    StoreConfig{BaseURL: validStoreBaseURL},
 				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
@@ -391,6 +433,52 @@ func TestValidateConfig(t *testing.T) {
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
 				Store:    StoreConfig{BaseURL: validStoreBaseURL},
 				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — Points amounts are required config placeholders, not hardcoded
+			name: "missing points config fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — win_amount must be strictly less than pvp_win_amount
+			// (a config assertion guards KotH awards staying below PvP's match_win).
+			name: "win amount equal to pvp amount fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 16, RankAmount: 3, PvPWinAmount: 16},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — rank_amount must be strictly less than pvp_win_amount
+			name: "rank amount greater than pvp amount fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 20, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},

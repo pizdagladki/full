@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -16,6 +17,12 @@ import (
 	"github.com/pizdagladki/full/services/koth/internal/api/service"
 	"github.com/pizdagladki/full/services/koth/internal/config"
 )
+
+// pointsClientTimeout bounds a single points-credit HTTP call to the store.
+const pointsClientTimeout = 10 * time.Second
+
+// mediaClientTimeout bounds a single king-clip-expiry HTTP call to media.
+const mediaClientTimeout = 10 * time.Second
 
 // App holds the service dependencies and drives its lifecycle.
 type App struct {
