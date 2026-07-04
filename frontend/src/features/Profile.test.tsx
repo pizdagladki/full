@@ -54,6 +54,8 @@ function makeClipsApi(clips: Clip[]): ClipsApi {
   return {
     getClips: vi.fn().mockResolvedValue(clips),
     getClipDownloadUrl: vi.fn((id: string) => `/v1/clips/${id}/download`),
+    uploadClip: vi.fn().mockResolvedValue({ id: 'clip-1' }),
+    convertClip: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -61,6 +63,8 @@ function makeClipsApiError(msg = 'clips failed'): ClipsApi {
   return {
     getClips: vi.fn().mockRejectedValue(new Error(msg)),
     getClipDownloadUrl: vi.fn((id: string) => `/v1/clips/${id}/download`),
+    uploadClip: vi.fn().mockResolvedValue({ id: 'clip-1' }),
+    convertClip: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -68,6 +72,8 @@ function makeClipsApiPending(): ClipsApi {
   return {
     getClips: vi.fn().mockReturnValue(new Promise(() => {})),
     getClipDownloadUrl: vi.fn((id: string) => `/v1/clips/${id}/download`),
+    uploadClip: vi.fn().mockResolvedValue({ id: 'clip-1' }),
+    convertClip: vi.fn().mockResolvedValue(undefined),
   };
 }
 
