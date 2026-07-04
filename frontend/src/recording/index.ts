@@ -54,6 +54,13 @@ export type CaptureStreamFactory = (canvas: HTMLCanvasElement) => MediaStream;
 
 export type AudioContextFactory = () => AudioContextLike;
 
+/**
+ * Builds a brand-new MediaStream from a list of tracks. Used to mix the engine's own
+ * placeholder audio track onto a caller-supplied MediaStream source WITHOUT mutating the
+ * caller's original stream object (see captureWin()'s MediaStream-source branch).
+ */
+export type MediaStreamFactory = (tracks: MediaStreamTrack[]) => MediaStream;
+
 // ---------------------------------------------------------------------------
 // Factories (defaults use real browser APIs; tests inject mocks)
 // ---------------------------------------------------------------------------
@@ -71,6 +78,8 @@ const defaultMediaRecorderFactory: MediaRecorderFactory = (stream, options) =>
 const defaultAudioContextFactory: AudioContextFactory = () =>
   new AudioContext() as unknown as AudioContextLike;
 
+const defaultMediaStreamFactory: MediaStreamFactory = (tracks) => new MediaStream(tracks);
+
 // ---------------------------------------------------------------------------
 // RecordingEngineImpl — the core logic class (exported for direct unit testing)
 // ---------------------------------------------------------------------------
@@ -79,6 +88,8 @@ export interface RecordingEngineOpts {
   captureStreamFactory?: CaptureStreamFactory;
   mediaRecorderFactory?: MediaRecorderFactory;
   audioContextFactory?: AudioContextFactory;
+  /** Builds the combined stream when the source is a caller-supplied MediaStream (see captureWin()). */
+  mediaStreamFactory?: MediaStreamFactory;
   /** Duration the edit slot (src/canvas) plays for while the win-part records, ms. */
   editSlotDurationMs?: number;
   /** Injectable edit-slot draw override, forwarded to `runEditSlot`. */
@@ -88,12 +99,18 @@ export interface RecordingEngineOpts {
 export class RecordingEngineImpl {
   private source: HTMLCanvasElement | MediaStream | null = null;
   private stream: MediaStream | null = null;
+  // Tracks the engine itself created (and therefore owns) and must stop() on teardown. For a
+  // canvas source this is every track of the captured stream (the engine owns that stream
+  // outright); for a caller-supplied MediaStream source this is ONLY the engine's own placeholder
+  // audio track(s) — the caller's original tracks are never stopped by this engine.
+  private ownedTracks: MediaStreamTrack[] = [];
   private recorder: MediaRecorderLike | null = null;
   private audioCtx: AudioContextLike | null = null;
 
   private readonly captureStreamFactory: CaptureStreamFactory;
   private readonly mediaRecorderFactory: MediaRecorderFactory;
   private readonly audioContextFactory: AudioContextFactory;
+  private readonly mediaStreamFactory: MediaStreamFactory;
   private readonly editSlotDurationMs: number;
   private readonly editSlotDraw: EditSlotOptions['draw'];
 
@@ -101,6 +118,7 @@ export class RecordingEngineImpl {
     this.captureStreamFactory = opts.captureStreamFactory ?? defaultCaptureStreamFactory;
     this.mediaRecorderFactory = opts.mediaRecorderFactory ?? defaultMediaRecorderFactory;
     this.audioContextFactory = opts.audioContextFactory ?? defaultAudioContextFactory;
+    this.mediaStreamFactory = opts.mediaStreamFactory ?? defaultMediaStreamFactory;
     this.editSlotDurationMs = opts.editSlotDurationMs ?? EDIT_SLOT_DURATION_MS_DEFAULT;
     this.editSlotDraw = opts.editSlotDraw;
   }
@@ -128,9 +146,6 @@ export class RecordingEngineImpl {
 
     const isCanvasSource =
       typeof HTMLCanvasElement !== 'undefined' && this.source instanceof HTMLCanvasElement;
-    const videoStream = isCanvasSource
-      ? this.captureStreamFactory(this.source as HTMLCanvasElement)
-      : (this.source as MediaStream);
 
     // Mix in a placeholder "TikTok track" audio source via AudioContext.
     const audioCtx = this.audioContextFactory();
@@ -139,11 +154,28 @@ export class RecordingEngineImpl {
     const placeholderTrackSource = audioCtx.createOscillator();
     placeholderTrackSource.connect(destination);
     placeholderTrackSource.start?.();
+    const audioTracks = destination.stream.getTracks();
 
-    for (const track of destination.stream.getTracks()) {
-      videoStream.addTrack(track);
+    let recordedStream: MediaStream;
+    if (isCanvasSource) {
+      // captureStream() mints a stream the engine owns outright — safe to mutate in place and
+      // to stop() every one of its tracks on teardown.
+      const videoStream = this.captureStreamFactory(this.source as HTMLCanvasElement);
+      for (const track of audioTracks) {
+        videoStream.addTrack(track);
+      }
+      recordedStream = videoStream;
+      this.ownedTracks = recordedStream.getTracks();
+    } else {
+      // The MediaStream source is the CALLER'S OWN stream object — it may be shared with, e.g., a
+      // live WebRTC call. Never mutate it (no addTrack on it) and never let stop()/teardown stop
+      // its tracks: build a brand-new stream referencing the caller's tracks (not owned by this
+      // engine) plus the engine's own placeholder audio track(s) (owned).
+      const callerStream = this.source as MediaStream;
+      recordedStream = this.mediaStreamFactory([...callerStream.getTracks(), ...audioTracks]);
+      this.ownedTracks = audioTracks;
     }
-    this.stream = videoStream;
+    this.stream = recordedStream;
 
     const chunks: Blob[] = [];
     const recorder = this.mediaRecorderFactory(this.stream);
@@ -195,8 +227,11 @@ export class RecordingEngineImpl {
     }
     this.recorder = null;
     if (this.stream) {
-      this.stream.getTracks().forEach((track) => track.stop());
+      // Only stop tracks the engine itself created/owns — for a MediaStream source that's just
+      // the placeholder audio track(s); the caller's original tracks are never stopped here.
+      this.ownedTracks.forEach((track) => track.stop());
       this.stream = null;
+      this.ownedTracks = [];
     }
     if (this.audioCtx) {
       this.audioCtx.close();
@@ -237,6 +272,7 @@ export interface RecordingComponentProps {
   captureStreamFactory?: CaptureStreamFactory;
   mediaRecorderFactory?: MediaRecorderFactory;
   audioContextFactory?: AudioContextFactory;
+  mediaStreamFactory?: MediaStreamFactory;
   editSlotDurationMs?: number;
   editSlotDraw?: EditSlotOptions['draw'];
 }
@@ -256,6 +292,7 @@ export const RecordingComponent = forwardRef(function RecordingComponent(
     captureStreamFactory,
     mediaRecorderFactory,
     audioContextFactory,
+    mediaStreamFactory,
     editSlotDurationMs,
     editSlotDraw,
   } = props;
@@ -265,6 +302,7 @@ export const RecordingComponent = forwardRef(function RecordingComponent(
       captureStreamFactory,
       mediaRecorderFactory,
       audioContextFactory,
+      mediaStreamFactory,
       editSlotDurationMs,
       editSlotDraw,
     });

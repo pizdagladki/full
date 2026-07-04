@@ -8,6 +8,7 @@ import type {
   AudioContextLike,
   AudioNodeLike,
   MediaStreamAudioDestinationNodeLike,
+  MediaStreamFactory,
 } from './index';
 import type { ClipsApi } from '../api/clips';
 import { EDIT_SLOT_DURATION_MS_DEFAULT } from '../canvas';
@@ -100,6 +101,12 @@ function makeFactories() {
     mediaRecorderFactory,
     audioContextFactory,
   };
+}
+
+// Mirrors the real `new MediaStream(tracks)` default — jsdom doesn't implement the MediaStream
+// constructor, so tests must inject this like the other factories.
+function makeMediaStreamFactory(): MediaStreamFactory {
+  return vi.fn((tracks) => makeStream(tracks as unknown as MockMediaStreamTrack[]));
 }
 
 function makeCanvas(): HTMLCanvasElement {
@@ -274,10 +281,12 @@ describe('RecordingEngineImpl', () => {
   it('accepts a MediaStream source directly, without calling captureStreamFactory', async () => {
     const { mediaRecorderFactory, audioContextFactory } = makeFactories();
     const captureStreamFactory: CaptureStreamFactory = vi.fn(() => makeStream());
+    const mediaStreamFactory = makeMediaStreamFactory();
     const engine = new RecordingEngineImpl({
       captureStreamFactory,
       mediaRecorderFactory,
       audioContextFactory,
+      mediaStreamFactory,
     });
 
     const directStream = makeStream([new MockMediaStreamTrack()]);
@@ -289,6 +298,65 @@ describe('RecordingEngineImpl', () => {
     await vi.advanceTimersByTimeAsync(EDIT_SLOT_DURATION_MS_DEFAULT);
     const blob = await capturePromise;
     expect(blob).toBeInstanceOf(Blob);
+  });
+
+  // criterion: bug fix — a MediaStream source is the CALLER'S OWN stream object (e.g. the same
+  // stream also live on an active WebRTC call via RtcPeerImpl). captureWin() must never mutate it
+  // (no addTrack against the caller's stream) — the mixed audio track must land on a brand-new
+  // stream built via mediaStreamFactory instead.
+  it('media-stream-source-no-mutate: captureWin never calls addTrack on the caller-supplied MediaStream', async () => {
+    const { mediaRecorderFactory, audioContextFactory } = makeFactories();
+    const captureStreamFactory: CaptureStreamFactory = vi.fn(() => makeStream());
+    const mediaStreamFactory = makeMediaStreamFactory();
+    const engine = new RecordingEngineImpl({
+      captureStreamFactory,
+      mediaRecorderFactory,
+      audioContextFactory,
+      mediaStreamFactory,
+    });
+
+    const originalStream = makeStream([new MockMediaStreamTrack()]) as unknown as MockMediaStream;
+    const addTrackSpy = vi.spyOn(originalStream, 'addTrack');
+
+    engine.startRingBuffer(originalStream as unknown as MediaStream);
+    const capturePromise = engine.captureWin();
+
+    await vi.advanceTimersByTimeAsync(EDIT_SLOT_DURATION_MS_DEFAULT);
+    await capturePromise;
+
+    expect(addTrackSpy).not.toHaveBeenCalled();
+    // The caller's stream must still only carry the track it started with — untouched.
+    expect(originalStream.getTracks()).toHaveLength(1);
+  });
+
+  // criterion: bug fix (violation guard) — stop() with a MediaStream source must stop only the
+  // engine's own placeholder audio track and must NOT stop the caller's original tracks (e.g. the
+  // shared camera/mic tracks of a live WebRTC call) — the caller owns their lifecycle.
+  it('media-stream-source-stop-scope: stop() stops the engine-owned audio track but not the caller-supplied MediaStream tracks', async () => {
+    const { audioCtx, mediaRecorderFactory, audioContextFactory } = makeFactories();
+    const captureStreamFactory: CaptureStreamFactory = vi.fn(() => makeStream());
+    const mediaStreamFactory = makeMediaStreamFactory();
+    const engine = new RecordingEngineImpl({
+      captureStreamFactory,
+      mediaRecorderFactory,
+      audioContextFactory,
+      mediaStreamFactory,
+    });
+
+    const originalTrack = new MockMediaStreamTrack();
+    const originalStream = makeStream([originalTrack]);
+    engine.startRingBuffer(originalStream);
+
+    const capturePromise = engine.captureWin();
+    engine.stop();
+
+    expect(originalTrack.stop).not.toHaveBeenCalled();
+    expect(audioCtx.destinationTrack.stop).toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(EDIT_SLOT_DURATION_MS_DEFAULT);
+    await capturePromise.catch(() => undefined);
+    // Still untouched after the in-flight capture settles.
+    expect(originalTrack.stop).not.toHaveBeenCalled();
   });
 
   // criterion: 1 (violation guard) — captureWin() called before startRingBuffer() must fail loudly
