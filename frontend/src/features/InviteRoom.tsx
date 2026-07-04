@@ -109,18 +109,27 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
     [teardown, navigate],
   );
 
-  const startConnection = useCallback(() => {
-    const ws = wsRef.current!;
-    ws.connect(SIGNALING_WS_PATH);
-    ws.onMessage(handleMessage);
-  }, [handleMessage]);
+  // The native WebSocket (and WsClient, which does no readyState guarding) throws
+  // InvalidStateError if send() is called while the socket is still CONNECTING. So the
+  // create_room/join_room frame must NOT be sent synchronously right after connect() — it has to
+  // wait for the socket to actually open. Mirrors Search.tsx's onOpen-gated join.
+  const startConnection = useCallback(
+    (onOpenSend: () => void) => {
+      const ws = wsRef.current!;
+      ws.connect(SIGNALING_WS_PATH);
+      ws.onOpen(onOpenSend);
+      ws.onMessage(handleMessage);
+    },
+    [handleMessage],
+  );
 
   const handleCreateRoom = useCallback(() => {
     setPhase('creating');
     setErrorMessage('');
-    startConnection();
-    const msg: CreateRoomMsg = { type: 'create_room' };
-    wsRef.current?.send(JSON.stringify(msg));
+    startConnection(() => {
+      const msg: CreateRoomMsg = { type: 'create_room' };
+      wsRef.current?.send(JSON.stringify(msg));
+    });
   }, [startConnection]);
 
   const handleJoinSubmit = useCallback(() => {
@@ -128,9 +137,10 @@ export function InviteRoom({ wsClient }: InviteRoomProps) {
     if (!trimmed) return;
     setPhase('joining');
     setErrorMessage('');
-    startConnection();
-    const msg: JoinRoomMsg = { type: 'join_room', code: trimmed };
-    wsRef.current?.send(JSON.stringify(msg));
+    startConnection(() => {
+      const msg: JoinRoomMsg = { type: 'join_room', code: trimmed };
+      wsRef.current?.send(JSON.stringify(msg));
+    });
   }, [joinCodeInput, startConnection]);
 
   const handleStartBattle = useCallback(() => {

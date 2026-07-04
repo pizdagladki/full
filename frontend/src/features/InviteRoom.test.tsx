@@ -103,6 +103,10 @@ describe('InviteRoom', () => {
     fireEvent.click(screen.getByTestId('create-room-button'));
 
     expect(ws.connect).toHaveBeenCalledWith('/ws');
+
+    act(() => {
+      ws.emitOpen();
+    });
     expect(sentMessages(ws)).toEqual([{ type: 'create_room' }]);
 
     act(() => {
@@ -112,6 +116,26 @@ describe('InviteRoom', () => {
     expect(screen.getByTestId('invite-code').textContent).toBe('ABC123');
     expect(screen.getByTestId('invite-waiting-message')).toBeInTheDocument();
     expect(screen.getByTestId('start-battle-button')).toBeInTheDocument();
+  });
+
+  // criterion: 1 (violation guard) — the create_room frame must NOT be sent synchronously right
+  // after clicking Create room (the socket is still CONNECTING at that point); it must only be
+  // sent once the WS actually reports open. This is the case that catches the InvalidStateError
+  // regression: a mock/native WebSocket that ignores readyState would let this pass, but the fix
+  // must only send from inside onOpen.
+  it('create-shows-code violation guard: create_room is sent only after the WS actually opens, not synchronously on click', () => {
+    const ws = new MockWs();
+    renderInviteRoom(ws);
+
+    fireEvent.click(screen.getByTestId('create-room-button'));
+
+    expect(ws.send).not.toHaveBeenCalled();
+
+    act(() => {
+      ws.emitOpen();
+    });
+
+    expect(sentMessages(ws)).toEqual([{ type: 'create_room' }]);
   });
 
   // criterion: 1 (violation guard) — without a real room_created reply the code must NOT render;
@@ -134,6 +158,7 @@ describe('InviteRoom', () => {
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
+      ws.emitOpen();
       ws.emitMessage(JSON.stringify({ type: 'room_created', room_id: 'room-42', code: 'XYZ' }));
     });
 
@@ -153,6 +178,10 @@ describe('InviteRoom', () => {
     fireEvent.click(screen.getByTestId('join-room-button'));
 
     expect(ws.connect).toHaveBeenCalledWith('/ws');
+
+    act(() => {
+      ws.emitOpen();
+    });
     expect(sentMessages(ws)).toEqual([{ type: 'join_room', code: 'FRIEND1' }]);
 
     act(() => {
@@ -161,6 +190,25 @@ describe('InviteRoom', () => {
 
     expect(screen.getByTestId('battle-probe')).toBeInTheDocument();
     expect(screen.getByTestId('battle-room-id').textContent).toBe('room-99');
+  });
+
+  // criterion: 2 (violation guard) — join_room must NOT be sent synchronously right after clicking
+  // Join by code (the socket is still CONNECTING); it must only be sent once the WS actually
+  // opens. Catches the same InvalidStateError regression as the create_room case.
+  it('join-by-code-transitions-to-battle violation guard: join_room is sent only after the WS actually opens, not synchronously on click', () => {
+    const ws = new MockWs();
+    renderInviteRoom(ws);
+
+    fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'FRIEND1' } });
+    fireEvent.click(screen.getByTestId('join-room-button'));
+
+    expect(ws.send).not.toHaveBeenCalled();
+
+    act(() => {
+      ws.emitOpen();
+    });
+
+    expect(sentMessages(ws)).toEqual([{ type: 'join_room', code: 'FRIEND1' }]);
   });
 
   // criterion: 2 (violation guard) — an invalid/expired code (an `error` frame) must show a
@@ -178,6 +226,7 @@ describe('InviteRoom', () => {
     fireEvent.click(screen.getByTestId('join-room-button'));
 
     act(() => {
+      ws.emitOpen();
       ws.emitMessage(JSON.stringify({ type: 'error', error }));
     });
 
@@ -193,6 +242,9 @@ describe('InviteRoom', () => {
 
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'CODE1' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
+    act(() => {
+      ws.emitOpen();
+    });
 
     expect(() => {
       act(() => {
@@ -213,6 +265,7 @@ describe('InviteRoom', () => {
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'BADCODE' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
     act(() => {
+      ws.emitOpen();
       ws.emitMessage(JSON.stringify({ type: 'error', error: 'invalid or expired code' }));
     });
 
@@ -241,6 +294,7 @@ describe('InviteRoom', () => {
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
+      ws.emitOpen();
       ws.emitMessage(JSON.stringify({ type: 'room_created', room_id: 'room-1', code: 'ABC123' }));
     });
 
@@ -267,6 +321,7 @@ describe('InviteRoom', () => {
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
+      ws.emitOpen();
       ws.emitMessage(JSON.stringify({ type: 'room_created', room_id: 'room-1', code: 'ABC123' }));
     });
 
@@ -287,6 +342,7 @@ describe('InviteRoom', () => {
 
     fireEvent.click(screen.getByTestId('create-room-button'));
     act(() => {
+      ws.emitOpen();
       ws.emitMessage(JSON.stringify({ type: 'room_created', room_id: 'room-1', code: 'ABC123' }));
     });
 
