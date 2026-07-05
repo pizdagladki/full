@@ -9,7 +9,7 @@ vi.mock('@mediapipe/tasks-vision', () => ({
 }));
 
 import { FaceLandmarker as MockedFaceLandmarker, FilesetResolver as MockedFilesetResolver } from '@mediapipe/tasks-vision';
-import { createFaceLandmarkerRunner, FaceLandmarkerRunner, mapFaceConfidence } from './FaceLandmarkerRunner';
+import { createFaceLandmarkerRunner, FaceLandmarkerRunner } from './FaceLandmarkerRunner';
 import * as cvIndex from './index';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,8 @@ function makeFakeVideo(): HTMLVideoElement {
   return document.createElement('video');
 }
 
+const emptyResult: FaceLandmarkerResult = { faceLandmarks: [], faceBlendshapes: [], facialTransformationMatrixes: [] };
+
 beforeEach(() => {
   vi.mocked(MockedFaceLandmarker.createFromOptions).mockReset();
   vi.mocked(MockedFilesetResolver.forVisionTasks).mockReset();
@@ -49,7 +51,7 @@ describe('FaceLandmarkerRunner.detectForVideo — mapping (criterion 1)', () => 
   it('criterion 1: maps faceLandmarks (x,y,z, dropping visibility) and faceConfidences from a mocked result', () => {
     const mpResult: FaceLandmarkerResult = {
       faceLandmarks: [[mpLandmark(0.1, 0.2, 0.3, 0.9), mpLandmark(0.4, 0.5, 0.6, 0.8)]],
-      faceBlendshapes: classifications([category('_neutral', 0.87)]),
+      faceBlendshapes: [],
       facialTransformationMatrixes: [],
     };
     const runner = new FaceLandmarkerRunner();
@@ -64,17 +66,18 @@ describe('FaceLandmarkerRunner.detectForVideo — mapping (criterion 1)', () => 
         { x: 0.4, y: 0.5, z: 0.6 },
       ],
     ]);
-    expect(result.faceConfidences).toEqual([0.87]);
+    expect(result.faceConfidences).toEqual([1]);
   });
 
-  it('fails-on-violation: dropping the confidence mapping would leave faceConfidences unset for a detected face', () => {
-    // If criterion 1/3's mapping were removed, a genuinely-detected face would report NO
+  it('fails-on-violation: a detected face must always report a populated faceConfidences[0]', () => {
+    // If the confidence mapping were dropped entirely, a genuinely-detected face would report NO
     // confidence at all — CvEngine's confidence gate (which treats "absent" as "confident") would
-    // then never distinguish a real low-confidence frame. Asserting the field IS populated here
-    // pins the mapping in place.
+    // then never distinguish a real low-confidence frame from a fully-confident one. Asserting the
+    // field IS populated (and at full confidence, since real gating already happened inside the
+    // model) pins the mapping in place.
     const mpResult: FaceLandmarkerResult = {
       faceLandmarks: [[mpLandmark(0, 0, 0)]],
-      faceBlendshapes: classifications([category('_neutral', 0.42)]),
+      faceBlendshapes: [],
       facialTransformationMatrixes: [],
     };
     const runner = new FaceLandmarkerRunner();
@@ -82,12 +85,11 @@ describe('FaceLandmarkerRunner.detectForVideo — mapping (criterion 1)', () => 
 
     const result = runner.detectForVideo(makeFakeVideo(), 0);
     expect(result.faceConfidences).toBeDefined();
-    expect(result.faceConfidences?.[0]).toBe(0.42);
+    expect(result.faceConfidences?.[0]).toBe(1);
   });
 
   it('passes the video element and timestamp straight through to FaceLandmarker.detectForVideo (VIDEO mode)', () => {
-    const mpResult: FaceLandmarkerResult = { faceLandmarks: [], faceBlendshapes: [], facialTransformationMatrixes: [] };
-    const landmarker = makeFakeMpLandmarker(mpResult);
+    const landmarker = makeFakeMpLandmarker(emptyResult);
     const runner = new FaceLandmarkerRunner();
     runner.setLandmarker(landmarker);
 
@@ -109,9 +111,8 @@ describe('FaceLandmarkerRunner.detectForVideo — never fabricates a face (crite
   });
 
   it('criterion 2: a ready runner with an empty-face MediaPipe result returns { faceLandmarks: [] }', () => {
-    const mpResult: FaceLandmarkerResult = { faceLandmarks: [], faceBlendshapes: [], facialTransformationMatrixes: [] };
     const runner = new FaceLandmarkerRunner();
-    runner.setLandmarker(makeFakeMpLandmarker(mpResult));
+    runner.setLandmarker(makeFakeMpLandmarker(emptyResult));
 
     const result = runner.detectForVideo(makeFakeVideo(), 0);
     expect(result).toEqual({ faceLandmarks: [] });
@@ -144,46 +145,61 @@ describe('FaceLandmarkerRunner.detectForVideo — never fabricates a face (crite
 });
 
 // ---------------------------------------------------------------------------
-// criterion 3 — confidence mapping helper
+// criterion 3 — confidence is delegated to the model's real detection thresholds, not expression
 // ---------------------------------------------------------------------------
-describe('mapFaceConfidence (criterion 3)', () => {
-  const cases: Array<{ name: string; blendshapes: Classifications[] | undefined; expected: number }> = [
-    {
-      name: 'criterion 3: prefers the _neutral category score when present',
-      blendshapes: classifications([category('mouthSmile', 0.2), category('_neutral', 0.73), category('browUp', 0.05)]),
-      expected: 0.73,
-    },
-    {
-      name: 'criterion 3: falls back to the max category score when _neutral is absent',
-      blendshapes: classifications([category('mouthSmile', 0.2), category('browUp', 0.65)]),
-      expected: 0.65,
-    },
-    {
-      name: 'criterion 3: falls back to full confidence (1) when categories are empty',
-      blendshapes: classifications([]),
-      expected: 1,
-    },
-    {
-      name: 'criterion 3: falls back to full confidence (1) when blendshapes were not requested/returned',
-      blendshapes: undefined,
-      expected: 1,
-    },
-    {
-      name: 'criterion 3: falls back to full confidence (1) when faceBlendshapes array itself is empty',
-      blendshapes: [],
-      expected: 1,
-    },
-  ];
+describe('FaceLandmarkerRunner — confidence gating delegated to the model (criterion 3)', () => {
+  it('criterion 3: createFaceLandmarkerRunner configures the model with real confidence thresholds and no blendshapes', async () => {
+    vi.mocked(MockedFilesetResolver.forVisionTasks).mockResolvedValue({
+      wasmLoaderPath: '/mediapipe/wasm/x.js',
+      wasmBinaryPath: '/mediapipe/wasm/x.wasm',
+    });
+    vi.mocked(MockedFaceLandmarker.createFromOptions).mockResolvedValue(makeFakeMpLandmarker(emptyResult));
 
-  it.each(cases)('$name', ({ blendshapes, expected }) => {
-    expect(mapFaceConfidence(blendshapes)).toBe(expected);
+    await createFaceLandmarkerRunner();
+
+    const [, options] = vi.mocked(MockedFaceLandmarker.createFromOptions).mock.calls[0];
+    expect(options.runningMode).toBe('VIDEO');
+    expect(options.numFaces).toBe(1);
+    expect(options.minFaceDetectionConfidence).toBe(0.5);
+    expect(options.minFacePresenceConfidence).toBe(0.5);
+    expect(options.minTrackingConfidence).toBe(0.5);
+    expect(options.outputFaceBlendshapes).toBeUndefined();
   });
 
-  it('fails-on-violation: swapping max-score fallback for the first category would misreport confidence', () => {
-    // categories are NOT always sorted (mocked out of order here) — picking "the first" instead
-    // of the max would silently under/over-report confidence. Pin the max-of-all-categories rule.
-    const blendshapes = classifications([category('a', 0.1), category('b', 0.9), category('c', 0.5)]);
-    expect(mapFaceConfidence(blendshapes)).toBe(0.9);
+  it('fails-on-violation: a present face reports confidence 1 regardless of any blendshape content in the mock result', () => {
+    // Regression test for the original bug: confidence used to be read from the `_neutral`
+    // blendshape score, which is anti-correlated with expressiveness — a real blink (high
+    // eyeBlinkLeft/Right, low _neutral) would have been scored BELOW CvEngine's confidence
+    // threshold and silently dropped, so onBlink would never fire. We no longer read blendshapes
+    // at all, so a present face is always reported at full confidence no matter what expression
+    // (or blendshape content) the mocked result carries.
+    const blinkFrameBlendshapes = classifications([
+      category('eyeBlinkLeft', 0.97),
+      category('eyeBlinkRight', 0.95),
+      category('_neutral', 0.12), // would have failed the old CONFIDENCE_THRESHOLD (0.5) gate
+    ]);
+    const mpResult: FaceLandmarkerResult = {
+      faceLandmarks: [[mpLandmark(0.3, 0.3, 0)]],
+      faceBlendshapes: blinkFrameBlendshapes,
+      facialTransformationMatrixes: [],
+    };
+    const runner = new FaceLandmarkerRunner();
+    runner.setLandmarker(makeFakeMpLandmarker(mpResult));
+
+    const result = runner.detectForVideo(makeFakeVideo(), 0);
+    expect(result.faceConfidences).toEqual([1]);
+  });
+
+  it('criterion 3: a present face reports confidence 1 even when no blendshapes are returned at all', () => {
+    const mpResult: FaceLandmarkerResult = {
+      faceLandmarks: [[mpLandmark(0.1, 0.1, 0)]],
+      faceBlendshapes: [],
+      facialTransformationMatrixes: [],
+    };
+    const runner = new FaceLandmarkerRunner();
+    runner.setLandmarker(makeFakeMpLandmarker(mpResult));
+
+    expect(runner.detectForVideo(makeFakeVideo(), 0).faceConfidences).toEqual([1]);
   });
 });
 
@@ -194,11 +210,7 @@ describe('createFaceLandmarkerRunner — local assets only (criterion 4)', () =>
   it('criterion 4: defaults to local origin-relative wasm and model paths (no CDN URL)', async () => {
     const fakeFileset = { wasmLoaderPath: '/mediapipe/wasm/x.js', wasmBinaryPath: '/mediapipe/wasm/x.wasm' };
     vi.mocked(MockedFilesetResolver.forVisionTasks).mockResolvedValue(fakeFileset);
-    vi.mocked(MockedFaceLandmarker.createFromOptions).mockResolvedValue(makeFakeMpLandmarker({
-      faceLandmarks: [],
-      faceBlendshapes: [],
-      facialTransformationMatrixes: [],
-    }));
+    vi.mocked(MockedFaceLandmarker.createFromOptions).mockResolvedValue(makeFakeMpLandmarker(emptyResult));
 
     await createFaceLandmarkerRunner();
 
@@ -213,11 +225,7 @@ describe('createFaceLandmarkerRunner — local assets only (criterion 4)', () =>
   it('criterion 4: honors injected wasmBasePath/modelAssetPath overrides (so tests never hit real assets)', async () => {
     const fakeFileset = { wasmLoaderPath: '/custom/wasm/x.js', wasmBinaryPath: '/custom/wasm/x.wasm' };
     vi.mocked(MockedFilesetResolver.forVisionTasks).mockResolvedValue(fakeFileset);
-    vi.mocked(MockedFaceLandmarker.createFromOptions).mockResolvedValue(makeFakeMpLandmarker({
-      faceLandmarks: [],
-      faceBlendshapes: [],
-      facialTransformationMatrixes: [],
-    }));
+    vi.mocked(MockedFaceLandmarker.createFromOptions).mockResolvedValue(makeFakeMpLandmarker(emptyResult));
 
     await createFaceLandmarkerRunner({ wasmBasePath: '/custom/wasm', modelAssetPath: '/custom/model.task' });
 
@@ -229,7 +237,7 @@ describe('createFaceLandmarkerRunner — local assets only (criterion 4)', () =>
   it('criterion 2: the factory awaits the full load, and the returned runner then maps real detections', async () => {
     const mpResult: FaceLandmarkerResult = {
       faceLandmarks: [[mpLandmark(0.2, 0.3, 0.1)]],
-      faceBlendshapes: classifications([category('_neutral', 0.6)]),
+      faceBlendshapes: [],
       facialTransformationMatrixes: [],
     };
     vi.mocked(MockedFilesetResolver.forVisionTasks).mockResolvedValue({
@@ -242,7 +250,7 @@ describe('createFaceLandmarkerRunner — local assets only (criterion 4)', () =>
     const result = runner.detectForVideo(makeFakeVideo(), 500);
 
     expect(result.faceLandmarks).toEqual([[{ x: 0.2, y: 0.3, z: 0.1 }]]);
-    expect(result.faceConfidences).toEqual([0.6]);
+    expect(result.faceConfidences).toEqual([1]);
   });
 });
 

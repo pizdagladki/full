@@ -1,9 +1,4 @@
-import {
-  FaceLandmarker,
-  FilesetResolver,
-  type Classifications,
-  type NormalizedLandmark as MpNormalizedLandmark,
-} from '@mediapipe/tasks-vision';
+import { FaceLandmarker, FilesetResolver, type NormalizedLandmark as MpNormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { FaceLandmarkResult, LandmarkRunner, NormalizedLandmark } from './types';
 
 // Local, CDN-free static assets — see the `mediapipeWasmPlugin` in vite.config.ts (dev middleware
@@ -11,6 +6,10 @@ import type { FaceLandmarkResult, LandmarkRunner, NormalizedLandmark } from './t
 // committed model at `public/models/face_landmarker.task`. Never point these at a CDN URL.
 const DEFAULT_WASM_BASE_PATH = '/mediapipe/wasm';
 const DEFAULT_MODEL_ASSET_PATH = '/models/face_landmarker.task';
+// The real confidence gate: a returned face has already survived these thresholds inside the
+// model itself, so a low-confidence/uncertain-tracking frame simply yields NO face
+// (`faceLandmarks: []`) rather than a face we'd then have to score ourselves.
+const DETECTION_CONFIDENCE_THRESHOLD = 0.5;
 
 export interface CreateFaceLandmarkerRunnerOptions {
   wasmBasePath?: string;
@@ -23,25 +22,6 @@ function mapFaceLandmarks(faceLandmarks: MpNormalizedLandmark[][]): NormalizedLa
 }
 
 /**
- * Derives a real, per-frame face-confidence proxy from a `FaceLandmarker` result.
- *
- * `@mediapipe/tasks-vision`'s `FaceLandmarkerResult` does NOT surface a raw face-detection score
- * (that only exists as an INPUT threshold — `minFaceDetectionConfidence` — not an output field).
- * The best available real per-frame signal is the blendshape classification scores: when present,
- * we prefer the `_neutral` category's score (a stable, always-present baseline expression score),
- * falling back to the highest-scoring category. When blendshapes weren't requested/returned at
- * all, a face WAS still detected (this is only called once `faceLandmarks.length > 0`), so we
- * report full confidence for it rather than fabricate a lower number.
- */
-export function mapFaceConfidence(faceBlendshapes: Classifications[] | undefined): number {
-  const categories = faceBlendshapes?.[0]?.categories;
-  if (!categories || categories.length === 0) return 1;
-  const neutral = categories.find((category) => category.categoryName === '_neutral');
-  if (neutral) return neutral.score;
-  return categories.reduce((max, category) => Math.max(max, category.score), categories[0].score);
-}
-
-/**
  * Production `LandmarkRunner` backed by MediaPipe's `FaceLandmarker`.
  *
  * `detectForVideo` stays SYNCHRONOUS to match `LandmarkRunner` (mirrors `FaceLandmarker`'s own
@@ -49,6 +29,15 @@ export function mapFaceConfidence(faceBlendshapes: Classifications[] | undefined
  * loading is asynchronous — see `createFaceLandmarkerRunner`. Until a model is assigned (loading,
  * or never loaded), or when no face is found in a frame, `detectForVideo` returns
  * `{ faceLandmarks: [] }` — it NEVER fabricates a face.
+ *
+ * Confidence: `@mediapipe/tasks-vision`'s `FaceLandmarkerResult` exposes NO scalar
+ * detector/landmark-confidence field, so real confidence gating is delegated to the model's own
+ * `minFaceDetectionConfidence` / `minFacePresenceConfidence` / `minTrackingConfidence` options
+ * (set in `createFaceLandmarkerRunner`) — a low-confidence frame never comes back as a face at
+ * all. A returned face has therefore already passed the real gate, so it is reported at full
+ * confidence (`1`) rather than fabricated from an unrelated signal (do NOT use blendshapes /
+ * expression weights / `visibility` here — those measure expression, not detection confidence,
+ * and would incorrectly suppress genuine expressive frames like blinks).
  */
 export class FaceLandmarkerRunner implements LandmarkRunner {
   private landmarker: FaceLandmarker | null = null;
@@ -66,7 +55,7 @@ export class FaceLandmarkerRunner implements LandmarkRunner {
 
     return {
       faceLandmarks: mapFaceLandmarks(result.faceLandmarks),
-      faceConfidences: [mapFaceConfidence(result.faceBlendshapes)],
+      faceConfidences: [1],
     };
   }
 }
@@ -74,7 +63,9 @@ export class FaceLandmarkerRunner implements LandmarkRunner {
 /**
  * Asynchronously loads the FaceLandmarker WASM runtime + model and returns a ready
  * `FaceLandmarkerRunner`. Assets are resolved from LOCAL static paths only (never a CDN) — see
- * `DEFAULT_WASM_BASE_PATH` / `DEFAULT_MODEL_ASSET_PATH` and `vite.config.ts`.
+ * `DEFAULT_WASM_BASE_PATH` / `DEFAULT_MODEL_ASSET_PATH` and `vite.config.ts`. Detection
+ * confidence thresholds are set explicitly so the model itself performs the real confidence
+ * gating (see the class doc comment above).
  */
 export async function createFaceLandmarkerRunner(
   options: CreateFaceLandmarkerRunnerOptions = {},
@@ -87,7 +78,9 @@ export async function createFaceLandmarkerRunner(
     baseOptions: { modelAssetPath },
     runningMode: 'VIDEO',
     numFaces: 1,
-    outputFaceBlendshapes: true,
+    minFaceDetectionConfidence: DETECTION_CONFIDENCE_THRESHOLD,
+    minFacePresenceConfidence: DETECTION_CONFIDENCE_THRESHOLD,
+    minTrackingConfidence: DETECTION_CONFIDENCE_THRESHOLD,
   });
   runner.setLandmarker(landmarker);
   return runner;
