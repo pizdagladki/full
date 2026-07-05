@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +111,43 @@ func TestHTTPMediaClient_ExpireKingClip(t *testing.T) {
 				t.Fatalf("ExpireKingClip() unexpected error = %v", err)
 			}
 		})
+	}
+}
+
+// TestHTTPMediaClient_ExpireKingClip_EscapesClipID verifies criterion: 2 —
+// a clipID containing "/" or ".." (confused-deputy / path-traversal
+// attempt) is percent-escaped as a single opaque path segment rather than
+// being interpolated raw, so it cannot redirect the trusted internal bearer
+// token onto an unintended route. Without url.PathEscape in ExpireKingClip,
+// the escaped path assertion below fails.
+func TestHTTPMediaClient_ExpireKingClip_EscapesClipID(t *testing.T) {
+	t.Parallel()
+
+	const maliciousClipID = "../../secret"
+
+	var gotEscapedPath string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEscapedPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := service.NewHTTPMediaClient(srv.URL, "token", &http.Client{Timeout: 2 * time.Second})
+
+	if err := client.ExpireKingClip(context.Background(), maliciousClipID); err != nil {
+		t.Fatalf("ExpireKingClip() unexpected error = %v", err)
+	}
+
+	wantEscapedPath := "/internal/v1/king-clips/" + url.PathEscape(maliciousClipID)
+	if gotEscapedPath != wantEscapedPath {
+		t.Errorf("escaped path = %q, want %q", gotEscapedPath, wantEscapedPath)
+	}
+
+	// The clipID's "/" must never survive as a literal, unescaped path
+	// separator beyond the fixed "/internal/v1/king-clips/" prefix.
+	if strings.Count(gotEscapedPath, "/") != strings.Count("/internal/v1/king-clips/", "/") {
+		t.Errorf("escaped path %q contains unescaped path separators from clipID", gotEscapedPath)
 	}
 }
 
