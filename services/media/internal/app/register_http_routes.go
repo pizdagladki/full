@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/pizdagladki/full/internal/platform/internalauth"
 )
 
 // registerHTTPRoutes builds the service's Echo router. Public routes are
@@ -31,6 +33,12 @@ func (a *App) registerHTTPRoutes() *echo.Echo {
 	v1.POST("/king-clips", a.kingClipHandler.Upload)
 	v1.GET("/king-clips/current", a.kingClipHandler.Current)
 	v1.DELETE("/king-clips/:id", a.kingClipHandler.Delete)
+
+	// Internal server-to-server king-clip expiry — internal bearer token
+	// required, no user session. Used by the koth reset worker to expire the
+	// king clip on a hill reset.
+	internal := e.Group("/internal/v1", internalauth.New(a.cfg.Internal.APIToken))
+	internal.DELETE("/king-clips/:id", a.kingClipHandler.DeleteInternal)
 
 	return e
 }

@@ -507,6 +507,102 @@ func TestKingClipService_Delete(t *testing.T) {
 	}
 }
 
+func TestKingClipService_ExpireByID(t *testing.T) {
+	t.Parallel()
+
+	fixedNow := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name       string
+		clipID     int64
+		setupRepo  func(m *repomocks.MockKingClipRepository)
+		setupStore func(m *svcmocks.MockObjectStore)
+		wantErr    error
+	}{
+		{
+			// criterion: 2 — success: repo removes the metadata row and returns
+			// its object_key, and the service best-effort removes the object from
+			// storage. Crucially, no ownership check (no GetByID/userID) is made —
+			// unlike the session-gated Delete.
+			name:   "existing clip: removes metadata then object, no ownership check",
+			clipID: 1,
+			setupRepo: func(m *repomocks.MockKingClipRepository) {
+				m.EXPECT().Delete(gomock.Any(), int64(1)).Return("king-clips/daily/42/a.webm", nil)
+			},
+			setupStore: func(m *svcmocks.MockObjectStore) {
+				m.EXPECT().Remove(gomock.Any(), "king-clips/daily/42/a.webm").Return(nil)
+			},
+		},
+		{
+			// criterion: 2 — missing clip: repo.Delete returns
+			// ErrKingClipNotFound, the service returns it as-is, and store.Remove
+			// is NEVER called.
+			name:   "missing clip: returns ErrKingClipNotFound, store.Remove not called",
+			clipID: 999,
+			setupRepo: func(m *repomocks.MockKingClipRepository) {
+				m.EXPECT().Delete(gomock.Any(), int64(999)).Return("", repository.ErrKingClipNotFound)
+			},
+			setupStore: func(_ *svcmocks.MockObjectStore) {},
+			wantErr:    repository.ErrKingClipNotFound,
+		},
+		{
+			name:   "repo Delete error is wrapped",
+			clipID: 2,
+			setupRepo: func(m *repomocks.MockKingClipRepository) {
+				m.EXPECT().Delete(gomock.Any(), int64(2)).Return("", errors.New("db error"))
+			},
+			setupStore: func(_ *svcmocks.MockObjectStore) {},
+			wantErr:    errors.New("expire king clip"),
+		},
+		{
+			// store.Remove failure is best-effort (logged, not returned) — mirrors
+			// the existing Delete method's behavior.
+			name:   "store.Remove failure is best-effort, does not fail the call",
+			clipID: 3,
+			setupRepo: func(m *repomocks.MockKingClipRepository) {
+				m.EXPECT().Delete(gomock.Any(), int64(3)).Return("king-clips/daily/42/b.webm", nil)
+			},
+			setupStore: func(m *svcmocks.MockObjectStore) {
+				m.EXPECT().Remove(gomock.Any(), "king-clips/daily/42/b.webm").Return(errors.New("minio down"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			repoMock := repomocks.NewMockKingClipRepository(ctrl)
+			storeMock := svcmocks.NewMockObjectStore(ctrl)
+
+			tt.setupRepo(repoMock)
+			tt.setupStore(storeMock)
+
+			svc := newKingClipSvc(repoMock, storeMock, fixedNow)
+
+			err := svc.ExpireByID(context.Background(), tt.clipID)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("ExpireByID() error = nil, want error")
+				}
+
+				if errors.Is(tt.wantErr, repository.ErrKingClipNotFound) &&
+					!errors.Is(err, repository.ErrKingClipNotFound) {
+					t.Errorf("ExpireByID() error = %v, want ErrKingClipNotFound", err)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ExpireByID() unexpected error = %v", err)
+			}
+		})
+	}
+}
+
 // TestKingClipService_FIFOIsolation documents (both directions) that king
 // clips and win-clips are fully independent categories: uploading a king clip
 // never evicts a user's win-clips (ClipRepository is never touched by

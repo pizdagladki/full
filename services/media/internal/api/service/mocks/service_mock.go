@@ -331,6 +331,20 @@ func (mr *MockKingClipServiceMockRecorder) Delete(ctx, userID, id any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockKingClipService)(nil).Delete), ctx, userID, id)
 }
 
+// ExpireByID mocks base method.
+func (m *MockKingClipService) ExpireByID(ctx context.Context, id int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExpireByID", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ExpireByID indicates an expected call of ExpireByID.
+func (mr *MockKingClipServiceMockRecorder) ExpireByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExpireByID", reflect.TypeOf((*MockKingClipService)(nil).ExpireByID), ctx, id)
+}
+
 // Upload mocks base method.
 func (m *MockKingClipService) Upload(ctx context.Context, userID int64, hillType string, blinkTsMs int64, contentType string, size int64, r io.Reader) (domain.KingClip, error) {
 	m.ctrl.T.Helper()

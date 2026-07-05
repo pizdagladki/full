@@ -35,4 +35,9 @@ type KingClipHandler interface {
 	Current(c echo.Context) error
 	// Delete handles DELETE /v1/king-clips/:id.
 	Delete(c echo.Context) error
+	// DeleteInternal handles DELETE /internal/v1/king-clips/:id. It is gated
+	// by the internalauth middleware (shared internal bearer token) instead of
+	// a user session, and performs no ownership check — used by the koth
+	// reset worker to expire a hill's king clip.
+	DeleteInternal(c echo.Context) error
 }

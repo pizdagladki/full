@@ -178,6 +178,27 @@ func (s *kingClipService) Delete(ctx context.Context, userID, id int64) error {
 	return nil
 }
 
+// ExpireByID removes the king clip identified by id (object + metadata)
+// WITHOUT an ownership check — for trusted internal callers only (the koth
+// reset worker expiring a hill's king clip on a daily/monthly reset).
+func (s *kingClipService) ExpireByID(ctx context.Context, id int64) error {
+	key, err := s.repo.Delete(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrKingClipNotFound) {
+			return repository.ErrKingClipNotFound
+		}
+
+		return fmt.Errorf("expire king clip: %w", err)
+	}
+
+	removeErr := s.store.Remove(ctx, key)
+	if removeErr != nil {
+		s.logger.Warn("remove expired king clip object", zap.String("key", key), zap.Error(removeErr))
+	}
+
+	return nil
+}
+
 // termFor returns the configured lifetime for hillType. Callers must validate
 // hillType via domain.ValidHillType before calling this.
 func (s *kingClipService) termFor(hillType string) time.Duration {

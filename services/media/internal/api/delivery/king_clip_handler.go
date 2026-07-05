@@ -150,3 +150,28 @@ func (h *kingClipHandler) Delete(c echo.Context) error {
 
 	return c.NoContent(http.StatusNoContent)
 }
+
+// DeleteInternal handles DELETE /internal/v1/king-clips/:id. Unlike Delete,
+// it is reached only through the internalauth-gated group (no user session
+// in context) and does NOT read UserIDContextKey — it expires the king clip
+// unconditionally, on behalf of a trusted internal caller (the koth reset
+// worker).
+func (h *kingClipHandler) DeleteInternal(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid king clip id"})
+	}
+
+	err = h.svc.ExpireByID(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, repository.ErrKingClipNotFound) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
+		h.logger.Error("expire king clip", zap.Error(err))
+
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
