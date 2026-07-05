@@ -27,7 +27,7 @@ interface UnknownServerMsg {
   error?: string;
 }
 
-const SIGNALING_WS_PATH = '/ws';
+const SIGNALING_WS_PATH = '/ws/signal';
 
 type Phase = 'menu' | 'creating' | 'waiting' | 'joining' | 'error';
 

@@ -38,7 +38,7 @@ interface SearchLocationState {
   level?: number;
 }
 
-const MATCHMAKING_WS_PATH = '/ws/matchmaking';
+const MATCHMAKING_WS_PATH = '/ws/match';
 
 // TODO: wire real MediaPipe FaceLandmarker runner (separate task). Until then this placeholder
 // always reports NO face — the honest-scaffold approach also used by Home's "Calibrating…"

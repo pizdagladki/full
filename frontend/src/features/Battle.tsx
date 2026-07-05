@@ -43,8 +43,8 @@ interface BattleLocationState {
   ranked?: boolean;
 }
 
-const ARBITRATION_WS_PATH = '/ws';
-const SIGNALING_URL = `${(import.meta.env?.VITE_WS_URL as string | undefined) ?? ''}/ws`;
+const ARBITRATION_WS_PATH = '/ws/signal';
+const SIGNALING_URL = `${(import.meta.env?.VITE_WS_URL as string | undefined) ?? ''}/ws/signal`;
 
 const SANITY_MS_DEFAULT = 2000;
 const COUNTDOWN_SECONDS_DEFAULT = 5;
