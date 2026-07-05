@@ -201,7 +201,9 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi, cvRunner = def
       <nav>
         <Link to="/store">Store</Link>
         <Link to="/profile">Profile</Link>
-        <Link to="/mode-select">Play</Link>
+        <Link to="/mode-select" state={{ trackId: selectedTrackId }}>
+          Play
+        </Link>
       </nav>
 
       {/* Level progress bar */}

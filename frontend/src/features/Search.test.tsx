@@ -114,18 +114,21 @@ function sentMessages(ws: WsClientApi): unknown[] {
 
 function BattleProbe() {
   const location = useLocation();
-  const state = location.state as { roomId?: string; opponent?: unknown } | null;
+  const state = location.state as
+    | { roomId?: string; opponent?: unknown; trackId?: string }
+    | null;
   return (
     <div data-testid="battle-probe">
       <span data-testid="battle-room-id">{state?.roomId}</span>
       <span data-testid="battle-opponent">{JSON.stringify(state?.opponent)}</span>
+      <span data-testid="battle-track-id">{state?.trackId}</span>
     </div>
   );
 }
 
-function renderSearch(wsClient: WsClientApi, cvRunner: LandmarkRunner) {
+function renderSearch(wsClient: WsClientApi, cvRunner: LandmarkRunner, trackId?: string) {
   return render(
-    <MemoryRouter initialEntries={['/search']}>
+    <MemoryRouter initialEntries={[{ pathname: '/search', state: trackId ? { trackId } : undefined }]}>
       <Routes>
         <Route path="/search" element={<Search wsClient={wsClient} cvRunner={cvRunner} />} />
         <Route path="/home" element={<div>HOME</div>} />
@@ -272,6 +275,48 @@ describe('Search', () => {
     expect(screen.getByTestId('battle-probe')).toBeInTheDocument();
     expect(screen.getByTestId('battle-room-id').textContent).toBe('room-7');
     expect(screen.getByTestId('battle-opponent').textContent).toBe(JSON.stringify({ id: 'opp-1' }));
+  });
+
+  // criterion: 4 (#159) — the trackId carried in via ModeSelect's location.state is forwarded
+  // onward to /battle alongside roomId/opponent.
+  it('matched-transitions-to-battle: forwards trackId from location.state to /battle', () => {
+    const { ws, fireOpen, fireMessage } = makeMockWs();
+    const { runner, setResult } = makeCvRunner();
+    renderSearch(ws, runner, 'track-9');
+
+    act(() => {
+      fireOpen();
+    });
+    tickFrame(setResult, FACE_FRAME);
+
+    act(() => {
+      fireMessage(
+        JSON.stringify({ type: 'matched', room_id: 'room-7', opponent: { id: 'opp-1' } }),
+      );
+    });
+
+    expect(screen.getByTestId('battle-track-id').textContent).toBe('track-9');
+  });
+
+  // criterion: 4 (#159) violation guard — with no trackId in location.state, /battle receives
+  // none (not some hard-coded stand-in value).
+  it('matched-transitions-to-battle violation guard: with no trackId, /battle receives none', () => {
+    const { ws, fireOpen, fireMessage } = makeMockWs();
+    const { runner, setResult } = makeCvRunner();
+    renderSearch(ws, runner);
+
+    act(() => {
+      fireOpen();
+    });
+    tickFrame(setResult, FACE_FRAME);
+
+    act(() => {
+      fireMessage(
+        JSON.stringify({ type: 'matched', room_id: 'room-7', opponent: { id: 'opp-1' } }),
+      );
+    });
+
+    expect(screen.getByTestId('battle-track-id').textContent).toBe('');
   });
 
   // criterion: 3 (violation guard) — a malformed / non-matched frame must NOT navigate away from

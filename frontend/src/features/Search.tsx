@@ -32,10 +32,12 @@ interface UnknownServerMsg {
   opponent?: unknown;
 }
 
-/** location.state carried in by a future mode-select screen (#95). */
+/** location.state carried in by ModeSelect (#95, #159). */
 interface SearchLocationState {
   mode?: string;
   level?: number;
+  /** The TikTok-style track chosen on Home — threaded through to Battle as the selected edit audio. */
+  trackId?: string;
 }
 
 const MATCHMAKING_WS_PATH = '/ws/match';
@@ -54,6 +56,8 @@ export interface SearchProps {
   mode?: string;
   /** Fallback level when none is carried via location.state. Defaults to 1. */
   level?: number;
+  /** Fallback trackId when none is carried via location.state. Defaults to undefined. */
+  trackId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +69,7 @@ export function Search({
   cvRunner = defaultCvRunner(),
   mode: modeProp,
   level: levelProp,
+  trackId: trackIdProp,
 }: SearchProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -72,6 +77,7 @@ export function Search({
   const locationState = (location.state as SearchLocationState | null) ?? null;
   const mode = locationState?.mode ?? modeProp ?? 'ranked';
   const level = locationState?.level ?? levelProp ?? 1;
+  const trackId = locationState?.trackId ?? trackIdProp;
 
   // Lazily build the default WsClient once — never rebuilt on re-render.
   const wsRef = useRef<WsClientApi>();
@@ -151,13 +157,17 @@ export function Search({
         if (msg.type === 'matched' && typeof msg.room_id === 'string' && msg.room_id) {
           const matched = msg as MatchedMsg;
           teardown(false);
-          navigate('/battle', { state: { roomId: matched.room_id, opponent: matched.opponent } });
+          // Criterion 4 (#159): trackId (the edit-audio track chosen on Home) is forwarded through
+          // to Battle unchanged — Search has no use for it itself.
+          navigate('/battle', {
+            state: { roomId: matched.room_id, opponent: matched.opponent, trackId },
+          });
         }
       } catch {
         // ignore malformed WS frames
       }
     },
-    [teardown, navigate],
+    [teardown, navigate, trackId],
   );
 
   // Mount effect — open the matchmaking WS and start the CV loop. In production this runs exactly
