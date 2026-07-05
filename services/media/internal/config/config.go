@@ -19,6 +19,17 @@ type Config struct {
 	Session   SessionConfig   `yaml:"session"`
 	Clips     ClipsConfig     `yaml:"clips"`
 	KingClips KingClipsConfig `yaml:"king_clips"`
+	Internal  InternalConfig  `yaml:"internal"`
+}
+
+// InternalConfig holds settings for server-to-server internal endpoints
+// (e.g. DELETE /internal/v1/king-clips/:id, used by the koth reset worker to
+// expire a hill's king clip), gated by the internalauth middleware. It is
+// intentionally NOT validate:"required" — the middleware itself fails closed
+// (503) on an empty token, so the service must still be able to boot in
+// environments that haven't set INTERNAL_API_TOKEN yet.
+type InternalConfig struct {
+	APIToken string `yaml:"api_token"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -172,6 +183,9 @@ func loadFromEnv() (*Config, error) {
 			MonthlyTTL:    monthlyTTL,
 			RankedTTLRaw:  rankedRaw,
 			RankedTTL:     rankedTTL,
+		},
+		Internal: InternalConfig{
+			APIToken: os.Getenv("INTERNAL_API_TOKEN"),
 		},
 	}
 

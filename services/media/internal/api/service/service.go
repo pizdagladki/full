@@ -92,4 +92,10 @@ type KingClipService interface {
 	// metadata). Returns repository.ErrKingClipNotFound when the clip doesn't
 	// exist or belongs to a different user.
 	Delete(ctx context.Context, userID, id int64) error
+
+	// ExpireByID removes the king clip identified by id (object + metadata)
+	// WITHOUT an ownership check, for trusted internal callers — namely the
+	// koth reset worker expiring a hill's king clip on a daily/monthly reset.
+	// Returns repository.ErrKingClipNotFound when the clip doesn't exist.
+	ExpireByID(ctx context.Context, id int64) error
 }

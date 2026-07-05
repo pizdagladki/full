@@ -305,6 +305,110 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+func TestLoad_InternalConfig(t *testing.T) {
+	const (
+		validDSN       = "postgres://app:app@localhost:5432/app?sslmode=disable"
+		validEndpoint  = "localhost:9000"
+		validKey       = "minioadmin"
+		validBucket    = "media"
+		validRedisAddr = "localhost:6379"
+	)
+
+	minioEnv := map[string]string{
+		"STORAGE_ENDPOINT":   validEndpoint,
+		"STORAGE_ACCESS_KEY": validKey,
+		"STORAGE_SECRET_KEY": validKey,
+		"STORAGE_BUCKET":     validBucket,
+	}
+
+	baseEnv := merge(map[string]string{
+		"POSTGRES_DSN": validDSN,
+		"REDIS_ADDR":   validRedisAddr,
+	}, minioEnv)
+
+	validYAML := "http:\n  addr: \":7070\"\n" +
+		"postgres:\n  dsn: \"" + validDSN + "\"\n" +
+		"storage:\n  endpoint: \"" + validEndpoint + "\"\n  access_key: \"" + validKey + "\"\n  secret_key: \"" + validKey + "\"\n  bucket: \"" + validBucket + "\"\n" +
+		"redis:\n  addr: \"" + validRedisAddr + "\"\n"
+
+	tests := []struct {
+		name         string
+		isDocker     bool
+		env          map[string]string
+		setup        func(t *testing.T) string
+		wantAPIToken string
+		wantErr      bool
+	}{
+		{
+			// criterion: 1 — media config gains Internal.APIToken read from env
+			// INTERNAL_API_TOKEN in Docker/env mode.
+			name:         "env mode reads INTERNAL_API_TOKEN into Internal.APIToken",
+			isDocker:     true,
+			env:          merge(map[string]string{"INTERNAL_API_TOKEN": "s2s-secret-token"}, baseEnv),
+			wantAPIToken: "s2s-secret-token",
+		},
+		{
+			// criterion: 1 — an unset INTERNAL_API_TOKEN is valid (not
+			// validate:"required") and yields an empty token — the service
+			// must still boot; the internalauth middleware, not config
+			// validation, is what fails closed on an empty token.
+			name:         "env mode unset INTERNAL_API_TOKEN yields empty token, config still loads",
+			isDocker:     true,
+			env:          baseEnv,
+			wantAPIToken: "",
+		},
+		{
+			// criterion: 1 — yaml mode reads internal.api_token from the file.
+			name: "file mode reads internal.api_token from yaml",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, validYAML+"internal:\n  api_token: \"yaml-secret-token\"\n")
+			},
+			wantAPIToken: "yaml-secret-token",
+		},
+		{
+			// criterion: 1 — an absent internal section in yaml still loads
+			// successfully with an empty token (not validate:"required").
+			name: "file mode without internal section still loads with empty token",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, validYAML)
+			},
+			wantAPIToken: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.isDocker {
+				t.Setenv("IS_DOCKER", "1")
+			}
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+
+			path := ""
+			if tt.setup != nil {
+				path = tt.setup(t)
+			}
+
+			cfg, err := Load(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() error = nil, want error")
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if cfg.Internal.APIToken != tt.wantAPIToken {
+				t.Errorf("Internal.APIToken = %q, want %q", cfg.Internal.APIToken, tt.wantAPIToken)
+			}
+		})
+	}
+}
+
 func writeTempConfig(t *testing.T, body string) string {
 	t.Helper()
 

@@ -13,6 +13,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 
+	"github.com/pizdagladki/full/internal/platform/internalauth"
 	"github.com/pizdagladki/full/services/media/internal/api/delivery"
 	"github.com/pizdagladki/full/services/media/internal/api/domain"
 	"github.com/pizdagladki/full/services/media/internal/api/repository"
@@ -403,6 +404,187 @@ func TestKingClipHandler_Delete(t *testing.T) {
 			}
 
 			_ = h.Delete(c)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestKingClipHandler_DeleteInternal exercises DeleteInternal directly
+// (handler-level), confirming it never reads UserIDContextKey and maps
+// service errors the same way Delete does, minus the ownership/userID parts.
+func TestKingClipHandler_DeleteInternal(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		idParam    string
+		setupSvc   func(m *svcmocks.MockKingClipService)
+		wantStatus int
+	}{
+		{
+			// criterion: 3 — success path calls ExpireByID and returns 204, with
+			// no ownership/userID check (no c.Set of UserIDContextKey here).
+			name:    "204 when service expires the clip",
+			idParam: "1",
+			setupSvc: func(m *svcmocks.MockKingClipService) {
+				m.EXPECT().ExpireByID(gomock.Any(), int64(1)).Return(nil)
+			},
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			// criterion: 3 — repository.ErrKingClipNotFound maps to 404.
+			name:    "404 when clip not found",
+			idParam: "999",
+			setupSvc: func(m *svcmocks.MockKingClipService) {
+				m.EXPECT().ExpireByID(gomock.Any(), int64(999)).Return(repository.ErrKingClipNotFound)
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			// criterion: 3 — invalid (non-numeric) id -> 400, service never called.
+			name:       "400 on non-numeric id param",
+			idParam:    "notanumber",
+			setupSvc:   func(_ *svcmocks.MockKingClipService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			// criterion: 3 — non-positive id -> 400, service never called.
+			name:       "400 on zero id param",
+			idParam:    "0",
+			setupSvc:   func(_ *svcmocks.MockKingClipService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:    "500 on unexpected service error",
+			idParam: "1",
+			setupSvc: func(m *svcmocks.MockKingClipService) {
+				m.EXPECT().ExpireByID(gomock.Any(), int64(1)).Return(errors.New("db error"))
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			svcMock := svcmocks.NewMockKingClipService(ctrl)
+			tt.setupSvc(svcMock)
+
+			h := delivery.NewKingClipHandler(svcMock, testMaxBytes, zap.NewNop())
+
+			e := newEcho()
+			req := httptest.NewRequest(http.MethodDelete, "/internal/v1/king-clips/"+tt.idParam, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(tt.idParam)
+
+			// Deliberately NOT setting UserIDContextKey — DeleteInternal must not
+			// read it.
+			_ = h.DeleteInternal(c)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestKingClipHandler_DeleteInternal_ThroughRouter builds the Echo router the
+// way register_http_routes.go actually wires the internal group —
+// e.Group("/internal/v1", internalauth.New(token)) + DELETE
+// "/king-clips/:id" — and exercises it via httptest, proving
+// middleware+route+handler+404 all work together (the router-level 401 /
+// token criterion).
+func TestKingClipHandler_DeleteInternal_ThroughRouter(t *testing.T) {
+	t.Parallel()
+
+	const configuredToken = "test-token"
+
+	tests := []struct {
+		name       string
+		path       string
+		setHeader  bool
+		authHeader string
+		setupSvc   func(m *svcmocks.MockKingClipService)
+		wantStatus int
+	}{
+		{
+			// criterion: 6 — no Authorization header -> 401, handler never runs.
+			name:       "no Authorization header -> 401",
+			path:       "/internal/v1/king-clips/1",
+			setHeader:  false,
+			setupSvc:   func(_ *svcmocks.MockKingClipService) {},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// criterion: 6 — wrong bearer token -> 401, handler never runs.
+			name:       "wrong bearer token -> 401",
+			path:       "/internal/v1/king-clips/1",
+			setHeader:  true,
+			authHeader: "Bearer not-the-token",
+			setupSvc:   func(_ *svcmocks.MockKingClipService) {},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// criterion: 6 — correct token + existing clip -> 204.
+			name:       "correct token and existing clip -> 204",
+			path:       "/internal/v1/king-clips/1",
+			setHeader:  true,
+			authHeader: "Bearer " + configuredToken,
+			setupSvc: func(m *svcmocks.MockKingClipService) {
+				m.EXPECT().ExpireByID(gomock.Any(), int64(1)).Return(nil)
+			},
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			// criterion: 6 — correct token + missing clip -> 404.
+			name:       "correct token and missing clip -> 404",
+			path:       "/internal/v1/king-clips/999",
+			setHeader:  true,
+			authHeader: "Bearer " + configuredToken,
+			setupSvc: func(m *svcmocks.MockKingClipService) {
+				m.EXPECT().ExpireByID(gomock.Any(), int64(999)).Return(repository.ErrKingClipNotFound)
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			// criterion: 6 — correct token + non-numeric/zero id -> 400.
+			name:       "correct token and non-numeric id -> 400",
+			path:       "/internal/v1/king-clips/notanumber",
+			setHeader:  true,
+			authHeader: "Bearer " + configuredToken,
+			setupSvc:   func(_ *svcmocks.MockKingClipService) {},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			svcMock := svcmocks.NewMockKingClipService(ctrl)
+			tt.setupSvc(svcMock)
+
+			h := delivery.NewKingClipHandler(svcMock, testMaxBytes, zap.NewNop())
+
+			e := echo.New()
+			g := e.Group("/internal/v1", internalauth.New(configuredToken))
+			g.DELETE("/king-clips/:id", h.DeleteInternal)
+
+			req := httptest.NewRequest(http.MethodDelete, tt.path, nil)
+			if tt.setHeader {
+				req.Header.Set(echo.HeaderAuthorization, tt.authHeader)
+			}
+			rec := httptest.NewRecorder()
+
+			e.ServeHTTP(rec, req)
 
 			if rec.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())

@@ -49,6 +49,9 @@ func (noopKingClipHandler) Current(c echo.Context) error {
 func (noopKingClipHandler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNotImplemented)
 }
+func (noopKingClipHandler) DeleteInternal(c echo.Context) error {
+	return c.NoContent(http.StatusNotImplemented)
+}
 
 var _ delivery.KingClipHandler = noopKingClipHandler{}
 
