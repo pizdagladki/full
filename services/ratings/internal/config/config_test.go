@@ -13,13 +13,17 @@ func TestLoad(t *testing.T) {
 		validStoreURL = "http://localhost:8083"
 	)
 
+	const validInternalToken = "s2s-secret-token"
+
 	tests := []struct {
-		name     string
-		isDocker bool
-		env      map[string]string
-		setup    func(t *testing.T) string // returns the config path
-		wantAddr string
-		wantErr  bool
+		name       string
+		isDocker   bool
+		env        map[string]string
+		setup      func(t *testing.T) string // returns the config path
+		wantAddr   string
+		wantErr    bool
+		wantToken  string
+		checkToken bool
 	}{
 		{
 			name:     "env mode all set with explicit HTTP_ADDR",
@@ -51,17 +55,40 @@ func TestLoad(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			// criterion: 3 — StoreBaseURL is validated at startup: missing it fails ValidateConfig.
+			// criterion: 1 — Store.BaseURL is validated at startup: missing it fails ValidateConfig.
 			name:     "env mode missing store base URL fails validation",
 			isDocker: true,
 			env:      map[string]string{"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr},
 			wantErr:  true,
 		},
 		{
+			// criterion: 1 — Store.InternalToken is read from INTERNAL_API_TOKEN in env mode.
+			name:     "env mode reads INTERNAL_API_TOKEN into Store.InternalToken",
+			isDocker: true,
+			env: map[string]string{
+				"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "STORE_BASE_URL": validStoreURL,
+				"INTERNAL_API_TOKEN": validInternalToken,
+			},
+			wantAddr:   ":8080",
+			checkToken: true,
+			wantToken:  validInternalToken,
+		},
+		{
+			// criterion: 1 — an unset INTERNAL_API_TOKEN is valid config (not required).
+			name:     "env mode missing INTERNAL_API_TOKEN is valid config",
+			isDocker: true,
+			env: map[string]string{
+				"POSTGRES_DSN": validDSN, "REDIS_ADDR": validAddr, "STORE_BASE_URL": validStoreURL,
+			},
+			wantAddr:   ":8080",
+			checkToken: true,
+			wantToken:  "",
+		},
+		{
 			name: "file mode reads full yaml",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, "http:\n  addr: \":7070\"\npostgres:\n  dsn: \""+validDSN+
-					"\"\nredis:\n  addr: \""+validAddr+"\"\nstore_base_url: \""+validStoreURL+"\"\n")
+					"\"\nredis:\n  addr: \""+validAddr+"\"\nstore:\n  base_url: \""+validStoreURL+"\"\n")
 			},
 			wantAddr: ":7070",
 		},
@@ -69,19 +96,30 @@ func TestLoad(t *testing.T) {
 			name: "file mode empty addr falls back to default",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+
-					"\"\nstore_base_url: \""+validStoreURL+"\"\n")
+					"\"\nstore:\n  base_url: \""+validStoreURL+"\"\n")
 			},
 			wantAddr: ":8080",
 		},
 		{
+			// criterion: 1 — Store.InternalToken is read from the nested store.internal_token yaml key.
+			name: "file mode reads store.internal_token",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+
+					"\"\nstore:\n  base_url: \""+validStoreURL+"\"\n  internal_token: \""+validInternalToken+"\"\n")
+			},
+			wantAddr:   ":8080",
+			checkToken: true,
+			wantToken:  validInternalToken,
+		},
+		{
 			name: "file mode missing required Postgres fails validation",
 			setup: func(t *testing.T) string {
-				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\nstore_base_url: \""+validStoreURL+"\"\n")
+				return writeTempConfig(t, "redis:\n  addr: \""+validAddr+"\"\nstore:\n  base_url: \""+validStoreURL+"\"\n")
 			},
 			wantErr: true,
 		},
 		{
-			// criterion: 3 — StoreBaseURL is validated at startup: missing it fails ValidateConfig.
+			// criterion: 1 — Store.BaseURL is validated at startup: missing it fails ValidateConfig.
 			name: "file mode missing store base URL fails validation",
 			setup: func(t *testing.T) string {
 				return writeTempConfig(t, "postgres:\n  dsn: \""+validDSN+"\"\nredis:\n  addr: \""+validAddr+"\"\n")
@@ -131,6 +169,9 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.HTTP.Addr != tt.wantAddr {
 				t.Errorf("addr = %q, want %q", cfg.HTTP.Addr, tt.wantAddr)
+			}
+			if tt.checkToken && cfg.Store.InternalToken != tt.wantToken {
+				t.Errorf("Store.InternalToken = %q, want %q", cfg.Store.InternalToken, tt.wantToken)
 			}
 		})
 	}

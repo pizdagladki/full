@@ -106,7 +106,8 @@ func (a *App) initRepositories() {
 }
 
 func (a *App) initServices() {
-	pointsClient := service.NewHTTPPointsClient(a.cfg.StoreBaseURL, &http.Client{Timeout: pointsClientTimeout})
+	pointsClient := service.NewHTTPPointsClient(a.cfg.Store.BaseURL, a.cfg.Store.InternalToken,
+		&http.Client{Timeout: pointsClientTimeout})
 	a.ratingsService = service.NewRatingsService(a.ratingsRepo, a.logger, pointsClient)
 }
 
