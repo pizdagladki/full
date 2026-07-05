@@ -479,11 +479,70 @@ describe('Issue #158 — CV engine auto-calibration on the camera preview', () =
     // The engine actually scheduled a frame — confirms it was running before the camera change.
     expect(rafCallbacks.length).toBeGreaterThan(0);
 
+    // Snapshot BEFORE the camera change — the initial ''→'cam1' device-selection settle already
+    // triggered its own cleanup/cancelAnimationFrame call, so asserting plain "was called" would
+    // pass even if the camera-change cleanup were removed. Asserting a STRICT increase from this
+    // snapshot is what actually discriminates the camera-change stop.
+    const before = vi.mocked(cancelAnimationFrame).mock.calls.length;
+
     const select = screen.getByLabelText('Camera') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'cam2' } });
 
     // Changing the selected camera re-runs the camera-preview effect; its cleanup stops the
-    // previous engine run, which cancels the scheduled RAF frame.
-    expect(cancelAnimationFrame).toHaveBeenCalled();
+    // previous engine run, which cancels the scheduled RAF frame — a NEW cancelAnimationFrame
+    // call beyond the pre-change count.
+    expect(vi.mocked(cancelAnimationFrame).mock.calls.length).toBeGreaterThan(before);
+  });
+
+  // criterion: 1c — stopping on UNMOUNT (distinct from stopping on camera change above): Home's
+  // camera-preview effect cleanup calls `cv?.stop()` on unmount. Snapshot-then-strict-increase
+  // discriminates removing that cleanup (CvComponent's own unmount safety-net stop is a second,
+  // independent path, but this test is written against Home's own contract: unmounting stops the
+  // engine it started).
+  it('criterion-1c: stops the CV engine on unmount', async () => {
+    const { runner } = makeCvRunner();
+    const { unmount } = renderHome(AUTH_STATE, undefined, runner);
+
+    await waitForEngineStarted();
+    // The engine actually scheduled a frame — confirms it was running before unmount.
+    expect(rafCallbacks.length).toBeGreaterThan(0);
+
+    const before = vi.mocked(cancelAnimationFrame).mock.calls.length;
+
+    unmount();
+
+    expect(vi.mocked(cancelAnimationFrame).mock.calls.length).toBeGreaterThan(before);
+  });
+
+  // criterion: 2 — no blink side effects: Home wires ONLY {onFacePresent, onFaceLost} into
+  // CvCallbacks (no onBlink). This drives a GENUINE blink through the real CvEngine (not a
+  // synthetic call): FACE_FRAME's single-point landmarks make computeEAR degenerate to 0 for
+  // every eye (the eye-corner indices are out of bounds for a 1-point landmark array), so once
+  // calibration completes (CALIBRATION_FRAMES = 30) the EAR is already below the default blink
+  // threshold; two more frames in the 'running' state accumulate BLINK_FRAMES (=2) consecutive
+  // below-threshold samples and the engine fires a real onBlink() internally. If Home ever wired
+  // onBlink to a status-changing side effect, this assertion would catch it — the status must
+  // stay exactly 'ready' across the blink.
+  it('criterion-2: a genuine blink does not change the calibration status (no blink side effects on Home)', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderHome(AUTH_STATE, undefined, runner);
+
+    await waitForEngineStarted();
+
+    const status = screen.getByTestId('calibration-status');
+
+    // Drive calibration to completion (30 frames) — status flips to 'ready' as soon as a face is
+    // first detected (frame 1), well before calibration finishes.
+    for (let i = 0; i < 30; i++) {
+      tickFrame(setResult, FACE_FRAME);
+    }
+    expect(status.getAttribute('data-status')).toBe('ready');
+
+    // Two more frames in 'running' state — this is where the real onBlink() fires internally.
+    tickFrame(setResult, FACE_FRAME);
+    tickFrame(setResult, FACE_FRAME);
+
+    expect(status.getAttribute('data-status')).toBe('ready');
+    expect(status.textContent).toBe('Face detected — ready');
   });
 });
