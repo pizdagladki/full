@@ -85,8 +85,9 @@ type CreditRequest struct {
 
 // MediaClient expires (deletes) a king clip in the media service once its
 // reign has closed. Implemented by an HTTP client targeting the media
-// service's king-clip DELETE contract (see media's king_clip_handler.go,
-// introduced in #97).
+// service's internal, S2S-authenticated king-clip expiry route
+// (DELETE /internal/v1/king-clips/:id, see media's king_clip_handler.go,
+// introduced in #143).
 type MediaClient interface {
 	ExpireKingClip(ctx context.Context, clipID string) error
 }

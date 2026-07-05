@@ -7,8 +7,12 @@ import (
 )
 
 func (a *App) initServices() {
-	pointsClient := service.NewHTTPPointsClient(a.cfg.Store.BaseURL, &http.Client{Timeout: pointsClientTimeout})
-	mediaClient := service.NewHTTPMediaClient(a.cfg.Media.BaseURL, &http.Client{Timeout: mediaClientTimeout})
+	pointsClient := service.NewHTTPPointsClient(
+		a.cfg.Store.BaseURL, a.cfg.Internal.APIToken, &http.Client{Timeout: pointsClientTimeout},
+	)
+	mediaClient := service.NewHTTPMediaClient(
+		a.cfg.Media.BaseURL, a.cfg.Internal.APIToken, &http.Client{Timeout: mediaClientTimeout},
+	)
 
 	a.rankSvc = service.NewRankService(
 		a.rankRepo, service.RealClock, a.cfg.Ranked.Thresholds, pointsClient, a.cfg.Points.RankAmount, a.logger,

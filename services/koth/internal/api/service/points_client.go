@@ -11,13 +11,16 @@ import (
 // httpPointsClient is the production PointsClient, POSTing credits to the
 // store service's ledger endpoint.
 type httpPointsClient struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL       string
+	internalToken string
+	httpClient    *http.Client
 }
 
-// NewHTTPPointsClient constructs a PointsClient that POSTs to baseURL.
-func NewHTTPPointsClient(baseURL string, httpClient *http.Client) PointsClient {
-	return &httpPointsClient{baseURL: baseURL, httpClient: httpClient}
+// NewHTTPPointsClient constructs a PointsClient that POSTs to baseURL,
+// authenticating with internalToken as "Authorization: Bearer <token>"
+// against the store's internal-auth-protected credit endpoint.
+func NewHTTPPointsClient(baseURL string, internalToken string, httpClient *http.Client) PointsClient {
+	return &httpPointsClient{baseURL: baseURL, internalToken: internalToken, httpClient: httpClient}
 }
 
 // Credit calls the store's POST /v1/points/credit. A non-2xx status or a
@@ -36,6 +39,7 @@ func (c *httpPointsClient) Credit(ctx context.Context, req CreditRequest) error 
 		return fmt.Errorf("build points credit request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.internalToken)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
