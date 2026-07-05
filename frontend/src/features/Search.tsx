@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CvComponent } from '../cv';
+import { CvComponent, defaultCvRunner } from '../cv';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
 import { WsClient } from '../api/ws';
 import type { WsClientApi } from '../api/ws';
@@ -40,14 +40,6 @@ interface SearchLocationState {
 
 const MATCHMAKING_WS_PATH = '/ws/match';
 
-// TODO: wire real MediaPipe FaceLandmarker runner (separate task). Until then this placeholder
-// always reports NO face — the honest-scaffold approach also used by Home's "Calibrating…"
-// placeholder: it keeps the face gate truthful (never fakes a pass) rather than pretending CV
-// is wired up before it actually is.
-const PLACEHOLDER_RUNNER: LandmarkRunner = {
-  detectForVideo: () => ({ faceLandmarks: [] }),
-};
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -55,7 +47,8 @@ const PLACEHOLDER_RUNNER: LandmarkRunner = {
 export interface SearchProps {
   /** Injectable WS client (swap with a mock in tests). Defaults to a lazily-built WsClient. */
   wsClient?: WsClientApi;
-  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the placeholder. */
+  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the real
+   * MediaPipe FaceLandmarker runner (`defaultCvRunner()`). */
   cvRunner?: LandmarkRunner;
   /** Fallback mode when none is carried via location.state. Defaults to 'ranked'. */
   mode?: string;
@@ -69,7 +62,7 @@ export interface SearchProps {
 
 export function Search({
   wsClient,
-  cvRunner = PLACEHOLDER_RUNNER,
+  cvRunner = defaultCvRunner(),
   mode: modeProp,
   level: levelProp,
 }: SearchProps) {

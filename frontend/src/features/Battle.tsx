@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ForwardRefExoticComponent, RefAttributes } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CvComponent } from '../cv';
+import { CvComponent, defaultCvRunner } from '../cv';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
 import { RtcComponent } from '../rtc';
 import type { PcFactory, RtcHandle, WsFactory } from '../rtc';
@@ -49,14 +49,6 @@ const SIGNALING_URL = `${(import.meta.env?.VITE_WS_URL as string | undefined) ??
 const SANITY_MS_DEFAULT = 2000;
 const COUNTDOWN_SECONDS_DEFAULT = 5;
 
-// TODO: wire real MediaPipe FaceLandmarker runner (separate task). Until then this placeholder
-// always reports NO face — the honest-scaffold approach also used by Search/Home's placeholders:
-// it keeps the face gate truthful (never fakes a pass) rather than pretending CV is wired up
-// before it actually is.
-const PLACEHOLDER_RUNNER: LandmarkRunner = {
-  detectForVideo: () => ({ faceLandmarks: [] }),
-};
-
 type Phase = 'sanity' | 'countdown' | 'battle' | 'done';
 
 /** Structural type of CvComponent's props/ref — used for the test-injection seam below. */
@@ -71,7 +63,8 @@ type CvComponentType = ForwardRefExoticComponent<
 export interface BattleProps {
   /** Injectable arbitration WS client (swap with a mock in tests). Defaults to a lazily-built WsClient. */
   wsClient?: WsClientApi;
-  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the placeholder. */
+  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the real
+   * MediaPipe FaceLandmarker runner (`defaultCvRunner()`). */
   cvRunner?: LandmarkRunner;
   /** Injectable WS factory for RtcComponent's signaling socket (swap with a mock in tests). */
   rtcWsFactory?: WsFactory;
@@ -106,7 +99,7 @@ export interface BattleProps {
 
 export function Battle({
   wsClient,
-  cvRunner = PLACEHOLDER_RUNNER,
+  cvRunner = defaultCvRunner(),
   rtcWsFactory,
   rtcPcFactory,
   currentUserId: currentUserIdProp,

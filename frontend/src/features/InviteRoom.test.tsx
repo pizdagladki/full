@@ -95,6 +95,15 @@ function makeCvRunner(): {
 const FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [[{ x: 0, y: 0, z: 0 }]] };
 const NO_FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [] };
 
+/**
+ * A runner that always reports no face — used ONLY as an explicit test-only injection (never a
+ * production default; InviteRoom.tsx defaults `cvRunner` to the real `defaultCvRunner()` now, so
+ * tests that need the no-face behavior must inject it themselves).
+ */
+function noFaceRunner(): LandmarkRunner {
+  return { detectForVideo: vi.fn(() => NO_FACE_FRAME) };
+}
+
 /** Sets the next detection result, then ticks the latest pending RAF callback. */
 function tickFrame(
   setResult: (r: FaceLandmarkResult) => void,
@@ -181,7 +190,7 @@ describe('InviteRoom', () => {
   // Menu renders both controls (no dedicated criterion, exercised as setup for every flow below).
   it('renders the Create room button and the Join by code form', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoom(ws, noFaceRunner());
 
     expect(screen.getByTestId('create-room-button')).toBeInTheDocument();
     expect(screen.getByTestId('join-code-input')).toBeInTheDocument();
@@ -459,7 +468,7 @@ describe('InviteRoom', () => {
   // way, but calling teardown must be safe (no crash) even with no connection.
   it('leave cleanup violation guard: unmounting from the bare menu does not throw', () => {
     const ws = new MockWs();
-    const { unmount } = renderInviteRoom(ws);
+    const { unmount } = renderInviteRoom(ws, noFaceRunner());
 
     expect(() => unmount()).not.toThrow();
   });
@@ -524,9 +533,10 @@ describe('InviteRoom', () => {
     'no-face-blocks-start: clicking $name with no face present sends nothing over the WS and shows the face prompt',
     ({ act: doAction }) => {
       const ws = new MockWs();
-      // No cvRunner override — defaults to InviteRoom's PLACEHOLDER_RUNNER, which always reports
-      // no face, so facePresentRef.current stays false.
-      renderInviteRoom(ws);
+      // Explicit no-face runner — InviteRoom.tsx now defaults `cvRunner` to the real
+      // `defaultCvRunner()`, so this test injects a no-face runner itself to keep
+      // facePresentRef.current false deterministically (never touches the real default).
+      renderInviteRoom(ws, noFaceRunner());
 
       doAction();
 
