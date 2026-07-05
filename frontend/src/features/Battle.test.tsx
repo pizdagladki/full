@@ -6,6 +6,7 @@ import { Battle } from './Battle';
 import type { BattleProps } from './Battle';
 import type { WsClientApi } from '../api/ws';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
+import { defaultCvRunner, __resetDefaultCvRunnerForTests } from '../cv';
 import type { PcLike, WsLike, PcFactory, WsFactory } from '../rtc';
 
 // ---------------------------------------------------------------------------
@@ -47,15 +48,19 @@ function makeFakeCv(): {
   fireFacePresent: () => void;
   fireFaceLost: () => void;
   fireBlink: () => void;
+  /** The `runner` prop Battle actually passed down — captured for the default-wiring test below. */
+  getCapturedRunner: () => LandmarkRunner | undefined;
 } {
   let cb: CvCallbacks = {};
+  let capturedRunner: LandmarkRunner | undefined;
   const start = vi.fn();
   const Cv = forwardRef<CvHandleRef, { runner: LandmarkRunner; callbacks?: CvCallbacks }>(
-    ({ callbacks }, ref) => {
+    ({ runner, callbacks }, ref) => {
       // Capture the (stable, useMemo'd []) callbacks prop as a side effect rather than during
       // render, so the fake component still obeys the "render must be pure" rule.
       useEffect(() => {
         cb = callbacks ?? {};
+        capturedRunner = runner;
       });
       useImperativeHandle(ref, () => ({
         start,
@@ -71,6 +76,7 @@ function makeFakeCv(): {
     fireFacePresent: () => cb.onFacePresent?.(),
     fireFaceLost: () => cb.onFaceLost?.(),
     fireBlink: () => cb.onBlink?.(),
+    getCapturedRunner: () => capturedRunner,
   };
 }
 
@@ -181,6 +187,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  __resetDefaultCvRunnerForTests();
 });
 
 // ---------------------------------------------------------------------------
@@ -390,5 +397,27 @@ describe('Battle', () => {
     });
 
     expect(sentMessages(ws)).not.toContainEqual({ type: 'face_lost', room_id: 'room-1' });
+  });
+
+  // criteria: 1b/2b (default wiring regression guard) — with NO `cvRunner` prop supplied at all,
+  // Battle must fall back to the real `defaultCvRunner()` singleton, NOT an inline no-face
+  // placeholder. Driving a real face through CvEngine's full RAF/calibration pipeline via this
+  // screen is impractical here: Battle.test.tsx deliberately swaps in a fake `cvComponent` (see its
+  // doc comment) that never calls `runner.detectForVideo` at all, so a behavioral assertion on
+  // face-present-driven UI would pass trivially regardless of which runner is wired. Instead this
+  // asserts the referential-identity edge directly: seed the module singleton (reset + a sentinel
+  // loader) BEFORE rendering, then confirm the exact `runner` prop Battle passed down to its cv
+  // component IS that same singleton instance. If Battle.tsx's default were reverted to an inline
+  // `{ detectForVideo: () => ({ faceLandmarks: [] }) }`, the captured runner would be a different
+  // object and this identity check would fail.
+  it('production-default-wiring: with no cvRunner prop, Battle wires the real defaultCvRunner() singleton', () => {
+    __resetDefaultCvRunnerForTests();
+    const singleton = defaultCvRunner(() => new Promise<LandmarkRunner>(() => {}));
+
+    const { ws } = makeMockWs();
+    const { Cv, getCapturedRunner } = makeFakeCv();
+    renderBattle({ wsClient: ws, cvComponent: Cv, currentUserId: 'u1' });
+
+    expect(getCapturedRunner()).toBe(singleton);
   });
 });

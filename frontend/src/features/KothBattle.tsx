@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ForwardRefExoticComponent, RefAttributes } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CvComponent } from '../cv';
+import { CvComponent, defaultCvRunner } from '../cv';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
 import { defaultKingClipsApi } from '../api/kingClips';
 import type { KingClipsApi } from '../api/kingClips';
@@ -24,12 +24,6 @@ interface KothBattleLocationState {
 
 const SANITY_MS_DEFAULT = 2000;
 const COUNTDOWN_SECONDS_DEFAULT = 5;
-
-// TODO: wire real MediaPipe FaceLandmarker runner (separate task, mirrors Battle.tsx). Until then
-// this placeholder always reports NO face — honest scaffold, never fakes a pass.
-const PLACEHOLDER_RUNNER: LandmarkRunner = {
-  detectForVideo: () => ({ faceLandmarks: [] }),
-};
 
 // TODO: wire the real recording engine once #52 lands. Honest scaffold: produces a real
 // (empty) WebM-typed Blob rather than pretending to have captured anything.
@@ -57,7 +51,8 @@ export interface KothBattleProps {
   kingClipsApi?: KingClipsApi;
   /** Injectable koth API (swap with a mock in tests). Defaults to the real client. */
   kothApi?: KothApi;
-  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the placeholder. */
+  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the real
+   * MediaPipe FaceLandmarker runner (`defaultCvRunner()`). */
   cvRunner?: LandmarkRunner;
   /** Sanity-check duration (ms) run before the countdown. Defaults to the criterion's 2000ms. */
   sanityMs?: number;
@@ -82,7 +77,7 @@ export interface KothBattleProps {
 export function KothBattle({
   kingClipsApi = defaultKingClipsApi,
   kothApi = defaultKothApi,
-  cvRunner = PLACEHOLDER_RUNNER,
+  cvRunner = defaultCvRunner(),
   sanityMs = SANITY_MS_DEFAULT,
   countdownSeconds = COUNTDOWN_SECONDS_DEFAULT,
   cvComponent: Cv = CvComponent,

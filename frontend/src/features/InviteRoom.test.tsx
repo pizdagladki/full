@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { InviteRoom } from './InviteRoom';
 import type { WsClientApi } from '../api/ws';
 import type { FaceLandmarkResult, LandmarkRunner } from '../cv';
+import { defaultCvRunner, __resetDefaultCvRunnerForTests } from '../cv';
 
 // ---------------------------------------------------------------------------
 // Mock WS client — hand-rolled class implementing WsClientApi, capturing the
@@ -74,6 +75,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  __resetDefaultCvRunnerForTests();
 });
 
 function makeCvRunner(): {
@@ -94,6 +96,15 @@ function makeCvRunner(): {
 
 const FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [[{ x: 0, y: 0, z: 0 }]] };
 const NO_FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [] };
+
+/**
+ * A runner that always reports no face — used ONLY as an explicit test-only injection (never a
+ * production default; InviteRoom.tsx defaults `cvRunner` to the real `defaultCvRunner()` now, so
+ * tests that need the no-face behavior must inject it themselves).
+ */
+function noFaceRunner(): LandmarkRunner {
+  return { detectForVideo: vi.fn(() => NO_FACE_FRAME) };
+}
 
 /** Sets the next detection result, then ticks the latest pending RAF callback. */
 function tickFrame(
@@ -181,7 +192,7 @@ describe('InviteRoom', () => {
   // Menu renders both controls (no dedicated criterion, exercised as setup for every flow below).
   it('renders the Create room button and the Join by code form', () => {
     const ws = new MockWs();
-    renderInviteRoom(ws);
+    renderInviteRoom(ws, noFaceRunner());
 
     expect(screen.getByTestId('create-room-button')).toBeInTheDocument();
     expect(screen.getByTestId('join-code-input')).toBeInTheDocument();
@@ -459,7 +470,7 @@ describe('InviteRoom', () => {
   // way, but calling teardown must be safe (no crash) even with no connection.
   it('leave cleanup violation guard: unmounting from the bare menu does not throw', () => {
     const ws = new MockWs();
-    const { unmount } = renderInviteRoom(ws);
+    const { unmount } = renderInviteRoom(ws, noFaceRunner());
 
     expect(() => unmount()).not.toThrow();
   });
@@ -524,9 +535,10 @@ describe('InviteRoom', () => {
     'no-face-blocks-start: clicking $name with no face present sends nothing over the WS and shows the face prompt',
     ({ act: doAction }) => {
       const ws = new MockWs();
-      // No cvRunner override — defaults to InviteRoom's PLACEHOLDER_RUNNER, which always reports
-      // no face, so facePresentRef.current stays false.
-      renderInviteRoom(ws);
+      // Explicit no-face runner — InviteRoom.tsx now defaults `cvRunner` to the real
+      // `defaultCvRunner()`, so this test injects a no-face runner itself to keep
+      // facePresentRef.current false deterministically (never touches the real default).
+      renderInviteRoom(ws, noFaceRunner());
 
       doAction();
 
@@ -649,5 +661,44 @@ describe('InviteRoom', () => {
     expect(ws.close).not.toHaveBeenCalled();
     expect(screen.queryByTestId('home-probe')).not.toBeInTheDocument();
     expect(screen.getByTestId('invite-error-screen')).toBeInTheDocument();
+  });
+
+  // criteria: 1b/2b (default wiring regression guard) — with NO `cvRunner` prop supplied at all,
+  // InviteRoom must fall back to the real `defaultCvRunner()` singleton, NOT an inline no-face
+  // placeholder. Seeds the module-level singleton (reset + a controllable loader resolving to a
+  // runner reporting a real face) BEFORE rendering, so InviteRoom's own
+  // `cvRunner = defaultCvRunner()` default-parameter call returns that SAME already-loaded
+  // instance. If InviteRoom.tsx's default were reverted to an inline
+  // `{ detectForVideo: () => ({ faceLandmarks: [] }) }`, the seeded singleton would never be
+  // consulted, the tick below would never report a face, and Create room would stay gated behind
+  // the face prompt — this test would fail.
+  it('production-default-wiring: with no cvRunner prop, the real defaultCvRunner() singleton drives the face gate', async () => {
+    __resetDefaultCvRunnerForTests();
+    const seededRunner: LandmarkRunner = { detectForVideo: vi.fn(() => FACE_FRAME) };
+    defaultCvRunner(() => Promise.resolve(seededRunner));
+    // Flush the DeferredCvRunner's internal load().then(...) so the singleton is actually ready.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const ws = new MockWs();
+    render(
+      <MemoryRouter initialEntries={['/invite']}>
+        <Routes>
+          <Route path="/invite" element={<InviteRoom wsClient={ws} />} />
+          <Route path="/battle" element={<BattleProbe />} />
+          <Route path="/home" element={<HomeProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const cb = rafCallbacks[rafCallbacks.length - 1];
+    act(() => {
+      cb(0);
+    });
+
+    fireEvent.click(screen.getByTestId('create-room-button'));
+
+    expect(ws.connect).toHaveBeenCalledWith('/ws/signal');
+    expect(screen.queryByTestId('invite-face-prompt')).not.toBeInTheDocument();
   });
 });
