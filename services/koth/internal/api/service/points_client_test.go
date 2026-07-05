@@ -16,8 +16,12 @@ import (
 // its JSON body and a Content-Type: application/json header, treats a 2xx
 // store response as success, and surfaces a non-2xx store response as an
 // error (so a broken transport/status-handling branch fails these cases).
+// It also verifies criterion: 1 — the request carries
+// "Authorization: Bearer <internalToken>".
 func TestHTTPPointsClient_Credit(t *testing.T) {
 	t.Parallel()
+
+	const configuredToken = "s2s-secret-token"
 
 	req := service.CreditRequest{
 		UserID: 99,
@@ -42,6 +46,13 @@ func TestHTTPPointsClient_Credit(t *testing.T) {
 			statusCode: http.StatusInternalServerError,
 			wantErr:    true,
 		},
+		{
+			// criterion: 1 — a 401 from the store (e.g. bad/missing internal
+			// token) is surfaced as an error via the existing non-2xx handling.
+			name:       "401 response from store surfaced as error",
+			statusCode: http.StatusUnauthorized,
+			wantErr:    true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -52,6 +63,7 @@ func TestHTTPPointsClient_Credit(t *testing.T) {
 				gotMethod      string
 				gotPath        string
 				gotContentType string
+				gotAuth        string
 				gotBody        service.CreditRequest
 			)
 
@@ -59,6 +71,7 @@ func TestHTTPPointsClient_Credit(t *testing.T) {
 				gotMethod = r.Method
 				gotPath = r.URL.Path
 				gotContentType = r.Header.Get("Content-Type")
+				gotAuth = r.Header.Get("Authorization")
 
 				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 					t.Errorf("decode request body: %v", err)
@@ -68,7 +81,7 @@ func TestHTTPPointsClient_Credit(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			client := service.NewHTTPPointsClient(srv.URL, &http.Client{Timeout: 2 * time.Second})
+			client := service.NewHTTPPointsClient(srv.URL, configuredToken, &http.Client{Timeout: 2 * time.Second})
 
 			err := client.Credit(context.Background(), req)
 
@@ -84,6 +97,12 @@ func TestHTTPPointsClient_Credit(t *testing.T) {
 			// criterion: 3 — Content-Type: application/json header is set.
 			if gotContentType != "application/json" {
 				t.Errorf("Content-Type = %q, want %q", gotContentType, "application/json")
+			}
+
+			// criterion: 1 — Authorization: Bearer <token> header is set on every request
+			// (fails if the header is absent or holds the wrong token).
+			if gotAuth != "Bearer "+configuredToken {
+				t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer "+configuredToken)
 			}
 
 			// criterion: 3 — the request body is the CreditRequest sent in.

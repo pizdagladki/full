@@ -19,3 +19,5 @@ points:
   win_amount: 5
   rank_amount: 3
   pvp_win_amount: 16
+internal:
+  api_token: ""

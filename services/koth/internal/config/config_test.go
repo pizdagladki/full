@@ -14,6 +14,7 @@ const (
 	validStoreBaseURL  = "http://localhost:8081"
 	validMediaBaseURL  = "http://localhost:8082"
 	validResetInterval = "1m"
+	validInternalToken = "s2s-secret-token"
 )
 
 // fullEnv returns a map with all required environment variables set to valid values.
@@ -50,12 +51,14 @@ func fullYAML(httpAddr string) string {
 
 func TestLoad(t *testing.T) {
 	tests := []struct {
-		name     string
-		isDocker bool
-		env      map[string]string
-		setup    func(t *testing.T) string // returns the config path
-		wantAddr string
-		wantErr  bool
+		name       string
+		isDocker   bool
+		env        map[string]string
+		setup      func(t *testing.T) string // returns the config path
+		wantAddr   string
+		wantErr    bool
+		checkToken bool
+		wantToken  string
 	}{
 		{
 			// criterion: env mode reads HTTP_ADDR, POSTGRES_DSN, REDIS_ADDR, REDIS_PASSWORD when explicitly set
@@ -63,6 +66,24 @@ func TestLoad(t *testing.T) {
 			isDocker: true,
 			env:      merge(fullEnv(), map[string]string{"HTTP_ADDR": ":9090"}),
 			wantAddr: ":9090",
+		},
+		{
+			// criterion: 1 — env mode reads INTERNAL_API_TOKEN into Internal.APIToken.
+			name:       "env mode reads INTERNAL_API_TOKEN into Internal.APIToken",
+			isDocker:   true,
+			env:        merge(fullEnv(), map[string]string{"INTERNAL_API_TOKEN": validInternalToken}),
+			wantAddr:   ":8080",
+			checkToken: true,
+			wantToken:  validInternalToken,
+		},
+		{
+			// criterion: 1 — an unset INTERNAL_API_TOKEN is still valid config (not required).
+			name:       "env mode missing INTERNAL_API_TOKEN is valid config",
+			isDocker:   true,
+			env:        fullEnv(),
+			wantAddr:   ":8080",
+			checkToken: true,
+			wantToken:  "",
 		},
 		{
 			// criterion: env mode defaults HTTP_ADDR to :8080 when unset
@@ -107,6 +128,26 @@ func TestLoad(t *testing.T) {
 				return writeTempConfig(t, fullYAML(""))
 			},
 			wantAddr: ":8080",
+		},
+		{
+			// criterion: 1 — file mode reads the nested internal.api_token yaml key.
+			name: "file mode reads internal.api_token",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, fullYAML(":8080")+"internal:\n  api_token: \""+validInternalToken+"\"\n")
+			},
+			wantAddr:   ":8080",
+			checkToken: true,
+			wantToken:  validInternalToken,
+		},
+		{
+			// criterion: 1 — an unset internal.api_token in yaml is still valid config.
+			name: "file mode missing internal.api_token is valid config",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t, fullYAML(":8080"))
+			},
+			wantAddr:   ":8080",
+			checkToken: true,
+			wantToken:  "",
 		},
 		{
 			// criterion: file mode fails validation when postgres section is missing
@@ -299,6 +340,9 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.HTTP.Addr != tt.wantAddr {
 				t.Errorf("addr = %q, want %q", cfg.HTTP.Addr, tt.wantAddr)
+			}
+			if tt.checkToken && cfg.Internal.APIToken != tt.wantToken {
+				t.Errorf("Internal.APIToken = %q, want %q", cfg.Internal.APIToken, tt.wantToken)
 			}
 		})
 	}

@@ -22,6 +22,7 @@ type Config struct {
 	Media    MediaConfig    `yaml:"media"    validate:"required"`
 	Reset    ResetConfig    `yaml:"reset"    validate:"required"`
 	Points   PointsConfig   `yaml:"points"   validate:"required"`
+	Internal InternalConfig `yaml:"internal"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -80,6 +81,16 @@ type PointsConfig struct {
 	WinAmount    int64 `yaml:"win_amount"     validate:"required,min=1"`
 	RankAmount   int64 `yaml:"rank_amount"    validate:"required,min=1"`
 	PvPWinAmount int64 `yaml:"pvp_win_amount" validate:"required,min=1"`
+}
+
+// InternalConfig holds the S2S internal bearer token, shared by the store
+// PointsClient (POST /v1/points/credit) and the media MediaClient
+// (DELETE /internal/v1/king-clips/:id): both are protected by the target
+// service's internalauth middleware. An unset token is valid config (not
+// required): the downstream service fails closed on its side, so an empty
+// token simply results in a 401, surfaced as an error by the client.
+type InternalConfig struct {
+	APIToken string `yaml:"api_token"`
 }
 
 const (
@@ -142,6 +153,7 @@ func loadFromEnv() *Config {
 			RankAmount:   parseInt64(os.Getenv("KOTH_POINTS_RANK_AMOUNT"), 0),
 			PvPWinAmount: parseInt64(os.Getenv("KOTH_POINTS_PVP_WIN_AMOUNT"), 0),
 		},
+		Internal: InternalConfig{APIToken: os.Getenv("INTERNAL_API_TOKEN")},
 	}
 }
 
