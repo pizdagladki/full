@@ -12,6 +12,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 
+	"github.com/pizdagladki/full/internal/platform/internalauth"
 	"github.com/pizdagladki/full/services/store/internal/api/delivery"
 	"github.com/pizdagladki/full/services/store/internal/api/domain"
 	svcmocks "github.com/pizdagladki/full/services/store/internal/api/service/mocks"
@@ -148,6 +149,87 @@ func TestPointsHandler_Credit(t *testing.T) {
 				if int64(got) != tt.wantBalance {
 					t.Errorf("balance = %v, want %d", got, tt.wantBalance)
 				}
+			}
+		})
+	}
+}
+
+// TestPointsHandler_Credit_ThroughInternalAuth exercises POST
+// /v1/points/credit wrapped with the internalauth middleware, the way it is
+// actually registered in register_http_routes.go, so the route-level
+// criteria (no header -> 401, wrong token -> 401, correct token -> existing
+// 2xx behavior) are verified end to end rather than just at the handler.
+func TestPointsHandler_Credit_ThroughInternalAuth(t *testing.T) {
+	t.Parallel()
+
+	const configuredToken = "s2s-secret-token"
+
+	tests := []struct {
+		name          string
+		setHeader     bool
+		authHeader    string
+		setupSvc      func(m *svcmocks.MockPointsService)
+		wantStatus    int
+		wantSvcCalled bool
+	}{
+		{
+			// criterion: no header -> 401, business logic never runs.
+			name:          "no Authorization header -> 401",
+			setHeader:     false,
+			setupSvc:      func(_ *svcmocks.MockPointsService) {},
+			wantStatus:    http.StatusUnauthorized,
+			wantSvcCalled: false,
+		},
+		{
+			// criterion: wrong token -> 401, business logic never runs.
+			name:          "wrong token -> 401",
+			setHeader:     true,
+			authHeader:    "Bearer not-the-token",
+			setupSvc:      func(_ *svcmocks.MockPointsService) {},
+			wantStatus:    http.StatusUnauthorized,
+			wantSvcCalled: false,
+		},
+		{
+			// criterion: correct token -> existing 2xx behavior preserved.
+			name:       "correct token -> existing 200 behavior",
+			setHeader:  true,
+			authHeader: "Bearer " + configuredToken,
+			setupSvc: func(m *svcmocks.MockPointsService) {
+				m.EXPECT().Credit(gomock.Any(), domain.PointsCredit{
+					UserID: 1, Reason: "match_win", RefID: "m-1", Delta: 0,
+				}).Return(int64(10), nil)
+			},
+			wantStatus:    http.StatusOK,
+			wantSvcCalled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			svc := svcmocks.NewMockPointsService(ctrl)
+			tt.setupSvc(svc)
+
+			handler := delivery.NewPointsHandler(svc, zap.NewNop())
+			guarded := internalauth.New(configuredToken)(handler.Credit)
+
+			e := setupEchoWithValidator(t)
+			req := httptest.NewRequest(http.MethodPost, "/v1/points/credit", strings.NewReader(`{"user_id":1,"reason":"match_win","ref_id":"m-1"}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			if tt.setHeader {
+				req.Header.Set(echo.HeaderAuthorization, tt.authHeader)
+			}
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			if err := guarded(c); err != nil {
+				t.Fatalf("guarded handler returned error: %v", err)
+			}
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body=%s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
 		})
 	}

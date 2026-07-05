@@ -19,6 +19,16 @@ type Config struct {
 	Stripe   StripeConfig   `yaml:"stripe" validate:"required"`
 	Points   PointsConfig   `yaml:"points"`
 	Rewarded RewardedConfig `yaml:"rewarded"`
+	Internal InternalConfig `yaml:"internal"`
+}
+
+// InternalConfig holds settings for server-to-server internal endpoints
+// (e.g. POST /v1/points/credit), gated by the internalauth middleware. It is
+// intentionally NOT validate:"required" — the middleware itself fails closed
+// (503) on an empty token, so the service must still be able to boot in
+// environments that haven't set INTERNAL_API_TOKEN yet.
+type InternalConfig struct {
+	APIToken string `yaml:"api_token"`
 }
 
 // RewardedConfig holds the rewarded-video grant rate-limit settings: at most
@@ -144,6 +154,9 @@ func loadFromEnv() (*Config, error) {
 		Rewarded: RewardedConfig{
 			Cap:           rewardedCap,
 			WindowSeconds: rewardedWindowSeconds,
+		},
+		Internal: InternalConfig{
+			APIToken: os.Getenv("INTERNAL_API_TOKEN"),
 		},
 	}, nil
 }
