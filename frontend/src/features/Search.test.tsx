@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Search } from './Search';
 import type { WsClientApi } from '../api/ws';
 import type { FaceLandmarkResult, LandmarkRunner } from '../cv';
+import { defaultCvRunner, __resetDefaultCvRunnerForTests } from '../cv';
 
 // ---------------------------------------------------------------------------
 // RAF stub — same pattern as CvComponent.test.tsx: collect scheduled callbacks
@@ -38,6 +39,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  __resetDefaultCvRunnerForTests();
 });
 
 // ---------------------------------------------------------------------------
@@ -378,5 +380,45 @@ describe('Search', () => {
     renderSearch(ws, runner);
 
     expect(ws.connect).toHaveBeenCalledWith('/ws/match');
+  });
+
+  // criteria: 1b/2b (default wiring regression guard) — with NO `cvRunner` prop supplied at all,
+  // Search must fall back to the real `defaultCvRunner()` singleton, NOT an inline no-face
+  // placeholder. Seeds the module-level singleton (reset + a controllable loader that resolves to
+  // a runner reporting a real face) BEFORE rendering, so Search's own `cvRunner = defaultCvRunner()`
+  // default-parameter call returns that SAME already-loaded instance. If Search.tsx's default were
+  // reverted to an inline `{ detectForVideo: () => ({ faceLandmarks: [] }) }`, the seeded singleton
+  // would never be consulted, the tick below would never report a face, and this test would fail
+  // (no join sent, face-prompt still shown).
+  it('production-default-wiring: with no cvRunner prop, the real defaultCvRunner() singleton drives face detection', async () => {
+    __resetDefaultCvRunnerForTests();
+    const seededRunner: LandmarkRunner = { detectForVideo: vi.fn(() => FACE_FRAME) };
+    defaultCvRunner(() => Promise.resolve(seededRunner));
+    // Flush the DeferredCvRunner's internal load().then(...) so the singleton is actually ready.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const { ws, fireOpen } = makeMockWs();
+    render(
+      <MemoryRouter initialEntries={['/search']}>
+        <Routes>
+          <Route path="/search" element={<Search wsClient={ws} />} />
+          <Route path="/home" element={<div>HOME</div>} />
+          <Route path="/battle" element={<BattleProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      fireOpen();
+    });
+    const cb = rafCallbacks[rafCallbacks.length - 1];
+    act(() => {
+      cb(0);
+    });
+
+    expect(sentMessages(ws)).toEqual([{ type: 'join', mode: 'ranked', level: 1 }]);
+    expect(screen.getByTestId('search-animation')).toBeInTheDocument();
+    expect(screen.queryByTestId('face-prompt')).not.toBeInTheDocument();
   });
 });

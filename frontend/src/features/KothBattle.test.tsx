@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KothBattle } from './KothBattle';
 import type { KothBattleProps } from './KothBattle';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
+import { defaultCvRunner, __resetDefaultCvRunnerForTests } from '../cv';
 import type { KingClipsApi, CurrentKingClip, KingClipUploadResult } from '../api/kingClips';
 import type { KothApi, ChallengeHillResult, RankedAttemptResult } from '../api/koth';
 
@@ -20,13 +21,17 @@ function makeFakeCv(): {
   fireFacePresent: () => void;
   fireFaceLost: () => void;
   fireBlink: () => void;
+  /** The `runner` prop KothBattle actually passed down — captured for the default-wiring test below. */
+  getCapturedRunner: () => LandmarkRunner | undefined;
 } {
   let cb: CvCallbacks = {};
+  let capturedRunner: LandmarkRunner | undefined;
   const start = vi.fn();
   const Cv = forwardRef<CvHandleRef, { runner: LandmarkRunner; callbacks?: CvCallbacks }>(
-    ({ callbacks }, ref) => {
+    ({ runner, callbacks }, ref) => {
       useEffect(() => {
         cb = callbacks ?? {};
+        capturedRunner = runner;
       });
       useImperativeHandle(ref, () => ({
         start,
@@ -42,6 +47,7 @@ function makeFakeCv(): {
     fireFacePresent: () => cb.onFacePresent?.(),
     fireFaceLost: () => cb.onFaceLost?.(),
     fireBlink: () => cb.onBlink?.(),
+    getCapturedRunner: () => capturedRunner,
   };
 }
 
@@ -167,6 +173,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  __resetDefaultCvRunnerForTests();
 });
 
 // ---------------------------------------------------------------------------
@@ -571,5 +578,28 @@ describe('KothBattle', () => {
     });
 
     expect(kingClipsApi.upload).toHaveBeenCalledWith('daily', expect.any(Number), expect.any(Blob));
+  });
+
+  // criteria: 1b/2b (default wiring regression guard) — with NO `cvRunner` prop supplied at all,
+  // KothBattle must fall back to the real `defaultCvRunner()` singleton, NOT an inline no-face
+  // placeholder. Driving a real face through CvEngine's full RAF/calibration pipeline via this
+  // screen is impractical here: KothBattle.test.tsx deliberately swaps in a fake `cvComponent` (see
+  // its doc comment, mirrors Battle.tsx) that never calls `runner.detectForVideo` at all, so a
+  // behavioral assertion on face-present-driven UI would pass trivially regardless of which runner
+  // is wired. Instead this asserts the referential-identity edge directly: seed the module
+  // singleton (reset + a sentinel loader) BEFORE rendering, then confirm the exact `runner` prop
+  // KothBattle passed down to its cv component IS that same singleton instance. If KothBattle.tsx's
+  // default were reverted to an inline `{ detectForVideo: () => ({ faceLandmarks: [] }) }`, the
+  // captured runner would be a different object and this identity check would fail.
+  it('production-default-wiring: with no cvRunner prop, KothBattle wires the real defaultCvRunner() singleton', () => {
+    __resetDefaultCvRunnerForTests();
+    const singleton = defaultCvRunner(() => new Promise<LandmarkRunner>(() => {}));
+
+    const { Cv, getCapturedRunner } = makeFakeCv();
+    const kingClipsApi = makeKingClipsApi();
+    const kothApi = makeKothApi();
+    renderKothBattle('daily', { cvComponent: Cv, kingClipsApi, kothApi });
+
+    expect(getCapturedRunner()).toBe(singleton);
   });
 });

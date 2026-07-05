@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { InviteRoom } from './InviteRoom';
 import type { WsClientApi } from '../api/ws';
 import type { FaceLandmarkResult, LandmarkRunner } from '../cv';
+import { defaultCvRunner, __resetDefaultCvRunnerForTests } from '../cv';
 
 // ---------------------------------------------------------------------------
 // Mock WS client — hand-rolled class implementing WsClientApi, capturing the
@@ -74,6 +75,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  __resetDefaultCvRunnerForTests();
 });
 
 function makeCvRunner(): {
@@ -659,5 +661,44 @@ describe('InviteRoom', () => {
     expect(ws.close).not.toHaveBeenCalled();
     expect(screen.queryByTestId('home-probe')).not.toBeInTheDocument();
     expect(screen.getByTestId('invite-error-screen')).toBeInTheDocument();
+  });
+
+  // criteria: 1b/2b (default wiring regression guard) — with NO `cvRunner` prop supplied at all,
+  // InviteRoom must fall back to the real `defaultCvRunner()` singleton, NOT an inline no-face
+  // placeholder. Seeds the module-level singleton (reset + a controllable loader resolving to a
+  // runner reporting a real face) BEFORE rendering, so InviteRoom's own
+  // `cvRunner = defaultCvRunner()` default-parameter call returns that SAME already-loaded
+  // instance. If InviteRoom.tsx's default were reverted to an inline
+  // `{ detectForVideo: () => ({ faceLandmarks: [] }) }`, the seeded singleton would never be
+  // consulted, the tick below would never report a face, and Create room would stay gated behind
+  // the face prompt — this test would fail.
+  it('production-default-wiring: with no cvRunner prop, the real defaultCvRunner() singleton drives the face gate', async () => {
+    __resetDefaultCvRunnerForTests();
+    const seededRunner: LandmarkRunner = { detectForVideo: vi.fn(() => FACE_FRAME) };
+    defaultCvRunner(() => Promise.resolve(seededRunner));
+    // Flush the DeferredCvRunner's internal load().then(...) so the singleton is actually ready.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const ws = new MockWs();
+    render(
+      <MemoryRouter initialEntries={['/invite']}>
+        <Routes>
+          <Route path="/invite" element={<InviteRoom wsClient={ws} />} />
+          <Route path="/battle" element={<BattleProbe />} />
+          <Route path="/home" element={<HomeProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const cb = rafCallbacks[rafCallbacks.length - 1];
+    act(() => {
+      cb(0);
+    });
+
+    fireEvent.click(screen.getByTestId('create-room-button'));
+
+    expect(ws.connect).toHaveBeenCalledWith('/ws/signal');
+    expect(screen.queryByTestId('invite-face-prompt')).not.toBeInTheDocument();
   });
 });
