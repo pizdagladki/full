@@ -13,10 +13,7 @@ type Config struct {
 	HTTP     HTTPConfig     `yaml:"http" validate:"required"`
 	Postgres PostgresConfig `yaml:"postgres" validate:"required"`
 	Redis    RedisConfig    `yaml:"redis" validate:"required"`
-
-	// StoreBaseURL is the base URL of the store service, targeted by the
-	// PointsClient to credit match_win / level_up points.
-	StoreBaseURL string `yaml:"store_base_url" validate:"required"`
+	Store    StoreConfig    `yaml:"store" validate:"required"`
 }
 
 // HTTPConfig holds the HTTP server settings.
@@ -33,6 +30,19 @@ type PostgresConfig struct {
 type RedisConfig struct {
 	Addr     string `yaml:"addr" validate:"required"`
 	Password string `yaml:"password"`
+}
+
+// StoreConfig holds the settings for calling the store service, targeted by
+// the PointsClient to credit match_win / level_up points.
+type StoreConfig struct {
+	// BaseURL is the base URL of the store service.
+	BaseURL string `yaml:"base_url" validate:"required"`
+	// InternalToken authenticates ratings to the store's protected
+	// POST /v1/points/credit as "Authorization: Bearer <token>". An unset
+	// token is valid config (not required): store fails closed on its side,
+	// so an empty token simply results in the store rejecting the request
+	// with 401, surfaced as an error by PointsClient.
+	InternalToken string `yaml:"internal_token"`
 }
 
 const defaultAddr = ":8080"
@@ -72,7 +82,10 @@ func loadFromEnv() *Config {
 			Addr:     os.Getenv("REDIS_ADDR"),
 			Password: os.Getenv("REDIS_PASSWORD"),
 		},
-		StoreBaseURL: os.Getenv("STORE_BASE_URL"),
+		Store: StoreConfig{
+			BaseURL:       os.Getenv("STORE_BASE_URL"),
+			InternalToken: os.Getenv("INTERNAL_API_TOKEN"),
+		},
 	}
 }
 
