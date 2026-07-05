@@ -10,7 +10,11 @@ session:
 ranked:
   thresholds: [5000, 15000, 30000, 60000, 120000]
 store:
-  base_url: "http://localhost:8083"
+  base_url: "http://localhost:8081"
+media:
+  base_url: "http://localhost:8082"
+reset:
+  check_interval: "1m"
 points:
   win_amount: 5
   rank_amount: 3

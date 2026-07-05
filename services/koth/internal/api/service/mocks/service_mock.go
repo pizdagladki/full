@@ -256,3 +256,79 @@ func (mr *MockPointsClientMockRecorder) Credit(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Credit", reflect.TypeOf((*MockPointsClient)(nil).Credit), ctx, req)
 }
+
+// MockMediaClient is a mock of MediaClient interface.
+type MockMediaClient struct {
+	ctrl     *gomock.Controller
+	recorder *MockMediaClientMockRecorder
+	isgomock struct{}
+}
+
+// MockMediaClientMockRecorder is the mock recorder for MockMediaClient.
+type MockMediaClientMockRecorder struct {
+	mock *MockMediaClient
+}
+
+// NewMockMediaClient creates a new mock instance.
+func NewMockMediaClient(ctrl *gomock.Controller) *MockMediaClient {
+	mock := &MockMediaClient{ctrl: ctrl}
+	mock.recorder = &MockMediaClientMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockMediaClient) EXPECT() *MockMediaClientMockRecorder {
+	return m.recorder
+}
+
+// ExpireKingClip mocks base method.
+func (m *MockMediaClient) ExpireKingClip(ctx context.Context, clipID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExpireKingClip", ctx, clipID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ExpireKingClip indicates an expected call of ExpireKingClip.
+func (mr *MockMediaClientMockRecorder) ExpireKingClip(ctx, clipID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExpireKingClip", reflect.TypeOf((*MockMediaClient)(nil).ExpireKingClip), ctx, clipID)
+}
+
+// MockResetService is a mock of ResetService interface.
+type MockResetService struct {
+	ctrl     *gomock.Controller
+	recorder *MockResetServiceMockRecorder
+	isgomock struct{}
+}
+
+// MockResetServiceMockRecorder is the mock recorder for MockResetService.
+type MockResetServiceMockRecorder struct {
+	mock *MockResetService
+}
+
+// NewMockResetService creates a new mock instance.
+func NewMockResetService(ctrl *gomock.Controller) *MockResetService {
+	mock := &MockResetService{ctrl: ctrl}
+	mock.recorder = &MockResetServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockResetService) EXPECT() *MockResetServiceMockRecorder {
+	return m.recorder
+}
+
+// CloseStaleReign mocks base method.
+func (m *MockResetService) CloseStaleReign(ctx context.Context, hillType domain.HillType) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CloseStaleReign", ctx, hillType)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CloseStaleReign indicates an expected call of CloseStaleReign.
+func (mr *MockResetServiceMockRecorder) CloseStaleReign(ctx, hillType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseStaleReign", reflect.TypeOf((*MockResetService)(nil).CloseStaleReign), ctx, hillType)
+}

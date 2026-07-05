@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -144,4 +145,68 @@ func (r *hillRepository) Challenge(
 	}
 
 	return domain.ChallengeOutcome{Won: true, King: newKing}, nil
+}
+
+// CloseIfStale closes the current reign for hillType when it started before
+// periodStart, returning the pre-close snapshot for reward/expiry handling.
+// It takes the same advisory lock as Challenge, serializing a reset-close
+// against a concurrent challenge on the same hill.
+func (r *hillRepository) CloseIfStale(
+	ctx context.Context, hillType domain.HillType, periodStart time.Time,
+) (*domain.KingReign, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	_, err = tx.Exec(ctx, lockHillSQL, string(hillType))
+	if err != nil {
+		return nil, fmt.Errorf("lock hill: %w", err)
+	}
+
+	king, scanErr := scanCurrentKing(ctx, tx, hillType)
+	if scanErr != nil {
+		if errors.Is(scanErr, ErrHillNotFound) {
+			err = tx.Commit(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("commit tx: %w", err)
+			}
+
+			return nil, nil //nolint:nilnil // no current reign: nothing to close, not an error
+		}
+
+		err = scanErr
+
+		return nil, err
+	}
+
+	if !king.StartedAt.Before(periodStart) {
+		// The current reign already started within this period — either it
+		// was already reset, or it was (re)seeded after the boundary rolled
+		// over. Nothing to do; commit the read-only tx and report a no-op.
+		err = tx.Commit(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("commit tx: %w", err)
+		}
+
+		return nil, nil //nolint:nilnil // fresh reign: nothing to close, not an error
+	}
+
+	_, err = tx.Exec(ctx, closeReignSQL, king.ID)
+	if err != nil {
+		return nil, fmt.Errorf("close reign: %w", err)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return king, nil
 }

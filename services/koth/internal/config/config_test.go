@@ -4,13 +4,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 const (
-	validDSN        = "postgres://app:app@localhost:5432/app?sslmode=disable"
-	validRedisAddr  = "localhost:6379"
-	validThresholds = "5000,15000,30000,60000,120000"
-	validStoreURL   = "http://localhost:8083"
+	validDSN           = "postgres://app:app@localhost:5432/app?sslmode=disable"
+	validRedisAddr     = "localhost:6379"
+	validThresholds    = "5000,15000,30000,60000,120000"
+	validStoreBaseURL  = "http://localhost:8081"
+	validMediaBaseURL  = "http://localhost:8082"
+	validResetInterval = "1m"
 )
 
 // fullEnv returns a map with all required environment variables set to valid values.
@@ -19,7 +22,9 @@ func fullEnv() map[string]string {
 		"POSTGRES_DSN":               validDSN,
 		"REDIS_ADDR":                 validRedisAddr,
 		"RANKED_THRESHOLDS_MS":       validThresholds,
-		"STORE_BASE_URL":             validStoreURL,
+		"STORE_BASE_URL":             validStoreBaseURL,
+		"MEDIA_BASE_URL":             validMediaBaseURL,
+		"RESET_CHECK_INTERVAL":       validResetInterval,
 		"KOTH_POINTS_WIN_AMOUNT":     "5",
 		"KOTH_POINTS_RANK_AMOUNT":    "3",
 		"KOTH_POINTS_PVP_WIN_AMOUNT": "16",
@@ -37,7 +42,9 @@ func fullYAML(httpAddr string) string {
 		"postgres:\n  dsn: \"" + validDSN + "\"\n" +
 		"redis:\n  addr: \"" + validRedisAddr + "\"\n" +
 		"ranked:\n  thresholds: [5000, 15000, 30000, 60000, 120000]\n" +
-		"store:\n  base_url: \"" + validStoreURL + "\"\n" +
+		"store:\n  base_url: \"" + validStoreBaseURL + "\"\n" +
+		"media:\n  base_url: \"" + validMediaBaseURL + "\"\n" +
+		"reset:\n  check_interval: \"" + validResetInterval + "\"\n" +
 		"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n"
 }
 
@@ -152,26 +159,115 @@ func TestLoad(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// criterion: 3 — store.base_url is validated at startup: missing it fails Load.
-			name: "file mode missing store base_url fails validation",
-			setup: func(t *testing.T) string {
-				return writeTempConfig(t,
-					"postgres:\n  dsn: \""+validDSN+"\"\n"+
-						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
-						"ranked:\n  thresholds: [5000, 15000]\n"+
-						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
-				)
+			// criterion: 4 — env mode fails validation when STORE_BASE_URL is missing (no reward
+			// credit target — the config-driven reset job cannot run without it)
+			name:     "env mode missing store base url fails validation",
+			isDocker: true,
+			env: map[string]string{
+				"POSTGRES_DSN": validDSN, "REDIS_ADDR": validRedisAddr, "RANKED_THRESHOLDS_MS": validThresholds,
+				"MEDIA_BASE_URL": validMediaBaseURL, "RESET_CHECK_INTERVAL": validResetInterval,
 			},
 			wantErr: true,
 		},
 		{
-			// criterion: 2 — env mode fails validation when win_amount is not strictly less than pvp_win_amount
+			// criterion: 3 — env mode fails validation when MEDIA_BASE_URL is missing (no clip
+			// expiry target for the reset job)
+			name:     "env mode missing media base url fails validation",
+			isDocker: true,
+			env: map[string]string{
+				"POSTGRES_DSN": validDSN, "REDIS_ADDR": validRedisAddr, "RANKED_THRESHOLDS_MS": validThresholds,
+				"STORE_BASE_URL": validStoreBaseURL, "RESET_CHECK_INTERVAL": validResetInterval,
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 4 — env mode fails validation when RESET_CHECK_INTERVAL is unset (the
+			// scheduled worker's boundary-poll cadence is config-driven, not hardcoded)
+			name:     "env mode missing reset check interval fails validation",
+			isDocker: true,
+			env: map[string]string{
+				"POSTGRES_DSN": validDSN, "REDIS_ADDR": validRedisAddr, "RANKED_THRESHOLDS_MS": validThresholds,
+				"STORE_BASE_URL": validStoreBaseURL, "MEDIA_BASE_URL": validMediaBaseURL,
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 4 — env mode fails validation when RESET_CHECK_INTERVAL is malformed
+			// (parseDuration falls back to the zero Duration, which fails "required")
+			name:     "env mode malformed reset check interval fails validation",
+			isDocker: true,
+			env:      merge(fullEnv(), map[string]string{"RESET_CHECK_INTERVAL": "not-a-duration"}),
+			wantErr:  true,
+		},
+		{
+			// criterion: 2 — env mode fails validation when the KotH win amount is not
+			// strictly less than the PvP match_win amount
 			name:     "env mode win amount not less than pvp amount fails validation",
 			isDocker: true,
 			env: merge(fullEnv(), map[string]string{
 				"KOTH_POINTS_WIN_AMOUNT":     "20",
 				"KOTH_POINTS_PVP_WIN_AMOUNT": "16",
 			}),
+			wantErr: true,
+		},
+		{
+			// criterion: 3 — store.base_url is validated at startup: missing it fails Load.
+			name: "file mode missing store base url fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 15000]\n"+
+						"media:\n  base_url: \""+validMediaBaseURL+"\"\n"+
+						"reset:\n  check_interval: \""+validResetInterval+"\"\n"+
+						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
+				)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 3 — file mode fails validation when media.base_url is missing
+			name: "file mode missing media base url fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 15000]\n"+
+						"store:\n  base_url: \""+validStoreBaseURL+"\"\n"+
+						"reset:\n  check_interval: \""+validResetInterval+"\"\n"+
+						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
+				)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 4 — file mode fails validation when reset.check_interval is missing
+			name: "file mode missing reset check interval fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 15000]\n"+
+						"store:\n  base_url: \""+validStoreBaseURL+"\"\n"+
+						"media:\n  base_url: \""+validMediaBaseURL+"\"\n"+
+						"points:\n  win_amount: 5\n  rank_amount: 3\n  pvp_win_amount: 16\n",
+				)
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 2 — file mode fails validation when points config is missing
+			name: "file mode missing points config fails validation",
+			setup: func(t *testing.T) string {
+				return writeTempConfig(t,
+					"postgres:\n  dsn: \""+validDSN+"\"\n"+
+						"redis:\n  addr: \""+validRedisAddr+"\"\n"+
+						"ranked:\n  thresholds: [5000, 15000]\n"+
+						"store:\n  base_url: \""+validStoreBaseURL+"\"\n"+
+						"media:\n  base_url: \""+validMediaBaseURL+"\"\n"+
+						"reset:\n  check_interval: \""+validResetInterval+"\"\n",
+				)
+			},
 			wantErr: true,
 		},
 	}
@@ -221,7 +317,9 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000, 15000, 30000}},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 		},
@@ -232,7 +330,9 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
@@ -244,7 +344,9 @@ func TestValidateConfig(t *testing.T) {
 				HTTP:   HTTPConfig{Addr: ":8080"},
 				Redis:  RedisConfig{Addr: validRedisAddr},
 				Ranked: RankedConfig{Thresholds: []int{5000}},
-				Store:  StoreConfig{BaseURL: validStoreURL},
+				Store:  StoreConfig{BaseURL: validStoreBaseURL},
+				Media:  MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:  ResetConfig{CheckInterval: time.Minute},
 				Points: PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
@@ -256,7 +358,9 @@ func TestValidateConfig(t *testing.T) {
 				HTTP:     HTTPConfig{Addr: ":8080"},
 				Postgres: PostgresConfig{DSN: validDSN},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
@@ -268,7 +372,9 @@ func TestValidateConfig(t *testing.T) {
 				HTTP:     HTTPConfig{Addr: ":8080"},
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
@@ -281,20 +387,52 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000, 5000, 30000}},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
 		},
 		{
-			// criterion: 3 — Store.BaseURL is required — PointsClient's HTTP impl
-			// targets it, and startup must fail fast when it's unset.
-			name: "missing store base_url fails",
+			// criterion: 4 — StoreConfig.BaseURL is required (the reset job's reward-credit
+			// target, and the target PointsClient POSTs credits to)
+			name: "missing store base url fails",
 			cfg: &Config{
 				HTTP:     HTTPConfig{Addr: ":8080"},
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 3 — MediaConfig.BaseURL is required (the reset job's clip-expiry target)
+			name: "missing media base url fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
+				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
+			},
+			wantErr: true,
+		},
+		{
+			// criterion: 4 — ResetConfig.CheckInterval is required (config-driven poll cadence)
+			name: "missing reset check interval fails",
+			cfg: &Config{
+				HTTP:     HTTPConfig{Addr: ":8080"},
+				Postgres: PostgresConfig{DSN: validDSN},
+				Redis:    RedisConfig{Addr: validRedisAddr},
+				Ranked:   RankedConfig{Thresholds: []int{5000}},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
 				Points:   PointsConfig{WinAmount: 5, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
@@ -307,7 +445,9 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 			},
 			wantErr: true,
 		},
@@ -320,7 +460,9 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 				Points:   PointsConfig{WinAmount: 16, RankAmount: 3, PvPWinAmount: 16},
 			},
 			wantErr: true,
@@ -333,7 +475,9 @@ func TestValidateConfig(t *testing.T) {
 				Postgres: PostgresConfig{DSN: validDSN},
 				Redis:    RedisConfig{Addr: validRedisAddr},
 				Ranked:   RankedConfig{Thresholds: []int{5000}},
-				Store:    StoreConfig{BaseURL: validStoreURL},
+				Store:    StoreConfig{BaseURL: validStoreBaseURL},
+				Media:    MediaConfig{BaseURL: validMediaBaseURL},
+				Reset:    ResetConfig{CheckInterval: time.Minute},
 				Points:   PointsConfig{WinAmount: 5, RankAmount: 20, PvPWinAmount: 16},
 			},
 			wantErr: true,

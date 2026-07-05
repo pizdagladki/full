@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,6 +19,8 @@ type Config struct {
 	Session  SessionConfig  `yaml:"session"`
 	Ranked   RankedConfig   `yaml:"ranked"   validate:"required"`
 	Store    StoreConfig    `yaml:"store"    validate:"required"`
+	Media    MediaConfig    `yaml:"media"    validate:"required"`
+	Reset    ResetConfig    `yaml:"reset"    validate:"required"`
 	Points   PointsConfig   `yaml:"points"   validate:"required"`
 }
 
@@ -49,9 +52,24 @@ type RankedConfig struct {
 	Thresholds []int `yaml:"thresholds" validate:"required,min=1"`
 }
 
-// StoreConfig is the store service's base URL, targeted by PointsClient.
+// StoreConfig holds the store service's base URL: targeted by PointsClient
+// (to credit rank/win points) and used to POST the daily/monthly
+// final-placement reward credit from the reset worker.
 type StoreConfig struct {
 	BaseURL string `yaml:"base_url" validate:"required"`
+}
+
+// MediaConfig holds the media service's base URL, used to DELETE (expire)
+// the king clip of a closed reign.
+type MediaConfig struct {
+	BaseURL string `yaml:"base_url" validate:"required"`
+}
+
+// ResetConfig holds the daily/monthly reset worker's poll cadence: the day
+// and month boundaries themselves are calendar-based, but how often the
+// worker checks for a rolled-over boundary is config-driven.
+type ResetConfig struct {
+	CheckInterval time.Duration `yaml:"check_interval" validate:"required"`
 }
 
 // PointsConfig holds the config-driven KotH award amounts (placeholders) plus
@@ -112,6 +130,12 @@ func loadFromEnv() *Config {
 		},
 		Store: StoreConfig{
 			BaseURL: os.Getenv("STORE_BASE_URL"),
+		},
+		Media: MediaConfig{
+			BaseURL: os.Getenv("MEDIA_BASE_URL"),
+		},
+		Reset: ResetConfig{
+			CheckInterval: parseDuration(os.Getenv("RESET_CHECK_INTERVAL")),
 		},
 		Points: PointsConfig{
 			WinAmount:    parseInt64(os.Getenv("KOTH_POINTS_WIN_AMOUNT"), 0),
@@ -184,6 +208,19 @@ func parseThresholds(raw string) []int {
 	}
 
 	return thresholds
+}
+
+// parseDuration parses raw (e.g. "1m") into a time.Duration. An empty or
+// malformed input yields the zero Duration, which fails ValidateConfig's
+// "required" check and aborts startup rather than silently defaulting the
+// reset worker's poll cadence.
+func parseDuration(raw string) time.Duration {
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0
+	}
+
+	return d
 }
 
 // parseInt64 parses raw as a base-10 int64, returning def when raw is empty

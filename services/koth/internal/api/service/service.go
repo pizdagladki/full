@@ -64,7 +64,8 @@ type (
 	// PointsClient credits points into the store's ledger. Implemented by an
 	// HTTP client targeting the store service. Credits are idempotent
 	// (deduped by user_id+reason+ref_id on the store side), so a failed call
-	// here is safe to log and drop.
+	// here is safe to log and drop — including by the reset job, which
+	// treats it as non-blocking.
 	PointsClient interface {
 		Credit(ctx context.Context, req CreditRequest) error
 	}
@@ -80,4 +81,24 @@ type CreditRequest struct {
 	Reason string `json:"reason"`
 	RefID  string `json:"ref_id"`
 	Delta  int64  `json:"delta"`
+}
+
+// MediaClient expires (deletes) a king clip in the media service once its
+// reign has closed. Implemented by an HTTP client targeting the media
+// service's king-clip DELETE contract (see media's king_clip_handler.go,
+// introduced in #97).
+type MediaClient interface {
+	ExpireKingClip(ctx context.Context, clipID string) error
+}
+
+// ResetService runs the day/month rollover reset for the daily/monthly
+// king-of-the-hill reigns, off the request hot path (invoked by a scheduled
+// worker — see internal/app/worker_reset.go).
+type ResetService interface {
+	// CloseStaleReign closes hillType's current reign if the day/month
+	// boundary has rolled over past it, credits the final-placement reward,
+	// and expires the reign's king clip. A no-op (nil error, no client
+	// calls) when there is nothing to close this tick — this is what makes
+	// repeated invocations for the same period idempotent.
+	CloseStaleReign(ctx context.Context, hillType domain.HillType) error
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/services/koth/internal/api/delivery"
+	"github.com/pizdagladki/full/services/koth/internal/api/domain"
 	"github.com/pizdagladki/full/services/koth/internal/api/middleware"
 	svcmocks "github.com/pizdagladki/full/services/koth/internal/api/service/mocks"
 	"github.com/pizdagladki/full/services/koth/internal/config"
@@ -156,15 +158,55 @@ func TestRunWorkers_GracefulShutdown(t *testing.T) {
 }
 
 // TestRunWorkers_WorkerError verifies criterion: a worker start failure (bad
-// bind address) is surfaced as an error from runWorkers.
+// bind address) is surfaced as an error from runWorkers. It also proves that
+// runWorkers itself unwinds workerReset's ctx.Done()-only loop and returns
+// promptly, without relying on the caller to cancel the passed-in ctx.
 func TestRunWorkers_WorkerError(t *testing.T) {
 	t.Parallel()
 
 	// A bind address with no port makes e.Start fail, surfacing a worker error.
 	a := newTestApp(t, "not-a-valid-bind-addr")
 
-	if err := a.runWorkers(context.Background()); err == nil {
+	err := a.runWorkers(context.Background())
+	if err == nil {
 		t.Fatal("runWorkers() error = nil, want the worker's start error")
+	}
+}
+
+// TestRunWorkers_CancelsSharedCtxOnFirstExit verifies criterion: when one
+// worker returns (with an error) while another worker's loop only exits on
+// ctx.Done(), runWorkers cancels the shared ctx as soon as the first worker
+// exits, unwinding the still-running worker so runWorkers returns promptly
+// instead of hanging on wg.Wait() forever.
+func TestRunWorkers_CancelsSharedCtxOnFirstExit(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("boom")
+
+	failFast := func(_ context.Context, _ *App) error {
+		return wantErr
+	}
+
+	blockUntilCanceled := func(ctx context.Context, _ *App) error {
+		<-ctx.Done()
+
+		return nil
+	}
+
+	a := &App{}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.runWorkersFor(context.Background(), []worker{failFast, blockUntilCanceled})
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("runWorkers() error = %v, want %v", err, wantErr)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("runWorkers did not return promptly after one worker exited — shared ctx was not canceled")
 	}
 }
 
@@ -212,14 +254,22 @@ func newTestApp(t *testing.T, addr string) *App {
 	a.cfg = &config.Config{
 		HTTP:    config.HTTPConfig{Addr: addr},
 		Session: config.SessionConfig{CookieName: "session"},
+		// Long interval: workerReset's first (immediate) tick fires once via
+		// checkReset in workerReset's own call, and the ticker itself won't
+		// fire again within these tests' short lifetimes.
+		Reset: config.ResetConfig{CheckInterval: time.Hour},
 	}
 
 	hillMock := svcmocks.NewMockHillService(ctrl)
+	resetMock := svcmocks.NewMockResetService(ctrl)
+	resetMock.EXPECT().CloseStaleReign(gomock.Any(), domain.HillTypeDaily).Return(nil).AnyTimes()
+	resetMock.EXPECT().CloseStaleReign(gomock.Any(), domain.HillTypeMonthly).Return(nil).AnyTimes()
 
 	// Wire stub handlers and middleware so registerHTTPRoutes works.
 	a.rankHandler = delivery.NewRankHandler(rankMock, zap.NewNop())
 	a.hillHandler = delivery.NewHillHandler(hillMock, zap.NewNop())
 	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
+	a.resetSvc = resetMock
 
 	return a
 }

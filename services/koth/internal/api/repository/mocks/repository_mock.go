@@ -125,6 +125,21 @@ func (mr *MockHillRepositoryMockRecorder) Challenge(ctx, hillType, userID, survi
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Challenge", reflect.TypeOf((*MockHillRepository)(nil).Challenge), ctx, hillType, userID, survivedMs, newClipID)
 }
 
+// CloseIfStale mocks base method.
+func (m *MockHillRepository) CloseIfStale(ctx context.Context, hillType domain.HillType, periodStart time.Time) (*domain.KingReign, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CloseIfStale", ctx, hillType, periodStart)
+	ret0, _ := ret[0].(*domain.KingReign)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CloseIfStale indicates an expected call of CloseIfStale.
+func (mr *MockHillRepositoryMockRecorder) CloseIfStale(ctx, hillType, periodStart any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseIfStale", reflect.TypeOf((*MockHillRepository)(nil).CloseIfStale), ctx, hillType, periodStart)
+}
+
 // CurrentKing mocks base method.
 func (m *MockHillRepository) CurrentKing(ctx context.Context, hillType domain.HillType) (*domain.KingReign, error) {
 	m.ctrl.T.Helper()

@@ -18,8 +18,11 @@ import (
 	"github.com/pizdagladki/full/services/koth/internal/config"
 )
 
-// pointsClientTimeout bounds a single points-credit HTTP call.
+// pointsClientTimeout bounds a single points-credit HTTP call to the store.
 const pointsClientTimeout = 10 * time.Second
+
+// mediaClientTimeout bounds a single king-clip-expiry HTTP call to media.
+const mediaClientTimeout = 10 * time.Second
 
 // App holds the service dependencies and drives its lifecycle.
 type App struct {
@@ -39,6 +42,7 @@ type App struct {
 	rankSvc    service.RankService
 	hillSvc    service.HillService
 	sessionSvc service.SessionService
+	resetSvc   service.ResetService
 
 	rankHandler delivery.RankHandler
 	hillHandler delivery.HillHandler
