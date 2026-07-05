@@ -110,10 +110,11 @@ function tickFrame(
 
 function BattleProbe() {
   const location = useLocation();
-  const state = location.state as { roomId?: string } | null;
+  const state = location.state as { roomId?: string; ranked?: boolean } | null;
   return (
     <div data-testid="battle-probe">
       <span data-testid="battle-room-id">{state?.roomId}</span>
+      <span data-testid="battle-ranked">{String(state?.ranked)}</span>
     </div>
   );
 }
@@ -260,6 +261,26 @@ describe('InviteRoom', () => {
     expect(screen.getByTestId('battle-room-id').textContent).toBe('room-42');
   });
 
+  // criterion: 2 — the invite-a-friend room is the spec's UNRANKED branch: Start Battle's
+  // create->battle hand-off must mark the navigation state `ranked: false`. This FAILS if the
+  // `ranked: false` marker is dropped from the navigate('/battle', ...) call.
+  it('unranked-marker: Start Battle navigates to /battle with ranked: false', () => {
+    const ws = new MockWs();
+    renderInviteRoomFacePresent(ws);
+
+    fireEvent.click(screen.getByTestId('create-room-button'));
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage(JSON.stringify({ type: 'room_created', room_id: 'room-42', code: 'XYZ' }));
+    });
+
+    fireEvent.click(screen.getByTestId('start-battle-button'));
+
+    expect(screen.getByTestId('battle-probe')).toBeInTheDocument();
+    expect(screen.getByTestId('battle-room-id').textContent).toBe('room-42');
+    expect(screen.getByTestId('battle-ranked').textContent).toBe('false');
+  });
+
   // criterion: 2 — "Join by code" sends {type:"join_room", code} and on room_joined transitions to
   // the battle screen carrying the shared room_id.
   it('join-by-code-transitions-to-battle: submitting a code sends join_room and room_joined navigates to /battle', () => {
@@ -282,6 +303,26 @@ describe('InviteRoom', () => {
 
     expect(screen.getByTestId('battle-probe')).toBeInTheDocument();
     expect(screen.getByTestId('battle-room-id').textContent).toBe('room-99');
+  });
+
+  // criterion: 2 — same UNRANKED requirement as above but for the join->battle transition (the
+  // `room_joined` handler). This FAILS if the `ranked: false` marker is dropped from that
+  // navigate('/battle', ...) call.
+  it('unranked-marker: room_joined navigates to /battle with ranked: false', () => {
+    const ws = new MockWs();
+    renderInviteRoomFacePresent(ws);
+
+    fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'FRIEND1' } });
+    fireEvent.click(screen.getByTestId('join-room-button'));
+
+    act(() => {
+      ws.emitOpen();
+      ws.emitMessage(JSON.stringify({ type: 'room_joined', room_id: 'room-99' }));
+    });
+
+    expect(screen.getByTestId('battle-probe')).toBeInTheDocument();
+    expect(screen.getByTestId('battle-room-id').textContent).toBe('room-99');
+    expect(screen.getByTestId('battle-ranked').textContent).toBe('false');
   });
 
   // criterion: 2 (violation guard) — join_room must NOT be sent synchronously right after clicking

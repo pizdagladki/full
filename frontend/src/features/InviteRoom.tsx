@@ -126,7 +126,9 @@ export function InviteRoom({ wsClient, cvRunner = PLACEHOLDER_RUNNER }: InviteRo
           // the joiner gets `room_joined`. Receiving it here proves the room already had the
           // creator present, so both peers are now in the room; navigate straight to battle.
           teardown();
-          navigate('/battle', { state: { roomId: msg.room_id } });
+          // Criterion 2 (#106): the invite-a-friend room is the spec's UNRANKED branch — mark it
+          // explicitly so Battle.tsx never applies rating/ELO for it.
+          navigate('/battle', { state: { roomId: msg.room_id, ranked: false } });
           return;
         }
         if (msg.type === 'error') {
@@ -189,7 +191,8 @@ export function InviteRoom({ wsClient, cvRunner = PLACEHOLDER_RUNNER }: InviteRo
 
   const handleStartBattle = useCallback(() => {
     teardown();
-    navigate('/battle', { state: { roomId } });
+    // Criterion 2 (#106): same unranked marker as the join->battle transition above.
+    navigate('/battle', { state: { roomId, ranked: false } });
   }, [teardown, navigate, roomId]);
 
   const handleCopy = useCallback(() => {
