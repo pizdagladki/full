@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ForwardRefExoticComponent, MutableRefObject, RefAttributes } from 'react';
+import type { ComponentType, ForwardRefExoticComponent, MutableRefObject, RefAttributes } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CvComponent, defaultCvRunner } from '../cv';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
@@ -13,7 +13,7 @@ import { defaultClipsApi } from '../api/clips';
 import type { ClipsApi } from '../api/clips';
 import { useAuth } from './auth';
 import { Distraction, makeEmptyBattleMeta } from './Distraction';
-import type { BattleMeta } from './Distraction';
+import type { BattleMeta, DistractionProps } from './Distraction';
 
 // ---------------------------------------------------------------------------
 // WS message shapes (server-side time-arbitration protocol) — kept local, no
@@ -70,6 +70,9 @@ type RecordingComponentType = ForwardRefExoticComponent<
   RecordingComponentProps & RefAttributes<RecordingHandle>
 >;
 
+/** Structural type of Distraction's props — used for the test-injection seam below. */
+type DistractionComponentType = ComponentType<DistractionProps>;
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -118,6 +121,13 @@ export interface BattleProps {
    * Production never sets this — Battle builds its own ref internally, once, like `wsRef`.
    */
   battleMetaRef?: MutableRefObject<BattleMeta>;
+  /**
+   * Test seam ONLY: overrides which component mounts the distraction control — mirrors
+   * `cvComponent`/`recordingComponent` above. Production never sets this — it always defaults to
+   * the real `Distraction`. Lets a test inject a spy that records the exact props (e.g.
+   * `battleStartMs`) Battle rendered it with, without depending on Distraction's own timer math.
+   */
+  distractionComponent?: DistractionComponentType;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +148,7 @@ export function Battle({
   cvComponent: Cv = CvComponent,
   recordingComponent: Recording = RecordingComponent,
   battleMetaRef: battleMetaRefProp,
+  distractionComponent: DistractionCmp = Distraction,
 }: BattleProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -469,7 +480,7 @@ export function Battle({
             done), so its internal 30s unlock timer aligns with `startTimeRef.current`, and it
             unmounts (clearing its timers) the instant the phase leaves 'battle'. */}
         {phase === 'battle' && (
-          <Distraction battleStartMs={battleStartMs} battleMetaRef={battleMetaRef} />
+          <DistractionCmp battleStartMs={battleStartMs} battleMetaRef={battleMetaRef} />
         )}
       </div>
       {phase === 'sanity' && <div data-testid="sanity-check">Checking for your face…</div>}
