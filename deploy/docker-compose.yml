@@ -18,8 +18,9 @@
 #
 # 6 of the 9 services own Postgres migrations (auth, ratings, media, store, reports, koth) and
 # all share the same `app` database — each gets its own golang-migrate schema-migrations table
-# (x-migrations-table=_schema_migrations) via a one-shot `migrate-<name>` init service so that
-# independently-numbered 0001... migration sets don't collide/skip each other.
+# (x-migrations-table=<service>_schema_migrations, e.g. auth_schema_migrations) via a one-shot
+# `migrate-<name>` init service so that independently-numbered 0001... migration sets don't
+# collide/skip each other.
 
 services:
   postgres:
@@ -65,7 +66,7 @@ services:
       - ../services/auth/migrations:/migrations:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=_schema_migrations" up'
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=auth_schema_migrations" up'
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,7 +79,7 @@ services:
       - ../services/ratings/migrations:/migrations:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=_schema_migrations" up'
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=ratings_schema_migrations" up'
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,7 +92,7 @@ services:
       - ../services/media/migrations:/migrations:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=_schema_migrations" up'
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=media_schema_migrations" up'
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,7 +105,7 @@ services:
       - ../services/store/migrations:/migrations:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=_schema_migrations" up'
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=store_schema_migrations" up'
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,7 +118,7 @@ services:
       - ../services/reports/migrations:/migrations:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=_schema_migrations" up'
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=reports_schema_migrations" up'
     depends_on:
       postgres:
         condition: service_healthy
@@ -130,7 +131,7 @@ services:
       - ../services/koth/migrations:/migrations:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=_schema_migrations" up'
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=koth_schema_migrations" up'
     depends_on:
       postgres:
         condition: service_healthy
