@@ -30,3 +30,10 @@ export type {
   RankedAttemptRequest,
   RankedAttemptResult,
 } from './koth';
+export { ReportsApiClient, defaultReportsApi } from './reports';
+export type {
+  ReportsApi,
+  CheatReportRequest,
+  BugReportRequest,
+  BugReportDevice,
+} from './reports';
