@@ -1,8 +1,26 @@
-# deploy/docker-compose.yml — local infra dependencies (+ services as they are created, Phase C+).
-# Base stack: PostgreSQL (pgx), Redis (go-redis), MinIO (minio-go).
-# App services (Phase C+) must include the shared internal S2S token (issues #142-#145):
+# deploy/docker-compose.yml — full local stack: infra + all nine app services.
+#
+# Canonical host-port table (host -> container :8080):
+#   auth         -> 8080
+#   signaling    -> 8081
+#   media        -> 8082
+#   store        -> 8083
+#   ratings      -> 8084
+#   reports      -> 8085
+#   matchmaking  -> 8086
+#   koth         -> 8087
+#   health       -> 8088
+#
+# App services (Phase C+) include the shared internal S2S token (issues #142-#145):
 #   env_file:
+#     - env/.env             # real file, gitignored; template: env/.env.example
 #     - env/internal.env     # real file, gitignored; template: env/internal.env.example
+#
+# 6 of the 9 services own Postgres migrations (auth, ratings, media, store, reports, koth) and
+# all share the same `app` database — each gets its own golang-migrate schema-migrations table
+# (x-migrations-table=<service>_schema_migrations, e.g. auth_schema_migrations) via a one-shot
+# `migrate-<name>` init service so that independently-numbered 0001... migration sets don't
+# collide/skip each other.
 
 services:
   postgres:
@@ -15,6 +33,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   redis:
     image: redis:7
@@ -32,6 +55,266 @@ services:
       - "9001:9001"
     volumes:
       - minio-data:/data
+
+  # --- one-shot DB migration init services -----------------------------------------------
+
+  migrate-auth:
+    image: migrate/migrate:v4.17.0
+    env_file:
+      - env/.env
+    volumes:
+      - ../services/auth/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=auth_schema_migrations" up'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate-ratings:
+    image: migrate/migrate:v4.17.0
+    env_file:
+      - env/.env
+    volumes:
+      - ../services/ratings/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=ratings_schema_migrations" up'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate-media:
+    image: migrate/migrate:v4.17.0
+    env_file:
+      - env/.env
+    volumes:
+      - ../services/media/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=media_schema_migrations" up'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate-store:
+    image: migrate/migrate:v4.17.0
+    env_file:
+      - env/.env
+    volumes:
+      - ../services/store/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=store_schema_migrations" up'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate-reports:
+    image: migrate/migrate:v4.17.0
+    env_file:
+      - env/.env
+    volumes:
+      - ../services/reports/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=reports_schema_migrations" up'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate-koth:
+    image: migrate/migrate:v4.17.0
+    env_file:
+      - env/.env
+    volumes:
+      - ../services/koth/migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'migrate -path /migrations -database "$$POSTGRES_DSN&x-migrations-table=koth_schema_migrations" up'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # --- app services ------------------------------------------------------------------------
+
+  auth:
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate-auth:
+        condition: service_completed_successfully
+
+  signaling:
+    build:
+      context: ..
+      dockerfile: services/signaling/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  media:
+    build:
+      context: ..
+      dockerfile: services/media/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      migrate-media:
+        condition: service_completed_successfully
+
+  store:
+    build:
+      context: ..
+      dockerfile: services/store/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8083:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate-store:
+        condition: service_completed_successfully
+
+  ratings:
+    build:
+      context: ..
+      dockerfile: services/ratings/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8084:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate-ratings:
+        condition: service_completed_successfully
+
+  reports:
+    build:
+      context: ..
+      dockerfile: services/reports/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8085:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      migrate-reports:
+        condition: service_completed_successfully
+
+  matchmaking:
+    build:
+      context: ..
+      dockerfile: services/matchmaking/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8086:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  koth:
+    build:
+      context: ..
+      dockerfile: services/koth/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8087:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate-koth:
+        condition: service_completed_successfully
+
+  health:
+    build:
+      context: ..
+      dockerfile: services/health/Dockerfile
+    env_file:
+      - env/.env
+      - env/internal.env
+    environment:
+      IS_DOCKER: "true"
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8088:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
 volumes:
   postgres-data:
