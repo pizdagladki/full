@@ -372,11 +372,11 @@ describe('Search', () => {
   });
 
   // criterion: 1 — entering search connects the matchmaking WS on the documented path.
-  it('mount: connects the matchmaking WS on /ws/matchmaking', () => {
+  it('mount: connects the matchmaking WS on /ws/match', () => {
     const { ws } = makeMockWs();
     const { runner } = makeCvRunner();
     renderSearch(ws, runner);
 
-    expect(ws.connect).toHaveBeenCalledWith('/ws/matchmaking');
+    expect(ws.connect).toHaveBeenCalledWith('/ws/match');
   });
 });

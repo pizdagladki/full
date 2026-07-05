@@ -195,7 +195,7 @@ describe('InviteRoom', () => {
 
     fireEvent.click(screen.getByTestId('create-room-button'));
 
-    expect(ws.connect).toHaveBeenCalledWith('/ws');
+    expect(ws.connect).toHaveBeenCalledWith('/ws/signal');
 
     act(() => {
       ws.emitOpen();
@@ -290,7 +290,7 @@ describe('InviteRoom', () => {
     fireEvent.change(screen.getByTestId('join-code-input'), { target: { value: 'FRIEND1' } });
     fireEvent.click(screen.getByTestId('join-room-button'));
 
-    expect(ws.connect).toHaveBeenCalledWith('/ws');
+    expect(ws.connect).toHaveBeenCalledWith('/ws/signal');
 
     act(() => {
       ws.emitOpen();
@@ -547,7 +547,7 @@ describe('InviteRoom', () => {
 
       doAction();
 
-      expect(ws.connect).toHaveBeenCalledWith('/ws');
+      expect(ws.connect).toHaveBeenCalledWith('/ws/signal');
       expect(screen.queryByTestId('invite-face-prompt')).not.toBeInTheDocument();
     },
   );

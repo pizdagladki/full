@@ -199,7 +199,7 @@ describe('Battle', () => {
     expect(screen.getByTestId('local-video')).toBeInTheDocument();
     expect(screen.getByTestId('remote-video')).toBeInTheDocument();
     expect(start).toHaveBeenCalledWith(screen.getByTestId('local-video'));
-    expect(ws.connect).toHaveBeenCalledWith('/ws');
+    expect(ws.connect).toHaveBeenCalledWith('/ws/signal');
   });
 
   // criterion: 1 — the rtc remote stream is attached to the right-hand video once it arrives.
