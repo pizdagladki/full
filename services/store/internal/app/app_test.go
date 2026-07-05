@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pizdagladki/full/services/store/internal/api/delivery"
+	"github.com/pizdagladki/full/services/store/internal/api/domain"
 	"github.com/pizdagladki/full/services/store/internal/api/middleware"
 	svcmocks "github.com/pizdagladki/full/services/store/internal/api/service/mocks"
 	"github.com/pizdagladki/full/services/store/internal/config"
@@ -82,6 +84,142 @@ func TestRegisterHTTPRoutes_Healthz(t *testing.T) {
 	}
 	if ct := rec.Header().Get(echo.HeaderContentType); ct != echo.MIMEApplicationJSON {
 		t.Errorf("Content-Type = %q, want %q", ct, echo.MIMEApplicationJSON)
+	}
+}
+
+// TestRegisterHTTPRoutes_InternalAuthAndSessionGuards drives requests through
+// the App's REAL router (a.registerHTTPRoutes(), the same one wired in
+// production) rather than re-wrapping the middleware by hand. This is what
+// actually proves POST /v1/points/credit is registered under the
+// internalauth-gated group (not public) and that the session-protected group
+// still carries RequireAuth — a route re-registered publicly, or a dropped
+// RequireAuth, would flip one of these assertions.
+func TestRegisterHTTPRoutes_InternalAuthAndSessionGuards(t *testing.T) {
+	t.Parallel()
+
+	const internalToken = "s2s-secret-token"
+
+	ctrl := gomock.NewController(t)
+	catalogMock := svcmocks.NewMockCatalogService(ctrl)
+	inventoryMock := svcmocks.NewMockInventoryService(ctrl)
+	sessionMock := svcmocks.NewMockSessionService(ctrl)
+	purchaseMock := svcmocks.NewMockPurchaseService(ctrl)
+	pointsMock := svcmocks.NewMockPointsService(ctrl)
+	rewardedMock := svcmocks.NewMockRewardedService(ctrl)
+
+	const validSessionCookie = "valid-session-value"
+
+	const sessionUserID = int64(7)
+
+	// Only reached if the request actually makes it past internalauth to the
+	// real Credit handler (the correct-token case).
+	pointsMock.EXPECT().Credit(gomock.Any(), gomock.Any()).Return(int64(10), nil).AnyTimes()
+
+	// Only reached if RequireAuth is still attached to the session group AND
+	// resolves the cookie (the valid-cookie case below); a dropped RequireAuth
+	// means these are never invoked and the handler 401s on the missing
+	// context value instead of returning 200.
+	sessionMock.EXPECT().ResolveSession(gomock.Any(), validSessionCookie).Return(sessionUserID, nil).AnyTimes()
+	inventoryMock.EXPECT().ListInventory(gomock.Any(), sessionUserID).Return([]domain.InventoryItem{}, nil).AnyTimes()
+
+	a := New("store-test")
+	a.logger = zap.NewNop()
+	a.initValidator()
+	a.cfg = &config.Config{
+		HTTP:     config.HTTPConfig{Addr: "127.0.0.1:0"},
+		Session:  config.SessionConfig{CookieName: "session"},
+		Internal: config.InternalConfig{APIToken: internalToken},
+	}
+
+	a.storeHandler = delivery.NewStoreHandler(catalogMock, inventoryMock, zap.NewNop())
+	a.purchaseHandler = delivery.NewPurchaseHandler(purchaseMock, zap.NewNop())
+	a.pointsHandler = delivery.NewPointsHandler(pointsMock, zap.NewNop())
+	a.rewardedHandler = delivery.NewRewardedHandler(rewardedMock, zap.NewNop())
+	a.authMiddleware = middleware.NewAuthMiddleware(sessionMock, "session", zap.NewNop())
+
+	e := a.registerHTTPRoutes()
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		body       string
+		authHeader string
+		cookie     string
+		wantStatus int
+	}{
+		{
+			// criterion 3: the credit route must NOT be public. If someone
+			// re-registered POST /v1/points/credit outside the internalauth
+			// group, this request (no Authorization header) would reach the
+			// handler and return 200 instead of 401, failing this case.
+			name:       "credit route with no internal token -> 401 (not public)",
+			method:     http.MethodPost,
+			path:       "/v1/points/credit",
+			body:       `{"user_id":1,"reason":"match_win","ref_id":"m-1"}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// criterion 3: the credit route IS reachable through the router
+			// with the correct internal bearer token, proving it is wired to
+			// the internalauth-gated group and to the real handler.
+			name:       "credit route with correct internal token -> 200 (reaches guarded handler)",
+			method:     http.MethodPost,
+			path:       "/v1/points/credit",
+			body:       `{"user_id":1,"reason":"match_win","ref_id":"m-1"}`,
+			authHeader: "Bearer " + internalToken,
+			wantStatus: http.StatusOK,
+		},
+		{
+			// criterion 3: the session-protected group is unchanged — a
+			// session route with no cookie still 401s (either via RequireAuth
+			// or the handler's own defense-in-depth check).
+			name:       "session-protected inventory route with no cookie -> 401",
+			method:     http.MethodGet,
+			path:       "/v1/store/inventory",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// criterion 3: RequireAuth is still attached to the session
+			// group — a VALID session cookie must resolve to a user and reach
+			// the handler (200). If RequireAuth were dropped from the /v1
+			// group, ResolveSession would never run, the handler would never
+			// see a user id in context, and this would 401 instead of 200.
+			name:       "session-protected inventory route with valid cookie -> 200 (RequireAuth intact)",
+			method:     http.MethodGet,
+			path:       "/v1/store/inventory",
+			cookie:     validSessionCookie,
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body *strings.Reader
+			if tt.body != "" {
+				body = strings.NewReader(tt.body)
+			} else {
+				body = strings.NewReader("")
+			}
+
+			req := httptest.NewRequest(tt.method, tt.path, body)
+			if tt.body != "" {
+				req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			}
+			if tt.authHeader != "" {
+				req.Header.Set(echo.HeaderAuthorization, tt.authHeader)
+			}
+			if tt.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: "session", Value: tt.cookie})
+			}
+			rec := httptest.NewRecorder()
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body=%s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+		})
 	}
 }
 

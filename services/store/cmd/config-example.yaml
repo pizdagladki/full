@@ -17,3 +17,9 @@ points:
 rewarded:
   cap: 5
   window_seconds: 3600
+# internal.api_token gates server-to-server endpoints (e.g. POST
+# /v1/points/credit). In Docker it is read from INTERNAL_API_TOKEN. An empty
+# value means the internalauth middleware fails closed (503) for those
+# endpoints — set it before relying on them.
+internal:
+  api_token: ""
