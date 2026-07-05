@@ -1,10 +1,11 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Home } from './Home';
 import { AuthContext } from './auth/AuthContext';
 import type { AuthState } from './auth/AuthContext';
 import type { RatingsApi, RatingData } from '../api/ratings';
+import type { FaceLandmarkResult, LandmarkRunner } from '../cv';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -22,11 +23,12 @@ const AUTH_STATE: AuthState = {
 function renderHome(
   authState: AuthState = AUTH_STATE,
   ratingsApi?: RatingsApi,
+  cvRunner?: LandmarkRunner,
 ) {
   return render(
     <AuthContext.Provider value={authState}>
       <MemoryRouter>
-        <Home ratingsApi={ratingsApi} />
+        <Home ratingsApi={ratingsApi} cvRunner={cvRunner} />
       </MemoryRouter>
     </AuthContext.Provider>,
   );
@@ -74,13 +76,63 @@ function setupMediaDevices(devices: MediaDeviceInfo[] = TWO_CAMERAS) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// RAF stub — same pattern as Search.test.tsx: collect scheduled callbacks and
+// tick them manually so CvEngine frames are driven deterministically.
+// ---------------------------------------------------------------------------
+
+let rafCallbacks: FrameRequestCallback[] = [];
+
 beforeEach(() => {
   setupMediaDevices();
+
+  rafCallbacks = [];
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }),
+  );
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+function makeCvRunner(): {
+  runner: LandmarkRunner;
+  setResult: (r: FaceLandmarkResult) => void;
+} {
+  let nextResult: FaceLandmarkResult = { faceLandmarks: [] };
+  const runner: LandmarkRunner = {
+    detectForVideo: vi.fn(() => nextResult),
+  };
+  return {
+    runner,
+    setResult: (r: FaceLandmarkResult) => {
+      nextResult = r;
+    },
+  };
+}
+
+const FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [[{ x: 0, y: 0, z: 0 }]] };
+const NO_FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [] };
+
+/** Sets the next detection result, then ticks the latest pending RAF callback. */
+function tickFrame(
+  setResult: (r: FaceLandmarkResult) => void,
+  result: FaceLandmarkResult,
+  ts = 0,
+): void {
+  setResult(result);
+  const cb = rafCallbacks[rafCallbacks.length - 1];
+  act(() => {
+    cb(ts);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Criterion 1 — camera device listing and selection
@@ -334,5 +386,104 @@ describe('Criterion 5 — camera preview', () => {
         expect.objectContaining({ video: expect.anything() }),
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #158 — invisible auto-calibration CV engine wired onto the preview
+// ---------------------------------------------------------------------------
+
+/** Waits until the camera <select> has settled on 'cam1' (enumerateDevices resolved and picked
+ * the first device) and the corresponding getUserMedia call has resolved and started the CV
+ * engine on the preview (its .then() ran, including cvRef.current.start(...)). */
+async function waitForEngineStarted(): Promise<void> {
+  await waitFor(() => {
+    const select = screen.getByLabelText('Camera') as HTMLSelectElement;
+    expect(select.value).toBe('cam1');
+  });
+  await waitFor(() => {
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ video: { deviceId: { exact: 'cam1' } } }),
+    );
+  });
+  // Flush the resolved getUserMedia promise's .then() (sets status + calls cvRef.start()).
+  await act(async () => {});
+}
+
+describe('Issue #158 — CV engine auto-calibration on the camera preview', () => {
+  it('criterion-1/3: engine is started against the camera-preview video element', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderHome(AUTH_STATE, undefined, runner);
+
+    await waitForEngineStarted();
+    tickFrame(setResult, FACE_FRAME);
+
+    const previewVideo = screen.getByTestId('camera-preview');
+    expect(runner.detectForVideo).toHaveBeenCalled();
+    expect(vi.mocked(runner.detectForVideo).mock.calls[0][0]).toBe(previewVideo);
+  });
+
+  it('criterion-2/3: initial status is "Calibrating…" and flips to ready once the engine reports a face', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderHome(AUTH_STATE, undefined, runner);
+
+    const status = screen.getByTestId('calibration-status');
+    expect(status.textContent).toBe('Calibrating…');
+    expect(status.getAttribute('data-status')).toBe('calibrating');
+
+    await waitForEngineStarted();
+    tickFrame(setResult, FACE_FRAME);
+
+    expect(status.getAttribute('data-status')).toBe('ready');
+    expect(status.textContent).not.toBe('Calibrating…');
+  });
+
+  it('criterion-2 violation guard: with only no-face frames the status never flips to ready', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderHome(AUTH_STATE, undefined, runner);
+
+    await waitForEngineStarted();
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+
+    const status = screen.getByTestId('calibration-status');
+    expect(status.getAttribute('data-status')).toBe('calibrating');
+    expect(status.textContent).toBe('Calibrating…');
+  });
+
+  it('criterion-2: losing the face after being ready reverts the status to calibrating', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderHome(AUTH_STATE, undefined, runner);
+
+    await waitForEngineStarted();
+    tickFrame(setResult, FACE_FRAME);
+
+    const status = screen.getByTestId('calibration-status');
+    expect(status.getAttribute('data-status')).toBe('ready');
+
+    // NO_FACE_WINDOW = 3 consecutive no-face frames trigger onFaceLost
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME);
+
+    expect(status.getAttribute('data-status')).toBe('calibrating');
+    expect(status.textContent).toBe('Calibrating…');
+  });
+
+  it('criterion-1: stops the CV engine when the selected camera changes', async () => {
+    const { runner } = makeCvRunner();
+    renderHome(AUTH_STATE, undefined, runner);
+
+    await waitForEngineStarted();
+    // The engine actually scheduled a frame — confirms it was running before the camera change.
+    expect(rafCallbacks.length).toBeGreaterThan(0);
+
+    const select = screen.getByLabelText('Camera') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'cam2' } });
+
+    // Changing the selected camera re-runs the camera-preview effect; its cleanup stops the
+    // previous engine run, which cancels the scheduled RAF frame.
+    expect(cancelAnimationFrame).toHaveBeenCalled();
   });
 });
