@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { defaultRatingsApi } from '../api/ratings';
 import type { RatingsApi, RatingData } from '../api/ratings';
 import { PointsWidget } from './PointsWidget';
 import type { PointsApi } from '../api/points';
+import { CvComponent, defaultCvRunner } from '../cv';
+import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
+
+/** Calibration status shown next to the camera preview — driven by the real CvEngine state
+ * (face-present vs. still calibrating/no face), never a hard-coded string. */
+type CalibrationStatus = 'calibrating' | 'ready';
 
 // ---------------------------------------------------------------------------
 // Mock TikTok tracks (no real audio yet — placeholder list)
@@ -25,13 +31,16 @@ export interface HomeProps {
   ratingsApi?: RatingsApi;
   /** Injectable points API (swap with a mock in tests). Defaults to the real client. */
   pointsApi?: PointsApi;
+  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the real
+   * MediaPipe FaceLandmarker runner (`defaultCvRunner()`). */
+  cvRunner?: LandmarkRunner;
 }
 
 // ---------------------------------------------------------------------------
 // Home component
 // ---------------------------------------------------------------------------
 
-export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
+export function Home({ ratingsApi = defaultRatingsApi, pointsApi, cvRunner = defaultCvRunner() }: HomeProps) {
   const { user } = useAuth();
 
   // --- camera devices ---
@@ -50,6 +59,28 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
   // --- camera preview ---
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cvRef = useRef<CvHandleRef>(null);
+
+  // --- invisible auto-calibration status (driven by the real CvEngine) ---
+  const [calibrationStatus, setCalibrationStatus] = useState<CalibrationStatus>('calibrating');
+
+  // Intentionally stable ([]): CvComponent freezes these callbacks on first render.
+  const onFacePresent = useCallback(() => {
+    setCalibrationStatus('ready');
+  }, []);
+
+  const onFaceLost = useCallback(() => {
+    setCalibrationStatus('calibrating');
+  }, []);
+
+  // No onBlink wired here — Home only cares about face-present/calibration status, not blink
+  // side effects (those belong to gameplay screens, e.g. Search/Battle).
+  const cvCallbacks = useMemo<CvCallbacks>(
+    () => ({ onFacePresent, onFaceLost }),
+    // Intentionally stable ([]): passed to CvComponent, which builds its engine ONCE.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   // Enumerate video input devices on mount
   useEffect(() => {
@@ -100,6 +131,10 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
   useEffect(() => {
     if (!navigator.mediaDevices?.getUserMedia) return;
     let cancelled = false;
+    // Captured up-front (not read from the ref again in the cleanup below) — the CvHandleRef
+    // never actually changes across renders, but this keeps the cleanup independent of
+    // whatever cvRef.current happens to be by the time it runs.
+    const cv = cvRef.current;
 
     // Stop any previous stream
     if (streamRef.current) {
@@ -122,6 +157,9 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
+        // Preview stream is ready — (re)start the invisible auto-calibration CV engine on it.
+        setCalibrationStatus('calibrating');
+        if (videoRef.current) cv?.start(videoRef.current);
       })
       .catch(() => {
         // getUserMedia failed — show camera area without a live feed, no crash
@@ -133,6 +171,9 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
+      // Stop the CV engine on unmount AND whenever the selected camera changes (this effect
+      // re-runs on [selectedDeviceId] change, cleaning up the previous camera's engine run).
+      cv?.stop();
     };
   }, [selectedDeviceId]);
 
@@ -220,6 +261,7 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
 
       {/* Camera preview */}
       <section aria-label="Camera preview">
+        <CvComponent ref={cvRef} runner={cvRunner} callbacks={cvCallbacks} />
         <video
           ref={videoRef}
           autoPlay
@@ -228,7 +270,9 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
           data-testid="camera-preview"
           style={{ width: '100%', maxWidth: '480px', background: '#000' }}
         />
-        <div data-testid="calibration-status">Calibrating…</div>
+        <div data-testid="calibration-status" data-status={calibrationStatus}>
+          {calibrationStatus === 'ready' ? 'Face detected — ready' : 'Calibrating…'}
+        </div>
       </section>
 
       {/* Bottom AdSense banner slot */}
