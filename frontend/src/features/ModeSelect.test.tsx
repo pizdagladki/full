@@ -10,10 +10,11 @@ import { ModeSelect } from './ModeSelect';
 
 function SearchProbe() {
   const location = useLocation();
-  const state = location.state as { mode?: string } | null;
+  const state = location.state as { mode?: string; trackId?: string } | null;
   return (
     <div data-testid="search-probe">
       <span data-testid="search-mode">{state?.mode}</span>
+      <span data-testid="search-track-id">{state?.trackId}</span>
     </div>
   );
 }
@@ -26,9 +27,11 @@ function KothProbe() {
   return <div data-testid="koth-probe" />;
 }
 
-function renderModeSelect() {
+function renderModeSelect(trackId?: string) {
   return render(
-    <MemoryRouter initialEntries={['/mode-select']}>
+    <MemoryRouter
+      initialEntries={[{ pathname: '/mode-select', state: trackId ? { trackId } : undefined }]}
+    >
       <Routes>
         <Route path="/mode-select" element={<ModeSelect />} />
         <Route path="/search" element={<SearchProbe />} />
@@ -136,5 +139,29 @@ describe('ModeSelect', () => {
     fireEvent.click(screen.getByTestId('mode-koth'));
     expect(screen.getByTestId('koth-probe')).toBeInTheDocument();
     expect(screen.queryByTestId('invite-probe')).not.toBeInTheDocument();
+  });
+
+  // criterion: 4 (#159) — the trackId carried in via Home's Play link is forwarded onward to
+  // /search for both the ranked and unranked branches.
+  it.each([
+    { name: 'criterion-4/#159: Ranked forwards trackId to /search', testId: 'mode-ranked' },
+    { name: 'criterion-4/#159: Unranked forwards trackId to /search', testId: 'mode-unranked' },
+  ])('$name', ({ testId }) => {
+    renderModeSelect('track-3');
+
+    fireEvent.click(screen.getByTestId(testId));
+
+    expect(screen.getByTestId('search-track-id').textContent).toBe('track-3');
+  });
+
+  // criterion: 4 (#159) violation guard — with NO trackId in location.state, /search must receive
+  // an EMPTY trackId (not some hard-coded default) — the field is genuinely being threaded through,
+  // not synthesized.
+  it('criterion-4/#159 violation guard: with no trackId in location.state, /search receives none', () => {
+    renderModeSelect(undefined);
+
+    fireEvent.click(screen.getByTestId('mode-ranked'));
+
+    expect(screen.getByTestId('search-track-id').textContent).toBe('');
   });
 });

@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Home } from './Home';
 import { AuthContext } from './auth/AuthContext';
@@ -322,6 +322,58 @@ describe('Criterion 4 — navigation and banner slots', () => {
     // criterion: 4 guard — confirms the assertion actually detects absence
     renderHome();
     expect(screen.queryByRole('link', { name: /store/i })).not.toBeNull();
+  });
+
+  // criterion: 4 (#159) — the Play link carries the selected track id in location.state so it can
+  // be threaded through ModeSelect → Search → Battle as the win-clip edit audio.
+  it('criterion-4/#159: the Play link carries the selected trackId in location.state', () => {
+    function ModeSelectProbe() {
+      const location = useLocation();
+      const state = location.state as { trackId?: string } | null;
+      return <div data-testid="mode-select-probe">{state?.trackId}</div>;
+    }
+
+    render(
+      <AuthContext.Provider value={AUTH_STATE}>
+        <MemoryRouter initialEntries={['/home']}>
+          <Routes>
+            <Route path="/home" element={<Home />} />
+            <Route path="/mode-select" element={<ModeSelectProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: /play/i }));
+
+    expect(screen.getByTestId('mode-select-probe').textContent).toBe('track-1');
+  });
+
+  // criterion: 4 (#159) violation guard — selecting a DIFFERENT track before clicking Play must
+  // carry THAT track, not always the default; a hard-coded trackId would fail this.
+  it('criterion-4/#159 violation guard: a newly-selected track (not the default) is carried through', () => {
+    function ModeSelectProbe() {
+      const location = useLocation();
+      const state = location.state as { trackId?: string } | null;
+      return <div data-testid="mode-select-probe">{state?.trackId}</div>;
+    }
+
+    render(
+      <AuthContext.Provider value={AUTH_STATE}>
+        <MemoryRouter initialEntries={['/home']}>
+          <Routes>
+            <Route path="/home" element={<Home />} />
+            <Route path="/mode-select" element={<ModeSelectProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>,
+    );
+
+    const trackSelect = screen.getByLabelText('Track') as HTMLSelectElement;
+    fireEvent.change(trackSelect, { target: { value: 'track-2' } });
+    fireEvent.click(screen.getByRole('link', { name: /play/i }));
+
+    expect(screen.getByTestId('mode-select-probe').textContent).toBe('track-2');
   });
 
   it('criterion-4: at least one ad-slot placeholder is present', () => {
