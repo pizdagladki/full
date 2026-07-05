@@ -5,6 +5,45 @@ Step-by-step sequences for testing and running the backend and frontend locally,
 **Prerequisites:** Go 1.26, Node 22+ (24 in CI), Docker, Make, golangci-lint v2. Run `make tools` once to
 install the Go dev tools (golangci-lint, mockgen, golang-migrate).
 
+## Full local end-to-end run
+
+On a clean machine, this is the shortest path from nothing to the player path (landing → battle →
+results) in a browser:
+
+1. `make -C deploy up` — starts infra only (Postgres, Redis, MinIO).
+2. `docker compose -f deploy/docker-compose.yml up -d --build` (run from the repo root) — builds & starts
+   all nine app services (auth, signaling, media, store, ratings, reports, matchmaking, koth, health) plus
+   the six one-shot DB-migration init steps (auth, ratings, media, store, reports, koth).
+3. `cd frontend && npm ci && npm run dev` — starts the Vite dev server.
+4. Open the printed Vite URL in a browser and walk the player path: landing → consent → Google login →
+   home → mode-select → search → battle → results.
+
+### Port table (host → container, per `deploy/docker-compose.yml`)
+
+| service | host port |
+|---|---|
+| auth | 8080 |
+| signaling | 8081 |
+| media | 8082 |
+| store | 8083 |
+| ratings | 8084 |
+| reports | 8085 |
+| matchmaking | 8086 |
+| koth | 8087 |
+| health | 8088 |
+
+### Manual prerequisites for a full walk
+
+- **Backend env:** `cp deploy/env/.env.example deploy/env/.env`, then fill the Google OAuth creds
+  (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URL`) — needed for login;
+  Stripe test keys only to exercise purchases.
+- **Internal S2S token:** `cp deploy/env/internal.env.example deploy/env/internal.env`, then set a strong
+  `INTERNAL_API_TOKEN` (e.g. `openssl rand -hex 32`). Services fail closed on internal routes when it's empty.
+- **Frontend env:** `cp frontend/.env.example frontend/.env`, then set `VITE_GOOGLE_CLIENT_ID` and
+  `VITE_GOOGLE_REDIRECT_URI` (the browser's Google login link is built from these). The `VITE_API_URL` /
+  `VITE_WS_URL` same-origin (empty) defaults route through the Vite dev proxy — leave them empty for the
+  local proxied run.
+
 ## 1. Backend — local test & run
 
 1. Install dev tools (one-time): `make tools`.
@@ -29,7 +68,10 @@ install the Go dev tools (golangci-lint, mockgen, golang-migrate).
 2. Quality gates: `npm run lint` (eslint), `npm run typecheck` (`tsc --noEmit`), `npm run test` (vitest) —
    or `make -C frontend lint typecheck test`.
 3. Format: `npm run format` (prettier).
-4. A dev server (`npm run dev`) is added when the React app lands.
+4. `npm run dev` starts the Vite dev server. `VITE_API_URL` / `VITE_WS_URL` default to same-origin (empty)
+   and use the Vite dev proxy (added in #154) to reach the backend services, so no per-service URLs or CORS
+   config are needed locally. A deployed / non-proxied frontend must set both to the real backend origin(s)
+   — see `frontend/.env.example`.
 
 ## 3. Deploy (DigitalOcean + Docker compose)
 
