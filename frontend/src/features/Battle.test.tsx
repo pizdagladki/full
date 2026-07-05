@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle } from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Battle } from './Battle';
@@ -22,6 +22,8 @@ import type {
   MediaStreamFactory,
 } from '../recording';
 import { EDIT_SLOT_DURATION_MS_DEFAULT } from '../canvas';
+import { makeEmptyBattleMeta } from './Distraction';
+import type { DistractionProps } from './Distraction';
 
 // ---------------------------------------------------------------------------
 // Mock arbitration WS client — captures onMessage cb so tests can fire server
@@ -1002,5 +1004,181 @@ describe('Battle — #159 win-clip recording + edit slot', () => {
 
     expect(screen.getByTestId('results-probe')).toBeInTheDocument();
     expect(screen.getByTestId('results-mp4-url').textContent).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #160 — wire the distraction control into the live battle
+// ---------------------------------------------------------------------------
+
+describe('Battle — #160 distraction control', () => {
+  // criterion: 1, 3, 4 — the Distraction control is absent during sanity/countdown and present
+  // during battle (mounted ONLY when `phase === 'battle'`).
+  it('distraction-control-phase-gating: absent in sanity/countdown, present in battle', () => {
+    const { ws } = makeMockWs();
+    const { Cv, fireFacePresent } = makeFakeCv();
+    renderBattle({ wsClient: ws, cvComponent: Cv, currentUserId: 'u1' });
+
+    // sanity phase — not yet mounted.
+    expect(screen.getByTestId('sanity-check')).toBeInTheDocument();
+    expect(screen.queryByTestId('distraction-control')).not.toBeInTheDocument();
+
+    act(() => {
+      fireFacePresent();
+    });
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    // countdown phase — still not mounted.
+    expect(screen.getByTestId('countdown')).toBeInTheDocument();
+    expect(screen.queryByTestId('distraction-control')).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    // battle phase — mounted.
+    expect(screen.getByTestId('battle-live')).toBeInTheDocument();
+    expect(screen.getByTestId('distraction-control')).toBeInTheDocument();
+  });
+
+  // criterion: 1, 4 — the tier buttons are locked before 30s from battle-start and become usable
+  // exactly 30s after battle start (`battleStartMs` passed to `Distraction` == `startTimeRef.current`
+  // set at the countdown→battle transition, and Distraction mounts in that same tick, so its
+  // internal unlock timer aligns with battle start).
+  it('distraction-unlock-aligned-with-battle-start: tier buttons are locked before 30s, unlocked after', () => {
+    const { ws } = makeMockWs();
+    const { Cv, fireFacePresent } = makeFakeCv();
+    renderBattle({ wsClient: ws, cvComponent: Cv, currentUserId: 'u1' });
+
+    reachBattle(fireFacePresent);
+
+    expect((screen.getByTestId('distraction-tier-1-button') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(29999);
+    });
+    expect((screen.getByTestId('distraction-tier-1-button') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect((screen.getByTestId('distraction-tier-1-button') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  // criterion: 2, 4 — applying a tier post-unlock records {tier, applied_at_ms} into the SAME
+  // battle-meta object the recording/sharing layer would consume — proven via the injected
+  // `battleMetaRef` test seam.
+  it('distraction-meta-recorded: applying a tier post-unlock records {tier, applied_at_ms} into the injected battleMetaRef', () => {
+    const battleMetaRef = { current: makeEmptyBattleMeta() };
+    const { ws } = makeMockWs();
+    const { Cv, fireFacePresent } = makeFakeCv();
+    renderBattle({ wsClient: ws, cvComponent: Cv, currentUserId: 'u1', battleMetaRef });
+
+    reachBattle(fireFacePresent);
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    act(() => {
+      screen.getByTestId('distraction-tier-2-button').click();
+    });
+
+    expect(battleMetaRef.current.distractions).toEqual([{ tier: 2, applied_at_ms: 30000 }]);
+  });
+
+  // criterion: 2 (violation guard) — Battle must NOT rebuild the battle-meta ref on re-render; with
+  // no `battleMetaRef` prop supplied at all (the production path), Battle still owns and writes into
+  // an internally-created one without throwing — proving the ref is real and used, not skipped.
+  it('distraction-meta-recorded violation guard: with no battleMetaRef prop, applying a tier does not throw', () => {
+    const { ws } = makeMockWs();
+    const { Cv, fireFacePresent } = makeFakeCv();
+    renderBattle({ wsClient: ws, cvComponent: Cv, currentUserId: 'u1' });
+
+    reachBattle(fireFacePresent);
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+
+    expect(() => {
+      act(() => {
+        screen.getByTestId('distraction-tier-1-button').click();
+      });
+    }).not.toThrow();
+  });
+
+  // criterion: 3, 4 — the control disappears the instant the phase leaves 'battle' (e.g. an
+  // authoritative outcome routes into the loss/skip-edit screen) — it must not remain
+  // mounted/active outside 'battle' (nor during win-edit/loss-edit/done).
+  it('distraction-control-hidden-outside-battle: the control disappears once the phase leaves battle', () => {
+    const { ws, fireMessage } = makeMockWs();
+    const { Cv, fireFacePresent } = makeFakeCv();
+    renderBattle({ wsClient: ws, cvComponent: Cv, currentUserId: '7' });
+
+    reachBattle(fireFacePresent);
+    expect(screen.getByTestId('distraction-control')).toBeInTheDocument();
+
+    act(() => {
+      fireMessage(JSON.stringify({ type: 'outcome', winner_id: 3, loser_id: 7 }));
+    });
+
+    expect(screen.getByTestId('loss-edit')).toBeInTheDocument();
+    expect(screen.queryByTestId('distraction-control')).not.toBeInTheDocument();
+  });
+
+  // criterion: 1 — `battleStartMs` threading is not a tautology: Battle must pass the ACTUAL
+  // recorded battle-start timestamp (`startTimeRef.current`, set at the countdown→battle
+  // transition) as the `distractionComponent`'s `battleStartMs` prop. Uses a deterministic fake
+  // system clock (base 1_000_000) so the expected value is an exact number: sanity (2000ms) +
+  // countdown (5000ms) = battle starts at 1_007_000. This fails if `battleStartMs={battleStartMs}`
+  // is ever deleted from the JSX (the spy would capture `undefined`) or wired to the wrong value.
+  it('distraction-passes-recorded-battle-start-timestamp: Battle passes the recorded battle-start timestamp as battleStartMs', () => {
+    vi.setSystemTime(new Date(1_000_000));
+
+    const capturedProps: DistractionProps[] = [];
+    const SpyDistraction: NonNullable<BattleProps['distractionComponent']> = (props) => {
+      capturedProps.push(props);
+      return null;
+    };
+
+    const { ws } = makeMockWs();
+    const { Cv, fireFacePresent } = makeFakeCv();
+    renderBattle({
+      wsClient: ws,
+      cvComponent: Cv,
+      currentUserId: 'u1',
+      distractionComponent: SpyDistraction,
+    });
+
+    reachBattle(fireFacePresent);
+
+    expect(capturedProps.length).toBeGreaterThan(0);
+    const lastProps = capturedProps[capturedProps.length - 1];
+    expect(lastProps.battleStartMs).toBe(1_000_000 + 7000);
+  });
+
+  // criterion: 2 — the one-shot tiered overlay renders over the battle split view: using the REAL
+  // Distraction (no test seam override), reach battle, unlock at 30s, apply a tier, then assert
+  // `distraction-overlay` is a DESCENDANT of `battle-split`. This fails if Distraction is ever
+  // mounted outside the split view or the overlay never renders.
+  it('distraction-overlay-renders-over-battle-split: the one-shot tiered overlay renders over the battle split view', () => {
+    const { ws } = makeMockWs();
+    const { Cv, fireFacePresent } = makeFakeCv();
+    renderBattle({ wsClient: ws, cvComponent: Cv, currentUserId: 'u1' });
+
+    reachBattle(fireFacePresent);
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    act(() => {
+      screen.getByTestId('distraction-tier-1-button').click();
+    });
+
+    const battleSplit = screen.getByTestId('battle-split');
+    expect(within(battleSplit).getByTestId('distraction-overlay')).toBeInTheDocument();
   });
 });
