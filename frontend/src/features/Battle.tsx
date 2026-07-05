@@ -31,10 +31,16 @@ interface UnknownServerMsg {
   loser_id?: unknown;
 }
 
-/** location.state carried in by Search (`navigate('/battle', { state: { roomId, opponent } })`). */
+/**
+ * location.state carried in by Search (`navigate('/battle', { state: { roomId, opponent } })`) or
+ * by InviteRoom's private-room flow (`navigate('/battle', { state: { roomId, ranked: false } })`).
+ * `ranked` defaults to `true` when absent so Search's existing ranked path — which never sets it —
+ * keeps working untouched (criterion 2, #106: the invite-a-friend room is the UNRANKED branch).
+ */
 interface BattleLocationState {
   roomId?: string;
   opponent?: unknown;
+  ranked?: boolean;
 }
 
 const ARBITRATION_WS_PATH = '/ws';
@@ -115,6 +121,9 @@ export function Battle({
 
   const locationState = (location.state as BattleLocationState | null) ?? null;
   const roomId = locationState?.roomId ?? '';
+  // Criterion 2 (#106): defaults to ranked (`true`) when absent so Search's existing ranked path
+  // (which never sets `ranked`) is unaffected.
+  const ranked = locationState?.ranked ?? true;
   const currentUserId = currentUserIdProp ?? user?.id;
 
   // Lazily build the default WsClient once — never rebuilt on re-render.
@@ -164,11 +173,15 @@ export function Battle({
       phaseRef.current = 'done';
       setPhase('done');
       teardown();
+      // Criterion 2 (#106): an unranked room (e.g. InviteRoom's invite-a-friend flow) must not
+      // affect rating/ELO — so winner_id/loser_id (the ids any rating/ELO update would key off of)
+      // are deliberately dropped from the /results hand-off when `ranked` is false. `ranked` itself
+      // is always forwarded so /results can also skip any rating UI/update for this match.
       navigate('/results', {
-        state: { result, durationMs, winnerId, loserId },
+        state: ranked ? { result, durationMs, winnerId, loserId, ranked } : { result, durationMs, ranked },
       });
     },
-    [teardown, navigate],
+    [teardown, navigate, ranked],
   );
 
   const startCountdown = useCallback(() => {
