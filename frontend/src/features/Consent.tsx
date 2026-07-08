@@ -44,52 +44,53 @@ export function Consent({ authApi = defaultAuthApi }: ConsentProps) {
   };
 
   return (
-    <div>
-      <h1>Consent</h1>
-      <form onSubmit={handleSubmit}>
+    <div className="panel-screen">
+      <h1 className="panel-title">Пара галочек</h1>
+      <form className="sheet consent-form" onSubmit={handleSubmit}>
         <div>
-          <label>
+          <label className="consent-row">
             <input
               type="checkbox"
               data-testid="checkbox-adult"
               checked={adultChecked}
               onChange={(e) => setAdultChecked(e.target.checked)}
             />
-            {' '}I confirm I am 18 years of age or older
+            {' '}Мне есть 18 лет
           </label>
         </div>
         <div>
-          <label>
+          <label className="consent-row">
             <input
               type="checkbox"
               data-testid="checkbox-recording"
               checked={recordingChecked}
               onChange={(e) => setRecordingChecked(e.target.checked)}
             />
-            {' '}I consent to recording and publishing my face in battle video
+            {' '}Я согласен на запись и публикацию моего лица в видео боёв
           </label>
         </div>
         <div>
-          <label>
+          <label className="consent-row">
             <input
               type="checkbox"
               data-testid="checkbox-tos"
               checked={tosChecked}
               onChange={(e) => setTosChecked(e.target.checked)}
             />
-            {' '}I agree to the full user agreement
+            {' '}Принимаю пользовательское соглашение
           </label>
         </div>
         <button
           type="submit"
+          className="btn-mode consent-continue"
           data-testid="btn-continue"
           disabled={!allChecked}
         >
-          Continue
+          Дальше
         </button>
       </form>
       {errorMessage != null && (
-        <div data-testid="error-message" role="alert">
+        <div className="panel-status" data-testid="error-message" role="alert">
           {errorMessage}
         </div>
       )}

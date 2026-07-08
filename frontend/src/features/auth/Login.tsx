@@ -90,17 +90,27 @@ export function Login({ authApi = defaultAuthApi }: LoginProps) {
   if (!code && user) return <Navigate to="/home" replace />;
 
   if (loading) {
-    return <div>Loading...</div>;
+    return (
+      <div className="panel-screen entrance">
+        <div className="entrance-logo">ГЛЯДЕЛКИ</div>
+        <div className="results-note">Секунду…</div>
+      </div>
+    );
   }
 
   const { url: googleAuthUrl } = buildGoogleAuthUrl();
 
   return (
-    <div>
-      <h1>Sign in</h1>
-      {error && <div role="alert">{error}</div>}
-      <a href={googleAuthUrl} data-testid="google-signin-link">
-        Sign in with Google
+    <div className="panel-screen entrance">
+      <div className="entrance-logo">ГЛЯДЕЛКИ</div>
+      <div className="entrance-tagline">кто моргнул — тот проиграл</div>
+      {error && (
+        <div className="panel-status" role="alert">
+          {error}
+        </div>
+      )}
+      <a className="btn-mode entrance-google" href={googleAuthUrl} data-testid="google-signin-link">
+        Войти через Google
       </a>
     </div>
   );

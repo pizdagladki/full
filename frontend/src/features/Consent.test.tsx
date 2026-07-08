@@ -138,9 +138,9 @@ describe('Consent — criterion 1: three independent checkboxes', () => {
   it('criterion-1: each checkbox has a descriptive label', () => {
     // criterion: 1 — labels must describe each consent item
     renderConsent();
-    expect(screen.getByText(/18 years of age or older/i)).toBeInTheDocument();
-    expect(screen.getByText(/recording and publishing/i)).toBeInTheDocument();
-    expect(screen.getByText(/full user agreement/i)).toBeInTheDocument();
+    expect(screen.getByText(/есть 18 лет/i)).toBeInTheDocument();
+    expect(screen.getByText(/запись и публикацию моего лица/i)).toBeInTheDocument();
+    expect(screen.getByText(/пользовательское соглашение/i)).toBeInTheDocument();
   });
 });
 
