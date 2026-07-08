@@ -659,3 +659,107 @@ button { font: inherit; cursor: pointer; }
 }
 .results-report-btn:hover:not(:disabled) { opacity: 1; transform: translateY(-2px); }
 .results-report-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ============================================================================
+   Battle («арена») — dark ground so the two faces carry the screen
+   ========================================================================== */
+
+.arena {
+  min-height: 100vh;
+  background: radial-gradient(900px 500px at 50% -10%, #2a2050, #16112e 65%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 20px;
+  color: #f4efe4;
+}
+
+.arena-split {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.arena-side { position: relative; }
+.arena-side video {
+  width: min(420px, 44vw);
+  aspect-ratio: 4/3;
+  object-fit: cover;
+  background: #0d0a18;
+  border: var(--stroke-fat) solid var(--ink);
+  border-radius: 26px;
+  box-shadow: 0 10px 0 rgba(0, 0, 0, 0.45);
+}
+.arena-side--you video { border-color: var(--pink); box-shadow: 0 0 34px rgba(255, 107, 179, 0.33), 0 10px 0 rgba(0, 0, 0, 0.45); }
+.arena-side--foe video { border-color: var(--grass); box-shadow: 0 0 34px rgba(124, 226, 74, 0.33), 0 10px 0 rgba(0, 0, 0, 0.45); }
+@media (max-width: 700px) {
+  .arena-side video { width: min(420px, 88vw); }
+}
+.arena-tag {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--ink);
+  border-radius: 999px;
+  padding: 4px 14px;
+  opacity: 0.85;
+}
+.arena-zap {
+  font-size: 40px;
+  animation: zap 0.5s steps(2) infinite;
+  filter: drop-shadow(0 0 12px #ffd23f);
+}
+
+.arena-status {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  background: var(--sun);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  padding: 8px 22px;
+}
+.arena-countdown {
+  font-family: var(--font-display);
+  font-size: clamp(80px, 16vw, 160px);
+  color: var(--sun);
+  -webkit-text-stroke: 2px var(--ink);
+  text-shadow: 6px 7px 0 var(--ink);
+  line-height: 1;
+  animation: verdict-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.arena-live {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 5vw, 48px);
+  color: var(--pink);
+  -webkit-text-stroke: 1px var(--ink);
+  text-shadow: 4px 5px 0 var(--ink);
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  50% { transform: scale(1.06) rotate(-1deg); }
+}
+.arena-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  font-weight: 800;
+  font-size: 17px;
+  background: rgba(13, 10, 24, 0.7);
+  border: 3px solid rgba(244, 239, 228, 0.25);
+  border-radius: 20px;
+  padding: 18px 30px;
+}
+.arena-overlay p { margin: 0; }
+.arena-skip { font-size: 18px; padding: 10px 28px; }
