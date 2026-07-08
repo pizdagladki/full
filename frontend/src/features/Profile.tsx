@@ -147,48 +147,53 @@ export function Profile({
   // ---------------------------------------------------------------------------
 
   return (
-    <div data-testid="profile-screen">
-      <h1>Profile</h1>
+    <div className="panel-screen" data-testid="profile-screen">
+      <h1 className="panel-title">Профиль</h1>
 
       {/* ------------------------------------------------------------------ */}
       {/* Stats section                                                        */}
       {/* ------------------------------------------------------------------ */}
       <section aria-label="Stats">
         {statsLoading || (!user && !rating) ? (
-          <div data-testid="stats-loading">Loading stats…</div>
+          <div className="results-note" data-testid="stats-loading">Загружаем статистику…</div>
         ) : statsError ? (
-          <div data-testid="stats-error">Could not load stats</div>
+          <div className="results-note" data-testid="stats-error">Не удалось загрузить статистику</div>
         ) : rating ? (
-          <div data-testid="stats-content">
-            <div>ELO: {rating.elo}</div>
-            <div>Level: {rating.level}</div>
-            <div>Games played: {rating.games_played}</div>
-            <div
-              role="progressbar"
-              aria-valuenow={levelPercent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={`Level ${rating.level} progress`}
-              style={{ width: `${levelPercent}%`, background: '#4caf50', height: '8px' }}
-            />
+          <div className="profile-stats" data-testid="stats-content">
+            <div className="results-chips">
+              <div className="results-chip">ELO: {rating.elo}</div>
+              <div className="results-chip">Уровень: {rating.level}</div>
+              <div className="results-chip">Матчей: {rating.games_played}</div>
+            </div>
+            <div className="results-levelbar">
+              <div
+                role="progressbar"
+                aria-valuenow={levelPercent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Level ${rating.level} progress`}
+                style={{ width: `${levelPercent}%` }}
+              />
+            </div>
           </div>
         ) : (
-          <div data-testid="stats-loading">Loading stats…</div>
+          <div className="results-note" data-testid="stats-loading">Загружаем статистику…</div>
         )}
       </section>
 
       {/* ------------------------------------------------------------------ */}
       {/* Match history section                                               */}
       {/* ------------------------------------------------------------------ */}
-      <section aria-label="Match history">
+      <section className="sheet" aria-label="Match history">
+        <h2 className="sheet-title">История матчей</h2>
         {historyLoading ? (
-          <div data-testid="history-loading">Loading match history…</div>
+          <div className="results-note" data-testid="history-loading">Загружаем историю…</div>
         ) : historyError ? (
-          <div data-testid="history-error">Could not load match history</div>
+          <div className="results-note" data-testid="history-error">Не удалось загрузить историю</div>
         ) : matches && matches.length === 0 ? (
-          <div data-testid="history-empty">No matches yet</div>
+          <div className="results-note" data-testid="history-empty">Матчей пока нет</div>
         ) : (
-          <ul>
+          <ul className="sheet-list">
             {(matches ?? []).map((match) => {
               const eloDeltaStr =
                 match.elo_delta >= 0 ? `+${match.elo_delta}` : `${match.elo_delta}`;
@@ -212,15 +217,16 @@ export function Profile({
       {/* ------------------------------------------------------------------ */}
       {/* Clips gallery section                                               */}
       {/* ------------------------------------------------------------------ */}
-      <section aria-label="Saved clips">
+      <section className="sheet" aria-label="Saved clips">
+        <h2 className="sheet-title">Клипы</h2>
         {clipsLoading ? (
-          <div data-testid="clips-loading">Loading clips…</div>
+          <div className="results-note" data-testid="clips-loading">Загружаем клипы…</div>
         ) : clipsError ? (
-          <div data-testid="clips-error">Could not load clips</div>
+          <div className="results-note" data-testid="clips-error">Не удалось загрузить клипы</div>
         ) : clips && clips.length === 0 ? (
-          <div data-testid="clips-empty">No clips yet</div>
+          <div className="results-note" data-testid="clips-empty">Клипов пока нет</div>
         ) : (
-          <ul>
+          <ul className="sheet-list">
             {(clips ?? []).map((clip) => (
               <li key={clip.id} data-testid="clip-item">
                 <a
@@ -229,17 +235,17 @@ export function Profile({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  View
+                  Смотреть
                 </a>
                 <a
                   data-testid="clip-download"
                   href={clipsApi.getClipDownloadUrl(clip.id)}
                   download
                 >
-                  Download
+                  Скачать
                 </a>
-                <button data-testid="clip-reshare" onClick={() => handleReshare(clip)}>
-                  Share
+                <button className="results-report-btn" data-testid="clip-reshare" onClick={() => handleReshare(clip)}>
+                  Шеринг
                 </button>
               </li>
             ))}

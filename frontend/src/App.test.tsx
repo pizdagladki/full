@@ -112,12 +112,12 @@ describe('App routes', () => {
 
   it('renders Profile placeholder at /profile when authenticated', () => {
     renderWithAuth(routes, '/profile');
-    expect(screen.getByText('Profile')).toBeInTheDocument();
+    expect(screen.getByTestId('profile-screen')).toBeInTheDocument();
   });
 
   it('renders Store placeholder at /store when authenticated', () => {
     renderWithAuth(routes, '/store');
-    expect(screen.getByText('Store')).toBeInTheDocument();
+    expect(screen.getByTestId('store-screen')).toBeInTheDocument();
   });
 
   it('renders Register at /register', () => {
