@@ -39,17 +39,19 @@ export function KothHillSelect() {
   const navigate = useNavigate();
 
   return (
-    <div data-testid="koth-hill-select-screen">
-      <h1>King of the Hill</h1>
-      <nav>
-        {HILL_OPTIONS.map((option) => (
+    <div className="koth-screen" data-testid="koth-hill-select-screen">
+      <h1 className="panel-title koth-title">Царь горы</h1>
+      <nav className="koth-hills" aria-label="Hills">
+        {HILL_OPTIONS.map((option, i) => (
           <button
             key={option.testId}
             type="button"
+            className="koth-hill-card"
             data-testid={option.testId}
             onClick={() => option.onSelect(navigate)}
           >
-            {option.label}
+            <span className="koth-hill-peak" data-size={i} aria-hidden="true" />
+            <span className="koth-hill-label">{option.label}</span>
           </button>
         ))}
       </nav>

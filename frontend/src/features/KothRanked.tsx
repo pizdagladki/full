@@ -73,48 +73,48 @@ export function KothRanked({ kothApi = defaultKothApi }: KothRankedProps) {
   }
 
   return (
-    <div data-testid="koth-ranked-screen">
-      <h1>Ranked hill</h1>
+    <div className="koth-screen" data-testid="koth-ranked-screen">
+      <h1 className="panel-title koth-title">Ранговая гора</h1>
 
-      <section aria-label="leaderboard">
-        <h2>Accounts per rank</h2>
+      <section className="koth-panel" aria-label="leaderboard">
+        <h2 className="koth-panel-title">Игроков на рангах</h2>
         {leaderboard.status === 'loading' && (
-          <div data-testid="ranked-leaderboard-loading">Loading leaderboard…</div>
+          <div className="results-note" data-testid="ranked-leaderboard-loading">Загружаем таблицу…</div>
         )}
         {leaderboard.status === 'error' && (
-          <div data-testid="ranked-leaderboard-error">Could not load the leaderboard</div>
+          <div className="results-note" data-testid="ranked-leaderboard-error">Не удалось загрузить таблицу</div>
         )}
         {leaderboard.status === 'loaded' && leaderboard.counts.length === 0 && (
-          <div data-testid="ranked-leaderboard-empty">No ranks reached yet</div>
+          <div className="results-note" data-testid="ranked-leaderboard-empty">Ранги пока никто не взял</div>
         )}
         {leaderboard.status === 'loaded' && leaderboard.counts.length > 0 && (
-          <ul>
+          <ul className="koth-ranklist">
             {leaderboard.counts.map((row) => (
               <li key={row.rank} data-testid={`rank-row-${row.rank}`}>
-                Rank {row.rank}: {row.count}
+                Ранг {row.rank}: {row.count}
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      <section aria-label="me">
-        <h2>Your rank</h2>
-        {me.status === 'loading' && <div data-testid="ranked-me-loading">Loading your rank…</div>}
+      <section className="koth-panel" aria-label="me">
+        <h2 className="koth-panel-title">Твой ранг</h2>
+        {me.status === 'loading' && <div className="results-note" data-testid="ranked-me-loading">Загружаем твой ранг…</div>}
         {me.status === 'error' && (
-          <div data-testid="ranked-me-error">Could not load your rank</div>
+          <div className="results-note" data-testid="ranked-me-error">Не удалось загрузить твой ранг</div>
         )}
         {me.status === 'loaded' && (
           <>
-            <div data-testid="ranked-me-current">Current rank: {me.me.current_rank}</div>
-            <div data-testid="ranked-me-target">Next target: {me.me.next_target_ms}</div>
+            <div className="koth-me-line" data-testid="ranked-me-current">Твой ранг: {me.me.current_rank}</div>
+            <div className="koth-me-line" data-testid="ranked-me-target">Следующая цель: {me.me.next_target_ms}</div>
           </>
         )}
       </section>
 
-      <div>
-        <button type="button" data-testid="ranked-play" onClick={handlePlay}>
-          Challenge
+      <div className="panel-actions">
+        <button type="button" className="btn-mode" data-testid="ranked-play" onClick={handlePlay}>
+          Бросить вызов
         </button>
       </div>
     </div>

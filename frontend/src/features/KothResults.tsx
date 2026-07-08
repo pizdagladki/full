@@ -38,21 +38,19 @@ export function KothResults() {
   }
 
   return (
-    <div data-testid="koth-results-screen">
-      <h1>Results</h1>
-
+    <div className="koth-screen" data-testid="koth-results-screen">
       {state?.error ? (
-        <div data-testid="koth-error">Something went wrong recording your attempt</div>
+        <div className="panel-status" data-testid="koth-error">Не получилось записать попытку</div>
       ) : hillType === 'ranked' ? (
         <div data-testid="koth-ranked-outcome">
           {state?.noAttempt ? (
-            <div data-testid="koth-no-attempt">No attempt recorded</div>
+            <div className="results-note" data-testid="koth-no-attempt">Попытка не записана</div>
           ) : (
             <>
               {state?.newlyReached ? (
-                <div data-testid="koth-rank-reached">Reached rank {state?.achievedRank}!</div>
+                <div className="results-verdict koth-verdict" data-testid="koth-rank-reached">Новый ранг: {state?.achievedRank}!</div>
               ) : (
-                <div data-testid="koth-rank-current">Current rank: {state?.currentRank}</div>
+                <div className="koth-me-line" data-testid="koth-rank-current">Твой ранг: {state?.currentRank}</div>
               )}
             </>
           )}
@@ -60,21 +58,21 @@ export function KothResults() {
       ) : (
         <div data-testid="koth-hill-outcome">
           {state?.won ? (
-            <div data-testid="koth-won">You are the new King!</div>
+            <div className="results-verdict koth-verdict" data-testid="koth-won">Ты — новый король! 👑</div>
           ) : (
-            <div data-testid="koth-lost">The king remains undefeated</div>
+            <div className="results-verdict koth-verdict koth-verdict--lost" data-testid="koth-lost">Король устоял</div>
           )}
         </div>
       )}
 
-      <div data-testid="rewards-placeholder">Rewards coming soon</div>
+      <div className="results-note" data-testid="rewards-placeholder">Награды скоро подъедут</div>
 
-      <div>
-        <button type="button" data-testid="play-again" onClick={handlePlayAgain}>
-          Play again
+      <div className="panel-actions">
+        <button type="button" className="btn-mode" data-testid="play-again" onClick={handlePlayAgain}>
+          Играть ещё
         </button>
-        <button type="button" data-testid="back-to-koth" onClick={handleBack}>
-          Back
+        <button type="button" className="results-report-btn" data-testid="back-to-koth" onClick={handleBack}>
+          Назад
         </button>
       </div>
     </div>
