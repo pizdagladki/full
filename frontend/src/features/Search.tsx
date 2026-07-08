@@ -4,6 +4,7 @@ import { CvComponent, defaultCvRunner } from '../cv';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
 import { WsClient } from '../api/ws';
 import type { WsClientApi } from '../api/ws';
+import { readLocal } from '../utils/storage';
 
 // ---------------------------------------------------------------------------
 // WS message shapes (matchmaking protocol) — kept local, no untyped `any`.
@@ -206,8 +207,12 @@ export function Search({
     if (!navigator.mediaDevices?.getUserMedia) return;
     let cancelled = false;
 
+    // #172: honor the camera picked on Home — the system-default device fails when
+    // e.g. OBS holds the physical cam. On failure fall back to the default device.
+    const savedCamId = readLocal('cameraDeviceId');
     navigator.mediaDevices
-      .getUserMedia({ video: true })
+      .getUserMedia(savedCamId ? { video: { deviceId: { exact: savedCamId } } } : { video: true })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }))
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());

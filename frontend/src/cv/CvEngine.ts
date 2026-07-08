@@ -98,7 +98,24 @@ export class CvEngine implements CvHandleRef {
     const stateSnapshot = this.state;
     if (stateSnapshot === 'idle' || !this.videoEl) return;
 
-    const result = this.runner.detectForVideo(this.videoEl, timestamp);
+    // A video element with no decoded frames yet (readyState < HAVE_CURRENT_DATA) or zero
+    // dimensions crashes MediaPipe's ImageToTensor ("ROI width and height must be > 0"), and
+    // the throw would kill this RAF loop for good. Treat such frames like the low-confidence
+    // case below: no evidence either way, just keep looping until the camera delivers pixels.
+    if (this.videoEl.readyState < 2 || this.videoEl.videoWidth === 0) {
+      this.scheduleFrame();
+      return;
+    }
+
+    // A throwing runner (e.g. a transient MediaPipe graph error) must not kill the RAF
+    // loop for good — treat the frame like the not-ready skip above and keep looping.
+    let result;
+    try {
+      result = this.runner.detectForVideo(this.videoEl, timestamp);
+    } catch {
+      this.scheduleFrame();
+      return;
+    }
     const faces = result.faceLandmarks;
 
     if (faces.length === 0) {

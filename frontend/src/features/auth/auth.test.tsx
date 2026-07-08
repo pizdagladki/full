@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -565,5 +566,75 @@ describe('Login — OAuth state CSRF protection', () => {
     });
 
     expect(api.googleLogin).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #169 - StrictMode must not swallow the OAuth exchange result
+// ---------------------------------------------------------------------------
+
+describe('Login - StrictMode exchange (#169)', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+  afterEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  function renderLoginStrict(authApi: AuthApi) {
+    const authState: AuthState = {
+      user: null,
+      loading: false,
+      error: null,
+      refreshUser: vi.fn().mockResolvedValue(undefined),
+    };
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/',
+          element: (
+            <AuthContext.Provider value={authState}>
+              <Login authApi={authApi} />
+            </AuthContext.Provider>
+          ),
+        },
+        { path: '/home', element: <div>Home</div> },
+      ],
+      { initialEntries: ['/?code=test_code&state=test-state'] },
+    );
+    return render(
+      <StrictMode>
+        <RouterProvider router={router} />
+      </StrictMode>,
+    );
+  }
+
+  it('a successful exchange navigates to /home under StrictMode double-mount', async () => {
+    // Under StrictMode the mount effect runs setup -> synthetic cleanup -> setup; the exchange
+    // is performed by the CANCELLED first run (the ref guard blocks run #2), so gating the
+    // navigation on !cancelled froze a successful login on the spinner forever.
+    window.sessionStorage.setItem('oauth_state', 'test-state');
+    const api = makeAuthApi();
+    renderLoginStrict(api);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home')).toBeInTheDocument();
+    });
+    // the single-use authorization code must be POSTed exactly once
+    expect(api.googleLogin).toHaveBeenCalledTimes(1);
+    expect(api.googleLogin).toHaveBeenCalledWith('test_code');
+  });
+
+  it('a failed exchange surfaces its error under StrictMode instead of an eternal spinner', async () => {
+    window.sessionStorage.setItem('oauth_state', 'test-state');
+    const api = makeAuthApi({
+      googleLogin: vi.fn().mockRejectedValue(new Error('exchange blew up')),
+    });
+    renderLoginStrict(api);
+
+    await waitFor(() => {
+      expect(screen.getByText(/exchange blew up/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Home')).not.toBeInTheDocument();
   });
 });

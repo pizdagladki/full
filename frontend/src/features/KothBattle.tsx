@@ -7,6 +7,7 @@ import { defaultKingClipsApi } from '../api/kingClips';
 import type { KingClipsApi } from '../api/kingClips';
 import { defaultKothApi } from '../api/koth';
 import type { KothApi } from '../api/koth';
+import { readLocal } from '../utils/storage';
 
 // ---------------------------------------------------------------------------
 // KotH battle screen — a battle-vs-recording: the "opponent" side plays the
@@ -296,8 +297,11 @@ export function KothBattle({
     if (!navigator.mediaDevices?.getUserMedia) return;
     let cancelled = false;
 
+    // HOTFIX (#172 lands the real fix): honor the camera picked on Home; fall back to default.
+    const savedCamId = readLocal('cameraDeviceId');
     navigator.mediaDevices
-      .getUserMedia({ video: true })
+      .getUserMedia(savedCamId ? { video: { deviceId: { exact: savedCamId } } } : { video: true })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }))
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());

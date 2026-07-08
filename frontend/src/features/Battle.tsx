@@ -14,6 +14,7 @@ import type { ClipsApi } from '../api/clips';
 import { useAuth } from './auth';
 import { Distraction, makeEmptyBattleMeta } from './Distraction';
 import type { BattleMeta, DistractionProps } from './Distraction';
+import { readLocal } from '../utils/storage';
 
 // ---------------------------------------------------------------------------
 // WS message shapes (server-side time-arbitration protocol) — kept local, no
@@ -422,8 +423,11 @@ export function Battle({
     if (!navigator.mediaDevices?.getUserMedia) return;
     let cancelled = false;
 
+    // HOTFIX (#172 lands the real fix): honor the camera picked on Home; fall back to default.
+    const savedCamId = readLocal('cameraDeviceId');
     navigator.mediaDevices
-      .getUserMedia({ video: true })
+      .getUserMedia(savedCamId ? { video: { deviceId: { exact: savedCamId } } } : { video: true })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }))
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());

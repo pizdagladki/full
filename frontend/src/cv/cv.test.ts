@@ -656,3 +656,44 @@ describe('no real MediaPipe in tests', () => {
     expect(runner.detectForVideo).toHaveBeenCalledOnce();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #171 — video readiness guard + throw resilience
+// ---------------------------------------------------------------------------
+
+describe('CvEngine - video readiness guard (#171)', () => {
+  it('skips detection while the video has no decoded frames, then detects once ready', () => {
+    const runner = makeRunner(faceResult(0.4, 0.4));
+    const engine = new CvEngine(runner);
+    const video = makeFakeVideo();
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 0 });
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 0 });
+    engine.start(video);
+    const raf = requestAnimationFrame as unknown as ReturnType<typeof vi.fn>;
+    const rafCallsBefore = raf.mock.calls.length;
+    engine.processFrame(0);
+    expect(runner.detectForVideo).not.toHaveBeenCalled();
+    // the loop stays alive: a new frame was scheduled despite the skip
+    expect(raf.mock.calls.length).toBeGreaterThan(rafCallsBefore);
+    // camera delivers pixels -> detection proceeds on the next frame
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 });
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 640 });
+    engine.processFrame(33);
+    expect(runner.detectForVideo).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing runner does not permanently kill the detection loop', () => {
+    const runner = makeRunner(faceResult(0.4, 0.4));
+    vi.mocked(runner.detectForVideo).mockImplementationOnce(() => {
+      throw new Error('MediaPipe graph error');
+    });
+    const engine = new CvEngine(runner);
+    engine.start(makeFakeVideo());
+    const raf = requestAnimationFrame as unknown as ReturnType<typeof vi.fn>;
+    const rafCallsBefore = raf.mock.calls.length;
+    expect(() => engine.processFrame(0)).not.toThrow();
+    expect(raf.mock.calls.length).toBeGreaterThan(rafCallsBefore);
+    engine.processFrame(33);
+    expect(runner.detectForVideo).toHaveBeenCalledTimes(2);
+  });
+});
