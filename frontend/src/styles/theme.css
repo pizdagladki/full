@@ -558,3 +558,27 @@ button { font: inherit; cursor: pointer; }
 }
 .btn-mode--unranked { background: #3dbe6c; }
 .btn-mode:hover { transform: translateY(4px); box-shadow: 0 3px 0 var(--ink); }
+
+/* ============================================================================
+   Search («Поиск соперника»)
+   ========================================================================== */
+
+.search-eyes {
+  display: inline-block;
+  animation: search-look 2.4s ease-in-out infinite;
+}
+@keyframes search-look {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(5px) rotate(6deg); }
+  70% { transform: translateX(-5px) rotate(-6deg); }
+}
+.search-dots::after {
+  content: '';
+  animation: search-dots 1.4s steps(4) infinite;
+}
+@keyframes search-dots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
