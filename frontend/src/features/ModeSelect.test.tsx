@@ -1,11 +1,11 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ModeSelect } from './ModeSelect';
+import type { FaceLandmarkResult, LandmarkRunner } from '../cv';
 
 // ---------------------------------------------------------------------------
-// Probe screens — render the target route + capture location.state so tests
-// can assert both the navigate target AND the state it carries.
+// Probe screens — capture the navigate target AND the location.state it carries.
 // ---------------------------------------------------------------------------
 
 function SearchProbe() {
@@ -19,149 +19,232 @@ function SearchProbe() {
   );
 }
 
-function InviteProbe() {
-  return <div data-testid="invite-probe" />;
+// ---------------------------------------------------------------------------
+// Shared helpers (ported from the old Home.test.tsx together with the camera
+// preview / auto-calibration blocks that moved into this screen).
+// ---------------------------------------------------------------------------
+
+const TWO_CAMERAS: MediaDeviceInfo[] = [
+  { kind: 'videoinput', deviceId: 'cam1', label: 'Front Cam', groupId: '', toJSON: () => ({}) },
+  { kind: 'videoinput', deviceId: 'cam2', label: 'Back Cam', groupId: '', toJSON: () => ({}) },
+];
+
+function setupMediaDevices(devices: MediaDeviceInfo[] = TWO_CAMERAS) {
+  Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+    value: {
+      enumerateDevices: vi.fn().mockResolvedValue(devices),
+      getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }),
+    },
+    writable: true,
+    configurable: true,
+  });
 }
 
-function KothProbe() {
-  return <div data-testid="koth-probe" />;
+let rafCallbacks: FrameRequestCallback[] = [];
+
+beforeEach(() => {
+  setupMediaDevices();
+  rafCallbacks = [];
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }),
+  );
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+function makeCvRunner(): { runner: LandmarkRunner; setResult: (r: FaceLandmarkResult) => void } {
+  let nextResult: FaceLandmarkResult = { faceLandmarks: [] };
+  const runner: LandmarkRunner = { detectForVideo: vi.fn(() => nextResult) };
+  return {
+    runner,
+    setResult: (r: FaceLandmarkResult) => {
+      nextResult = r;
+    },
+  };
 }
 
-function renderModeSelect(trackId?: string) {
+const FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [[{ x: 0, y: 0, z: 0 }]] };
+const NO_FACE_FRAME: FaceLandmarkResult = { faceLandmarks: [] };
+
+function tickFrame(
+  setResult: (r: FaceLandmarkResult) => void,
+  result: FaceLandmarkResult,
+  ts = 0,
+): void {
+  setResult(result);
+  const cb = rafCallbacks[rafCallbacks.length - 1];
+  act(() => {
+    cb(ts);
+  });
+}
+
+function renderModeSelect(cvRunner?: LandmarkRunner) {
   return render(
-    <MemoryRouter
-      initialEntries={[{ pathname: '/mode-select', state: trackId ? { trackId } : undefined }]}
-    >
+    <MemoryRouter initialEntries={['/mode-select']}>
       <Routes>
-        <Route path="/mode-select" element={<ModeSelect />} />
+        <Route
+          path="/mode-select"
+          element={<ModeSelect cvRunner={cvRunner ?? makeCvRunner().runner} />}
+        />
         <Route path="/search" element={<SearchProbe />} />
-        <Route path="/invite" element={<InviteProbe />} />
-        <Route path="/koth" element={<KothProbe />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 // ---------------------------------------------------------------------------
-// Tests — one named case per acceptance criterion
+// Mode buttons — the screen now hosts ONLY the online-battle branches; koth and
+// invite are reached directly from Home's mode windows.
 // ---------------------------------------------------------------------------
 
-describe('ModeSelect', () => {
-  // criterion: 1 — the screen renders all four selectable options.
-  it('criterion-1: renders four selectable options — Ranked, Unranked, Invite a friend, King of the Hill', () => {
+describe('ModeSelect — «Онлайн-батлы»', () => {
+  it('renders exactly the ranked and unranked options (koth/invite moved to Home)', () => {
     renderModeSelect();
-
     expect(screen.getByTestId('mode-select-screen')).toBeInTheDocument();
-    expect(screen.getByTestId('mode-ranked')).toHaveTextContent('Ranked');
-    expect(screen.getByTestId('mode-unranked')).toHaveTextContent('Unranked');
-    expect(screen.getByTestId('mode-invite')).toHaveTextContent('Invite a friend');
-    expect(screen.getByTestId('mode-koth')).toHaveTextContent('King of the Hill');
+    expect(screen.getByTestId('mode-ranked')).toBeInTheDocument();
+    expect(screen.getByTestId('mode-unranked')).toBeInTheDocument();
+    expect(screen.queryByTestId('mode-invite')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mode-koth')).not.toBeInTheDocument();
   });
 
-  // criterion: 1 (violation guard) — a screen missing one of the four options would fail this.
-  it('criterion-1 violation guard: exactly four options are present, not fewer', () => {
+  it('ranked navigates to /search with mode=ranked and the default trackId', async () => {
     renderModeSelect();
-
-    const options = screen.getAllByRole('button');
-    expect(options).toHaveLength(4);
-  });
-
-  // Table-driven cases for criteria 2 & 3 — each row selects an option and asserts the resulting
-  // navigate target (+ router state where applicable).
-  const routingCases: {
-    name: string;
-    testId: string;
-    expectedProbe: string;
-    expectedMode?: string;
-  }[] = [
-    {
-      name: 'criterion-2: selecting Ranked navigates to /search with { mode: "ranked" }',
-      testId: 'mode-ranked',
-      expectedProbe: 'search-probe',
-      expectedMode: 'ranked',
-    },
-    {
-      name: 'criterion-2: selecting Unranked navigates to /search with { mode: "unranked" }',
-      testId: 'mode-unranked',
-      expectedProbe: 'search-probe',
-      expectedMode: 'unranked',
-    },
-    {
-      name: 'criterion-3: selecting Invite a friend navigates to /invite',
-      testId: 'mode-invite',
-      expectedProbe: 'invite-probe',
-    },
-    {
-      name: 'criterion-3: selecting King of the Hill navigates to /koth',
-      testId: 'mode-koth',
-      expectedProbe: 'koth-probe',
-    },
-  ];
-
-  it.each(routingCases)('$name', ({ testId, expectedProbe, expectedMode }) => {
-    renderModeSelect();
-
-    fireEvent.click(screen.getByTestId(testId));
-
-    expect(screen.getByTestId(expectedProbe)).toBeInTheDocument();
-    if (expectedMode !== undefined) {
-      expect(screen.getByTestId('search-mode').textContent).toBe(expectedMode);
-    }
-  });
-
-  // criterion: 2 (violation guard) — Ranked and Unranked must carry DIFFERENT mode values; if the
-  // implementation hard-coded one mode for both buttons this test would fail.
-  it('criterion-2 violation guard: Ranked and Unranked hand off distinct mode values', () => {
-    const { unmount } = renderModeSelect();
     fireEvent.click(screen.getByTestId('mode-ranked'));
-    const rankedMode = screen.getByTestId('search-mode').textContent;
-    unmount();
+    expect(await screen.findByTestId('search-probe')).toBeInTheDocument();
+    expect(screen.getByTestId('search-mode')).toHaveTextContent('ranked');
+    expect(screen.getByTestId('search-track-id')).toHaveTextContent('track-1');
+  });
 
+  it('unranked navigates to /search with mode=unranked', async () => {
     renderModeSelect();
     fireEvent.click(screen.getByTestId('mode-unranked'));
-    const unrankedMode = screen.getByTestId('search-mode').textContent;
-
-    expect(rankedMode).toBe('ranked');
-    expect(unrankedMode).toBe('unranked');
-    expect(rankedMode).not.toBe(unrankedMode);
+    expect(await screen.findByTestId('search-probe')).toBeInTheDocument();
+    expect(screen.getByTestId('search-mode')).toHaveTextContent('unranked');
   });
 
-  // criterion: 3 (violation guard) — Invite and King of the Hill must route to DIFFERENT screens;
-  // if both mapped to the same placeholder this would fail.
-  it('criterion-3 violation guard: Invite a friend and King of the Hill route to different screens', () => {
-    const { unmount } = renderModeSelect();
-    fireEvent.click(screen.getByTestId('mode-invite'));
-    expect(screen.getByTestId('invite-probe')).toBeInTheDocument();
-    expect(screen.queryByTestId('koth-probe')).not.toBeInTheDocument();
-    unmount();
-
+  it('#159: a newly-selected track is carried through to /search', async () => {
     renderModeSelect();
-    fireEvent.click(screen.getByTestId('mode-koth'));
-    expect(screen.getByTestId('koth-probe')).toBeInTheDocument();
-    expect(screen.queryByTestId('invite-probe')).not.toBeInTheDocument();
-  });
-
-  // criterion: 4 (#159) — the trackId carried in via Home's Play link is forwarded onward to
-  // /search for both the ranked and unranked branches.
-  it.each([
-    { name: 'criterion-4/#159: Ranked forwards trackId to /search', testId: 'mode-ranked' },
-    { name: 'criterion-4/#159: Unranked forwards trackId to /search', testId: 'mode-unranked' },
-  ])('$name', ({ testId }) => {
-    renderModeSelect('track-3');
-
-    fireEvent.click(screen.getByTestId(testId));
-
-    expect(screen.getByTestId('search-track-id').textContent).toBe('track-3');
-  });
-
-  // criterion: 4 (#159) violation guard — with NO trackId in location.state, /search must receive
-  // an EMPTY trackId (not some hard-coded default) — the field is genuinely being threaded through,
-  // not synthesized.
-  it('criterion-4/#159 violation guard: with no trackId in location.state, /search receives none', () => {
-    renderModeSelect(undefined);
-
+    fireEvent.change(screen.getByLabelText(/Трек/), { target: { value: 'track-2' } });
     fireEvent.click(screen.getByTestId('mode-ranked'));
+    expect(await screen.findByTestId('search-probe')).toBeInTheDocument();
+    expect(screen.getByTestId('search-track-id')).toHaveTextContent('track-2');
+  });
+});
 
-    expect(screen.getByTestId('search-track-id').textContent).toBe('');
+// ---------------------------------------------------------------------------
+// Camera device listing / selection (moved from Home)
+// ---------------------------------------------------------------------------
+
+describe('ModeSelect — camera selection', () => {
+  it('lists video input devices in the <select> from enumerateDevices', async () => {
+    renderModeSelect();
+    await waitFor(() => {
+      expect(screen.getByText('Front Cam')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Back Cam')).toBeInTheDocument();
+  });
+
+  it('pre-selects the first device by default', async () => {
+    renderModeSelect();
+    await waitFor(() => {
+      expect((screen.getByLabelText('Камера') as HTMLSelectElement).value).toBe('cam1');
+    });
+  });
+
+  it('changing the selection re-acquires the stream and persists the device (#172)', async () => {
+    const setItem = vi.fn();
+    vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue(null), setItem });
+    renderModeSelect();
+    await waitFor(() => {
+      expect(screen.getByText('Back Cam')).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText('Камера'), { target: { value: 'cam2' } });
+    await waitFor(() => {
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
+        video: { deviceId: { exact: 'cam2' } },
+      });
+    });
+    expect(setItem).toHaveBeenCalledWith('cameraDeviceId', 'cam2');
+  });
+
+  it('renders the camera preview <video> and calls getUserMedia on mount', async () => {
+    renderModeSelect();
+    const video = screen.getByTestId('camera-preview');
+    expect(video).toBeInTheDocument();
+    expect(video).toHaveAttribute('autoplay');
+    await waitFor(() => {
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Invisible auto-calibration on the preview (#158 behavior, moved from Home)
+// ---------------------------------------------------------------------------
+
+describe('ModeSelect — CV auto-calibration on the preview', () => {
+  it('starts the engine against the preview video element', async () => {
+    const { runner } = makeCvRunner();
+    renderModeSelect(runner);
+    await waitFor(() => {
+      expect(rafCallbacks.length).toBeGreaterThan(0);
+    });
+    act(() => {
+      rafCallbacks[rafCallbacks.length - 1](0);
+    });
+    const previewVideo = screen.getByTestId('camera-preview');
+    expect(runner.detectForVideo).toHaveBeenCalled();
+    expect(vi.mocked(runner.detectForVideo).mock.calls[0][0]).toBe(previewVideo);
+  });
+
+  it('status starts as calibrating and flips to ready once a face is reported', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderModeSelect(runner);
+    expect(screen.getByTestId('calibration-status')).toHaveAttribute('data-status', 'calibrating');
+    await waitFor(() => {
+      expect(rafCallbacks.length).toBeGreaterThan(0);
+    });
+    tickFrame(setResult, FACE_FRAME);
+    await waitFor(() => {
+      expect(screen.getByTestId('calibration-status')).toHaveAttribute('data-status', 'ready');
+    });
+  });
+
+  it('with only no-face frames the status never flips to ready', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderModeSelect(runner);
+    await waitFor(() => {
+      expect(rafCallbacks.length).toBeGreaterThan(0);
+    });
+    tickFrame(setResult, NO_FACE_FRAME);
+    tickFrame(setResult, NO_FACE_FRAME, 33);
+    expect(screen.getByTestId('calibration-status')).toHaveAttribute('data-status', 'calibrating');
+  });
+
+  it('losing the face after being ready reverts the status to calibrating', async () => {
+    const { runner, setResult } = makeCvRunner();
+    renderModeSelect(runner);
+    await waitFor(() => {
+      expect(rafCallbacks.length).toBeGreaterThan(0);
+    });
+    tickFrame(setResult, FACE_FRAME);
+    await waitFor(() => {
+      expect(screen.getByTestId('calibration-status')).toHaveAttribute('data-status', 'ready');
+    });
+    // NO_FACE_WINDOW = 3 consecutive no-face frames trigger onFaceLost
+    tickFrame(setResult, NO_FACE_FRAME, 33);
+    tickFrame(setResult, NO_FACE_FRAME, 66);
+    tickFrame(setResult, NO_FACE_FRAME, 99);
+    await waitFor(() => {
+      expect(screen.getByTestId('calibration-status')).toHaveAttribute('data-status', 'calibrating');
+    });
   });
 });
