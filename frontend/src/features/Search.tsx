@@ -237,14 +237,31 @@ export function Search({
   }, []);
 
   return (
-    <div data-testid="search-screen">
-      <CvComponent ref={cvRef} runner={cvRunner} callbacks={cvCallbacks} />
-      <video ref={videoRef} autoPlay muted playsInline data-testid="search-preview" />
-      {!facePresent ? (
-        <div data-testid="face-prompt">Show your face to start searching</div>
-      ) : (
-        <div data-testid="search-animation">Searching for an opponent…</div>
-      )}
+    <div className="panel-screen" data-testid="search-screen">
+      <h1 className="panel-title">Поиск соперника</h1>
+      <div className="panel-card">
+        <CvComponent ref={cvRef} runner={cvRunner} callbacks={cvCallbacks} />
+        <video
+          ref={videoRef}
+          className="panel-video"
+          autoPlay
+          muted
+          playsInline
+          data-testid="search-preview"
+        />
+        {!facePresent ? (
+          <div className="panel-status" data-testid="face-prompt">
+            Покажи лицо в камеру — и начнём искать
+          </div>
+        ) : (
+          <div className="panel-status" data-status="ready" data-testid="search-animation">
+            <span className="search-eyes" aria-hidden="true">
+              👀
+            </span>{' '}
+            Ищем соперника<span className="search-dots" aria-hidden="true" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
