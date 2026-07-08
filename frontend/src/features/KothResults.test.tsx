@@ -38,7 +38,7 @@ describe('KothResults', () => {
   it('daily-won-renders-new-king: won:true for daily renders the new-king message', () => {
     renderResults({ hillType: 'daily', won: true, survivedMs: 500 });
 
-    expect(screen.getByTestId('koth-won')).toHaveTextContent('You are the new King!');
+    expect(screen.getByTestId('koth-won')).toHaveTextContent('Ты — новый король!');
     expect(screen.queryByTestId('koth-lost')).not.toBeInTheDocument();
   });
 
@@ -46,7 +46,7 @@ describe('KothResults', () => {
   it('daily-won-renders-new-king violation guard: won:false renders the undefeated message instead', () => {
     renderResults({ hillType: 'monthly', won: false, survivedMs: 200 });
 
-    expect(screen.getByTestId('koth-lost')).toHaveTextContent('The king remains undefeated');
+    expect(screen.getByTestId('koth-lost')).toHaveTextContent('Король устоял');
     expect(screen.queryByTestId('koth-won')).not.toBeInTheDocument();
   });
 
@@ -68,7 +68,7 @@ describe('KothResults', () => {
       newlyReached: true,
     });
 
-    expect(screen.getByTestId('koth-rank-reached')).toHaveTextContent('Reached rank 3!');
+    expect(screen.getByTestId('koth-rank-reached')).toHaveTextContent('Новый ранг: 3!');
     expect(screen.queryByTestId('koth-rank-current')).not.toBeInTheDocument();
   });
 
@@ -81,7 +81,7 @@ describe('KothResults', () => {
       newlyReached: false,
     });
 
-    expect(screen.getByTestId('koth-rank-current')).toHaveTextContent('Current rank: 6');
+    expect(screen.getByTestId('koth-rank-current')).toHaveTextContent('Твой ранг: 6');
     expect(screen.queryByTestId('koth-rank-reached')).not.toBeInTheDocument();
   });
 
@@ -89,7 +89,7 @@ describe('KothResults', () => {
   it('ranked-no-attempt-renders-neutral: noAttempt renders a neutral "no attempt" message', () => {
     renderResults({ hillType: 'ranked', noAttempt: true });
 
-    expect(screen.getByTestId('koth-no-attempt')).toHaveTextContent('No attempt recorded');
+    expect(screen.getByTestId('koth-no-attempt')).toHaveTextContent('Попытка не записана');
     expect(screen.queryByTestId('koth-rank-reached')).not.toBeInTheDocument();
     expect(screen.queryByTestId('koth-rank-current')).not.toBeInTheDocument();
   });

@@ -75,24 +75,28 @@ export function KothMountain({ kothApi = defaultKothApi }: KothMountainProps) {
   }
 
   return (
-    <div data-testid="koth-mountain-screen">
-      <h1>{hillType === 'monthly' ? 'Monthly hill' : 'Daily hill'}</h1>
+    <div className="koth-screen" data-testid="koth-mountain-screen">
+      <h1 className="panel-title koth-title">{hillType === 'monthly' ? 'Гора месяца' : 'Гора дня'}</h1>
 
       {kingState.status === 'loading' && (
-        <div data-testid="mountain-loading">Loading the hill…</div>
+        <div className="results-note" data-testid="mountain-loading">Смотрим, кто на вершине…</div>
       )}
 
       {kingState.status === 'empty' && (
-        <div data-testid="mountain-empty">No king yet — be the first to claim this hill</div>
+        <div className="panel-status" data-testid="mountain-empty">Короля ещё нет — займи вершину первым</div>
       )}
 
       {kingState.status === 'loaded' && (
-        <div data-testid="mountain-king">
-          <span data-testid="mountain-king-user">{kingState.king.user_id}</span>
-          <span data-testid="mountain-king-blink">{kingState.king.blink_ts_ms}</span>
+        <div className="koth-mountain" data-testid="mountain-king">
+          <div className="koth-peak-stage" aria-hidden="true">
+            <span className="koth-peak-crown">👑</span>
+            <span className="koth-peak-flag">🚩</span>
+          </div>
+          <span className="koth-king-chip" data-testid="mountain-king-user">{kingState.king.user_id}</span>
+          <span className="koth-king-blink" data-testid="mountain-king-blink">{kingState.king.blink_ts_ms}</span>
           {/* Functional stub: no backend top-10 endpoint exists yet (#104 only exposes the single
               current king) — these are neutral placeholder slots, never fabricated fake data. */}
-          <ol>
+          <ol className="koth-slots">
             {Array.from({ length: PLACEHOLDER_SLOT_COUNT }, (_, i) => i + 2).map((slot) => (
               <li key={slot} data-testid={`mountain-slot-${slot}`}>
                 —
@@ -102,12 +106,12 @@ export function KothMountain({ kothApi = defaultKothApi }: KothMountainProps) {
         </div>
       )}
 
-      <div>
-        <button type="button" data-testid="mountain-play" onClick={handlePlay}>
-          Challenge
+      <div className="panel-actions">
+        <button type="button" className="btn-mode" data-testid="mountain-play" onClick={handlePlay}>
+          Бросить вызов
         </button>
-        <button type="button" data-testid="mountain-back" onClick={handleBack}>
-          Back
+        <button type="button" className="results-report-btn" data-testid="mountain-back" onClick={handleBack}>
+          Назад
         </button>
       </div>
     </div>
