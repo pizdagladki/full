@@ -7,6 +7,7 @@ import { PointsWidget } from './PointsWidget';
 import type { PointsApi } from '../api/points';
 import { CvComponent, defaultCvRunner } from '../cv';
 import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
+import { writeLocal } from '../utils/storage';
 
 /** Calibration status shown next to the camera preview — driven by the real CvEngine state
  * (face-present vs. still calibrating/no face), never a hard-coded string. */
@@ -141,6 +142,9 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi, cvRunner = def
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+
+    // HOTFIX (#172 lands the real fix): persist the selection so game screens open the same device.
+    if (selectedDeviceId) writeLocal('cameraDeviceId', selectedDeviceId);
 
     const constraints: MediaStreamConstraints = {
       video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,

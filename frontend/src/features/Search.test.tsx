@@ -467,3 +467,47 @@ describe('Search', () => {
     expect(screen.queryByTestId('face-prompt')).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #172 - the camera picked on Home is honored by the game screen
+// ---------------------------------------------------------------------------
+
+describe('Search - camera device passthrough (#172)', () => {
+  function makeIdleRunner(): LandmarkRunner {
+    return { detectForVideo: vi.fn().mockReturnValue({ faceLandmarks: [] }) };
+  }
+
+  it('requests the persisted deviceId with an exact constraint', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn().mockReturnValue('cam-123'),
+      setItem: vi.fn(),
+    });
+    const gum = vi.fn().mockResolvedValue({ getTracks: () => [] });
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+      value: { getUserMedia: gum },
+      configurable: true,
+    });
+    renderSearch(makeMockWs().ws, makeIdleRunner());
+    await act(async () => {});
+    expect(gum).toHaveBeenCalledWith({ video: { deviceId: { exact: 'cam-123' } } });
+  });
+
+  it('falls back to the default device when the selected one fails', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn().mockReturnValue('cam-123'),
+      setItem: vi.fn(),
+    });
+    const gum = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('NotReadableError'))
+      .mockResolvedValue({ getTracks: () => [] });
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+      value: { getUserMedia: gum },
+      configurable: true,
+    });
+    renderSearch(makeMockWs().ws, makeIdleRunner());
+    await act(async () => {});
+    expect(gum).toHaveBeenCalledTimes(2);
+    expect(gum).toHaveBeenLastCalledWith({ video: true });
+  });
+});

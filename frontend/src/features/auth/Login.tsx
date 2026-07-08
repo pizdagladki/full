@@ -48,8 +48,12 @@ export function Login({ authApi = defaultAuthApi }: LoginProps) {
     if (exchangeStarted.current) return;
     exchangeStarted.current = true;
 
-    let cancelled = false;
-
+    // NO cancelled/cleanup gating here (#169): under StrictMode the mount effect runs
+    // setup -> synthetic cleanup -> setup, and the exchangeStarted ref (which must stay —
+    // the authorization code is single-use) blocks the second run. The ONLY run that ever
+    // performs the exchange is the synthetically-"cancelled" first one, so gating its
+    // outcome on a cancelled flag froze BOTH the successful navigate and the error state
+    // on the eternal spinner. Post-unmount setState is a safe no-op in React 18.
     const doExchange = async () => {
       // Validate OAuth state parameter to prevent CSRF attacks
       const storedState = sessionStorage.getItem('oauth_state');
@@ -57,21 +61,16 @@ export function Login({ authApi = defaultAuthApi }: LoginProps) {
       sessionStorage.removeItem('oauth_state');
 
       if (!storedState || storedState !== returnedState) {
-        if (!cancelled) {
-          setError('Authentication state mismatch. Please try again.');
-          setLoading(false);
-        }
+        setError('Authentication state mismatch. Please try again.');
+        setLoading(false);
         return;
       }
 
       try {
         await authApi.googleLogin(code);
         await authApi.getMe();
-        if (!cancelled) {
-          navigate('/home', { replace: true });
-        }
+        navigate('/home', { replace: true });
       } catch (err: unknown) {
-        if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
           setError('Authentication failed: unauthorized. Please try again.');
         } else if (err instanceof Error) {
@@ -84,10 +83,6 @@ export function Login({ authApi = defaultAuthApi }: LoginProps) {
     };
 
     void doExchange();
-
-    return () => {
-      cancelled = true;
-    };
   }, [code, authApi, navigate, searchParams]);
 
   // If already authenticated and not in exchange flow, redirect to home

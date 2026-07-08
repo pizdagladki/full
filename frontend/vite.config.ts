@@ -60,6 +60,11 @@ function mediapipeWasmPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), mediapipeWasmPlugin()],
   server: {
+    // Allow tunneled dev access (ngrok) — vite rejects unknown Host headers otherwise.
+    allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.app', '.ngrok.dev'],
+    // /mnt/c (WSL2 drvfs) does not deliver reliable inotify events — without polling vite
+    // serves stale module transforms after source edits.
+    watch: { usePolling: true, interval: 800 },
     proxy: {
       '/v1/auth': { target: 'http://localhost:8080', changeOrigin: true },
       '/v1/clips': { target: 'http://localhost:8082', changeOrigin: true },
