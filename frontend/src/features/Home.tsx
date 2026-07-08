@@ -1,30 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { defaultRatingsApi } from '../api/ratings';
 import type { RatingsApi, RatingData } from '../api/ratings';
 import { PointsWidget } from './PointsWidget';
 import type { PointsApi } from '../api/points';
-import { CvComponent, defaultCvRunner } from '../cv';
-import type { CvCallbacks, CvHandleRef, LandmarkRunner } from '../cv';
-import { writeLocal } from '../utils/storage';
-
-/** Calibration status shown next to the camera preview — driven by the real CvEngine state
- * (face-present vs. still calibrating/no face), never a hard-coded string. */
-type CalibrationStatus = 'calibrating' | 'ready';
+import { useState } from 'react';
 
 // ---------------------------------------------------------------------------
-// Mock TikTok tracks (no real audio yet — placeholder list)
-// ---------------------------------------------------------------------------
-
-const MOCK_TRACKS = [
-  { id: 'track-1', name: 'Beat Drop #1' },
-  { id: 'track-2', name: 'Viral Dance Mix' },
-  { id: 'track-3', name: 'Chill Vibes' },
-];
-
-// ---------------------------------------------------------------------------
-// Props
+// Home — «Субботний мультик» (owner-approved design, mockup round 4.3).
+// A cartoon world: sky, rolling hills, drifting clouds and a cursor-tracking
+// sun-eye. Store/Profile pinned to the top corners, the LVL+ELO widget on the
+// right edge, and THREE mode windows instead of a single Play button.
+// The camera preview / device picker / track picker moved to ModeSelect (the
+// «Онлайн-батлы» screen) — the owner's call: the face gate belongs on the
+// screens leading into a match, not on the storefront.
 // ---------------------------------------------------------------------------
 
 export interface HomeProps {
@@ -32,24 +22,11 @@ export interface HomeProps {
   ratingsApi?: RatingsApi;
   /** Injectable points API (swap with a mock in tests). Defaults to the real client. */
   pointsApi?: PointsApi;
-  /** Injectable CV landmark runner (swap with a mock in tests). Defaults to the real
-   * MediaPipe FaceLandmarker runner (`defaultCvRunner()`). */
-  cvRunner?: LandmarkRunner;
 }
 
-// ---------------------------------------------------------------------------
-// Home component
-// ---------------------------------------------------------------------------
-
-export function Home({ ratingsApi = defaultRatingsApi, pointsApi, cvRunner = defaultCvRunner() }: HomeProps) {
+export function Home({ ratingsApi = defaultRatingsApi, pointsApi }: HomeProps) {
   const { user } = useAuth();
-
-  // --- camera devices ---
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-
-  // --- track selection ---
-  const [selectedTrackId, setSelectedTrackId] = useState<string>(MOCK_TRACKS[0].id);
+  const navigate = useNavigate();
 
   // --- rating / level ---
   const [rating, setRating] = useState<RatingData | null>(null);
@@ -57,56 +34,6 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi, cvRunner = def
   const [ratingLoading, setRatingLoading] = useState<boolean>(user != null);
   const [ratingError, setRatingError] = useState<string | null>(null);
 
-  // --- camera preview ---
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const cvRef = useRef<CvHandleRef>(null);
-
-  // --- invisible auto-calibration status (driven by the real CvEngine) ---
-  const [calibrationStatus, setCalibrationStatus] = useState<CalibrationStatus>('calibrating');
-
-  // Intentionally stable ([]): CvComponent freezes these callbacks on first render.
-  const onFacePresent = useCallback(() => {
-    setCalibrationStatus('ready');
-  }, []);
-
-  const onFaceLost = useCallback(() => {
-    setCalibrationStatus('calibrating');
-  }, []);
-
-  // No onBlink wired here — Home only cares about face-present/calibration status, not blink
-  // side effects (those belong to gameplay screens, e.g. Search/Battle).
-  const cvCallbacks = useMemo<CvCallbacks>(
-    () => ({ onFacePresent, onFaceLost }),
-    // Intentionally stable ([]): passed to CvComponent, which builds its engine ONCE.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
-  // Enumerate video input devices on mount
-  useEffect(() => {
-    if (!navigator.mediaDevices?.enumerateDevices) return;
-    let cancelled = false;
-    navigator.mediaDevices
-      .enumerateDevices()
-      .then((all) => {
-        if (cancelled) return;
-        const videoInputs = all.filter((d) => d.kind === 'videoinput');
-        setDevices(videoInputs);
-        if (videoInputs.length > 0 && !selectedDeviceId) {
-          setSelectedDeviceId(videoInputs[0].deviceId);
-        }
-      })
-      .catch(() => {
-        // Device enumeration failed — leave list empty, no crash
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Fetch rating for the current user
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -128,158 +55,167 @@ export function Home({ ratingsApi = defaultRatingsApi, pointsApi, cvRunner = def
     };
   }, [user, ratingsApi]);
 
-  // Acquire camera stream whenever selected device changes
+  // --- sun-eye: the pupil follows the cursor (design signature) ---
+  const sunRef = useRef<HTMLDivElement>(null);
+  const pupilRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    let cancelled = false;
-    // Captured up-front (not read from the ref again in the cleanup below) — the CvHandleRef
-    // never actually changes across renders, but this keeps the cleanup independent of
-    // whatever cvRef.current happens to be by the time it runs.
-    const cv = cvRef.current;
-
-    // Stop any previous stream
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-
-    // HOTFIX (#172 lands the real fix): persist the selection so game screens open the same device.
-    if (selectedDeviceId) writeLocal('cameraDeviceId', selectedDeviceId);
-
-    const constraints: MediaStreamConstraints = {
-      video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
+    const onMove = (e: MouseEvent) => {
+      const sun = sunRef.current;
+      const pupil = pupilRef.current;
+      if (!sun || !pupil) return;
+      const r = sun.getBoundingClientRect();
+      const dx = e.clientX - (r.left + r.width / 2);
+      const dy = e.clientY - (r.top + r.height / 2);
+      const d = Math.min(1, Math.hypot(dx, dy) / 300);
+      const a = Math.atan2(dy, dx);
+      pupil.style.transform = `translate(${Math.cos(a) * 10 * d}px, ${Math.sin(a) * 10 * d}px)`;
     };
-
-    navigator.mediaDevices
-      .getUserMedia(constraints)
-      .then((stream) => {
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        // Preview stream is ready — (re)start the invisible auto-calibration CV engine on it.
-        setCalibrationStatus('calibrating');
-        if (videoRef.current) cv?.start(videoRef.current);
-      })
-      .catch(() => {
-        // getUserMedia failed — show camera area without a live feed, no crash
-      });
-
-    return () => {
-      cancelled = true;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      // Stop the CV engine on unmount AND whenever the selected camera changes (this effect
-      // re-runs on [selectedDeviceId] change, cleaning up the previous camera's engine run).
-      cv?.stop();
-    };
-  }, [selectedDeviceId]);
-
-  // ---------------------------------------------------------------------------
-  // Level progress bar helpers
-  // ---------------------------------------------------------------------------
+    document.addEventListener('mousemove', onMove);
+    return () => document.removeEventListener('mousemove', onMove);
+  }, []);
 
   const MAX_LEVEL = 10;
-  const levelPercent =
-    rating != null ? Math.min(100, (rating.level / MAX_LEVEL) * 100) : 0;
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const levelPercent = rating != null ? Math.min(100, (rating.level / MAX_LEVEL) * 100) : 0;
 
   return (
-    <div data-testid="home-screen">
-      {/* Points widget (balance + info panel) — top-right */}
+    <div className="world" data-testid="home-screen">
+      {/* ambient world */}
+      <div className="world-cloud" style={{ top: '9%', width: 104, animationDuration: '40s' }} />
+      <div
+        className="world-cloud"
+        style={{ top: '22%', width: 70, animationDuration: '58s', animationDelay: '-22s' }}
+      />
+      <span className="world-bird" style={{ top: '15%' }} aria-hidden="true">
+        🕊️
+      </span>
+      <div className="sun" ref={sunRef} data-testid="sun-eye">
+        <div className="sun-white">
+          <div className="sun-pupil" ref={pupilRef} />
+        </div>
+      </div>
+      <div className="world-hill world-hill--left" />
+      <div className="world-hill world-hill--right" />
+
+      {/* Points widget (balance + info panel) */}
       <PointsWidget pointsApi={pointsApi} />
 
       {/* Top AdSense banner slot */}
       <div data-testid="ad-slot" aria-hidden="true" />
 
-      {/* Navigation */}
-      <nav>
-        <Link to="/store">Store</Link>
-        <Link to="/profile">Profile</Link>
-        <Link to="/mode-select" state={{ trackId: selectedTrackId }}>
-          Play
-        </Link>
-      </nav>
+      {/* corner navigation */}
+      <Link className="corner-link corner-link--left" to="/store">
+        🛒 Магазин
+      </Link>
+      <Link className="corner-link corner-link--right" to="/profile">
+        😎 Профиль
+      </Link>
 
-      {/* Level progress bar */}
-      <section aria-label="Level progress">
+      {/* LVL + ELO widget */}
+      <section className="rank" aria-label="Level progress">
         {ratingLoading || ratingError || rating === null ? (
-          <div data-testid="level-placeholder" aria-label="Level loading">
+          <div className="rank-elo" data-testid="level-placeholder" aria-label="Level loading">
             {ratingError ? 'Could not load level' : 'Loading level…'}
           </div>
         ) : (
-          <div>
-            <div>
-              Level {rating.level} &mdash; ELO {rating.elo}
+          <>
+            <div className="rank-level">{rating.level}</div>
+            <div className="rank-elo">
+              <small>рейтинг</small>
+              ELO {rating.elo}
+              <div className="rank-elo-bar">
+                <div
+                  role="progressbar"
+                  aria-valuenow={levelPercent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`Level ${rating.level} progress`}
+                  style={{ width: `${levelPercent}%` }}
+                />
+              </div>
             </div>
-            <div
-              role="progressbar"
-              aria-valuenow={levelPercent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={`Level ${rating.level} progress`}
-              style={{ width: `${levelPercent}%`, background: '#4caf50', height: '8px' }}
-            />
-          </div>
+          </>
         )}
       </section>
 
-      {/* Camera device selector */}
-      <section aria-label="Camera selection">
-        <label htmlFor="camera-select">Camera</label>
-        <select
-          id="camera-select"
-          value={selectedDeviceId}
-          onChange={(e) => setSelectedDeviceId(e.target.value)}
-        >
-          {devices.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label || d.deviceId}
-            </option>
-          ))}
-        </select>
-      </section>
+      <div className="home-shell">
+        <div className="home-mid">
+          <h1 className="home-logo">ГЛЯДЕЛКИ</h1>
 
-      {/* TikTok-style track selector */}
-      <section aria-label="Track selection">
-        <label htmlFor="track-select">Track</label>
-        <select
-          id="track-select"
-          value={selectedTrackId}
-          onChange={(e) => setSelectedTrackId(e.target.value)}
-        >
-          {MOCK_TRACKS.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </section>
+          {/* mode windows */}
+          <nav className="modes" aria-label="Game modes">
+            <button
+              type="button"
+              className="mode"
+              data-testid="mode-battles"
+              onClick={() => navigate('/mode-select')}
+            >
+              <div className="mode-frame">
+                <div className="mode-scene scene-battle">
+                  <div className="scene-battle-vs">VS!</div>
+                  <div className="scene-battle-duel">
+                    <div className="scene-battle-eye scene-battle-eye--left">
+                      <b />
+                    </div>
+                    <div className="scene-battle-zap" aria-hidden="true">
+                      ⚡
+                    </div>
+                    <div className="scene-battle-eye scene-battle-eye--right">
+                      <b />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mode-plaque">Онлайн-батлы</div>
+              <div className="mode-sub">ранк и не ранк — внутри</div>
+            </button>
 
-      {/* Camera preview */}
-      <section aria-label="Camera preview">
-        <CvComponent ref={cvRef} runner={cvRunner} callbacks={cvCallbacks} />
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          data-testid="camera-preview"
-          style={{ width: '100%', maxWidth: '480px', background: '#000' }}
-        />
-        <div data-testid="calibration-status" data-status={calibrationStatus}>
-          {calibrationStatus === 'ready' ? 'Face detected — ready' : 'Calibrating…'}
+            <button
+              type="button"
+              className="mode"
+              data-testid="mode-koth"
+              onClick={() => navigate('/koth')}
+            >
+              <div className="mode-frame">
+                <div className="mode-scene scene-koth">
+                  <div className="scene-koth-cloud" style={{ left: -60 }} />
+                  <div className="scene-koth-mountain" />
+                  <div className="scene-koth-cap" />
+                  <div className="scene-koth-crown" aria-hidden="true">
+                    👑
+                  </div>
+                  <div className="scene-koth-flag" aria-hidden="true">
+                    🚩
+                  </div>
+                </div>
+              </div>
+              <div className="mode-plaque mode-plaque--koth">Царь горы</div>
+              <div className="mode-sub">вершина занята — сгони</div>
+            </button>
+
+            <button
+              type="button"
+              className="mode"
+              data-testid="mode-invite"
+              onClick={() => navigate('/invite')}
+            >
+              <div className="mode-frame">
+                <div className="mode-scene scene-friend">
+                  <div className="scene-friend-code">код: 7FK2</div>
+                  <div className="scene-friend-peek" aria-hidden="true">
+                    👀
+                  </div>
+                  <div className="scene-friend-door">
+                    <div className="scene-friend-knob" />
+                  </div>
+                </div>
+              </div>
+              <div className="mode-plaque mode-plaque--friend">С другом</div>
+              <div className="mode-sub">приватная комната по коду</div>
+            </button>
+          </nav>
         </div>
-      </section>
+      </div>
 
       {/* Bottom AdSense banner slot */}
       <div data-testid="ad-slot" aria-hidden="true" />
