@@ -763,3 +763,31 @@ button { font: inherit; cursor: pointer; }
 }
 .arena-overlay p { margin: 0; }
 .arena-skip { font-size: 18px; padding: 10px 28px; }
+
+/* ============================================================================
+   InviteRoom («с другом»)
+   ========================================================================== */
+
+.invite-menu { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.invite-join { display: flex; gap: 10px; width: 100%; justify-content: center; flex-wrap: wrap; }
+.invite-input {
+  font: inherit;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  padding: 10px 14px;
+  width: min(220px, 60vw);
+  text-align: center;
+}
+.invite-join-btn { font-size: 18px; padding: 10px 26px; }
+.invite-waiting { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.invite-code {
+  font-family: var(--font-display);
+  font-size: clamp(40px, 8vw, 72px);
+  color: var(--pink);
+  -webkit-text-stroke: 1px var(--ink);
+  text-shadow: 4px 5px 0 var(--ink);
+  letter-spacing: 0.1em;
+}
