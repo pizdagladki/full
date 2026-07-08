@@ -243,41 +243,76 @@ export function InviteRoom({ wsClient, cvRunner = defaultCvRunner() }: InviteRoo
   }, [teardown]);
 
   return (
-    <div data-testid="invite-room-screen">
+    <div className="panel-screen" data-testid="invite-room-screen">
+      <h1 className="panel-title">С другом</h1>
       <CvComponent ref={cvRef} runner={cvRunner} callbacks={cvCallbacks} />
-      <video ref={videoRef} autoPlay muted playsInline data-testid="invite-preview" />
-      {phase === 'menu' && (
-        <div data-testid="invite-menu">
-          <button type="button" data-testid="create-room-button" onClick={handleCreateRoom}>
-            Create room
-          </button>
-          <div data-testid="join-room-form">
-            <input
-              type="text"
-              data-testid="join-code-input"
-              value={joinCodeInput}
-              onChange={(e) => setJoinCodeInput(e.target.value)}
-              placeholder="Enter invite code"
-            />
-            <button type="button" data-testid="join-room-button" onClick={handleJoinSubmit}>
-              Join by code
+      <div className="panel-card">
+        <video
+          ref={videoRef}
+          className="panel-video"
+          autoPlay
+          muted
+          playsInline
+          data-testid="invite-preview"
+        />
+        {phase === 'menu' && (
+          <div className="invite-menu" data-testid="invite-menu">
+            <button
+              type="button"
+              className="btn-mode"
+              data-testid="create-room-button"
+              onClick={handleCreateRoom}
+            >
+              Создать комнату
             </button>
+            <div className="invite-join" data-testid="join-room-form">
+              <input
+                type="text"
+                className="invite-input"
+                data-testid="join-code-input"
+                value={joinCodeInput}
+                onChange={(e) => setJoinCodeInput(e.target.value)}
+                placeholder="Код приглашения"
+              />
+              <button
+                type="button"
+                className="btn-mode btn-mode--unranked invite-join-btn"
+                data-testid="join-room-button"
+                onClick={handleJoinSubmit}
+              >
+                Войти
+              </button>
+            </div>
+            {showFacePrompt && (
+              <div className="panel-status" data-testid="invite-face-prompt">
+                Покажи лицо в камеру, чтобы продолжить
+              </div>
+            )}
           </div>
-          {showFacePrompt && (
-            <div data-testid="invite-face-prompt">Show your face to continue</div>
-          )}
-        </div>
-      )}
+        )}
 
-      {phase === 'creating' && <div data-testid="invite-creating">Creating room…</div>}
+        {phase === 'creating' && (
+          <div className="results-note" data-testid="invite-creating">
+            Создаём комнату…
+          </div>
+        )}
 
-      {phase === 'waiting' && (
-        <div data-testid="invite-waiting">
-          <div data-testid="invite-code">{code}</div>
-          <button type="button" data-testid="copy-code-button" onClick={handleCopy}>
-            {copyLabel}
-          </button>
-          <div data-testid="invite-waiting-message">Waiting for your friend to join…</div>
+        {phase === 'waiting' && (
+          <div className="invite-waiting" data-testid="invite-waiting">
+            <div className="invite-code" data-testid="invite-code">
+              {code}
+            </div>
+            <button
+              type="button"
+              className="results-report-btn"
+              data-testid="copy-code-button"
+              onClick={handleCopy}
+            >
+              {copyLabel}
+            </button>
+            <div className="results-note" data-testid="invite-waiting-message">
+              Ждём, пока друг зайдёт по коду…
+            </div>
           {/*
             The signaling server never pushes a peer-joined notification to the room creator
             (JoinByCode/handleJoinRoom only writes room_joined back to the joiner's own
@@ -285,32 +320,57 @@ export function InviteRoom({ wsClient, cvRunner = defaultCvRunner() }: InviteRoo
             this is automatic, the creator manually confirms the friend has joined out-of-band
             (e.g. a chat message) and starts the battle themselves.
           */}
-          <button type="button" data-testid="start-battle-button" onClick={handleStartBattle}>
-            Start Battle
-          </button>
-          <button type="button" data-testid="leave-button" onClick={resetToMenu}>
-            Leave
-          </button>
-        </div>
-      )}
+            <div className="panel-actions">
+              <button
+                type="button"
+                className="btn-mode"
+                data-testid="start-battle-button"
+                onClick={handleStartBattle}
+              >
+                В бой!
+              </button>
+              <button
+                type="button"
+                className="results-report-btn"
+                data-testid="leave-button"
+                onClick={resetToMenu}
+              >
+                Выйти
+              </button>
+            </div>
+          </div>
+        )}
 
-      {phase === 'joining' && (
-        <div data-testid="invite-joining">
-          <div>Joining room…</div>
-          <button type="button" data-testid="leave-button" onClick={resetToMenu}>
-            Leave
-          </button>
-        </div>
-      )}
+        {phase === 'joining' && (
+          <div className="invite-waiting" data-testid="invite-joining">
+            <div className="results-note">Заходим в комнату…</div>
+            <button
+              type="button"
+              className="results-report-btn"
+              data-testid="leave-button"
+              onClick={resetToMenu}
+            >
+              Выйти
+            </button>
+          </div>
+        )}
 
-      {phase === 'error' && (
-        <div data-testid="invite-error-screen">
-          <div data-testid="invite-error">{errorMessage}</div>
-          <button type="button" data-testid="retry-button" onClick={resetToMenu}>
-            Try again
-          </button>
-        </div>
-      )}
+        {phase === 'error' && (
+          <div className="invite-waiting" data-testid="invite-error-screen">
+            <div className="panel-status" data-testid="invite-error">
+              {errorMessage}
+            </div>
+            <button
+              type="button"
+              className="btn-mode"
+              data-testid="retry-button"
+              onClick={resetToMenu}
+            >
+              Ещё раз
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
