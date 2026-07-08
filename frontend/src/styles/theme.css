@@ -582,3 +582,80 @@ button { font: inherit; cursor: pointer; }
   50% { content: '..'; }
   75% { content: '...'; }
 }
+
+/* ============================================================================
+   Results («итоги матча»)
+   ========================================================================== */
+
+.results--win { background: linear-gradient(#ffe9f4, #fff3c9 70%, var(--sky-low)); }
+.results--loss { background: linear-gradient(#dfe3f2, #cfd6ea 70%, #bfc9e2); }
+
+.results-outcome { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.results-verdict {
+  font-family: var(--font-display);
+  font-size: clamp(52px, 10vw, 110px);
+  color: var(--pink);
+  -webkit-text-stroke: 2px var(--ink);
+  text-shadow: 6px 7px 0 var(--ink);
+  transform: rotate(-2deg);
+  animation: verdict-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.results--loss .results-verdict { color: #8f9bc4; transform: rotate(1deg); }
+.results-verdict--none { color: #9aa; text-shadow: none; -webkit-text-stroke: 0; }
+@keyframes verdict-pop {
+  from { transform: scale(0.4) rotate(-10deg); opacity: 0; }
+}
+
+.results-chips { display: flex; gap: 12px; }
+.results-chip {
+  font-weight: 800;
+  font-size: 18px;
+  background: var(--paper);
+  border: var(--stroke) solid var(--ink);
+  border-radius: 999px;
+  padding: 8px 20px;
+  box-shadow: var(--drop-soft);
+}
+.results-chip--up { background: var(--grass); }
+.results-chip--down { background: #ff8f8f; }
+
+.results-levelbar {
+  width: min(320px, 80vw);
+  height: 14px;
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper);
+  overflow: hidden;
+}
+.results-levelbar > div { height: 100%; background: var(--pink); }
+
+.results-note { font-weight: 800; font-size: 13px; opacity: 0.65; }
+
+.results-share { display: flex; justify-content: center; }
+.results-share-btn {
+  font-weight: 800;
+  font-size: 17px;
+  color: var(--paper);
+  background: var(--ink);
+  border: var(--stroke) solid var(--ink);
+  border-radius: 999px;
+  padding: 12px 30px;
+  box-shadow: 0 6px 0 rgba(28, 20, 48, 0.35);
+  transition: transform 0.1s;
+}
+.results-share-btn:hover { transform: scale(1.05) rotate(-1deg); }
+
+.results-reports { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.results-report-btn {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  padding: 7px 16px;
+  opacity: 0.7;
+  transition: opacity 0.12s, transform 0.12s;
+}
+.results-report-btn:hover:not(:disabled) { opacity: 1; transform: translateY(-2px); }
+.results-report-btn:disabled { opacity: 0.35; cursor: default; }

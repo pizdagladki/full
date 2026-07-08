@@ -175,101 +175,131 @@ export function Results({
   // ---------------------------------------------------------------------------
 
   return (
-    <div data-testid="results-screen">
-      <h1>Results</h1>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Outcome — win/loss, ±ELO, level progress, duration                   */}
-      {/* ------------------------------------------------------------------ */}
-      <section aria-label="Outcome">
+    <div
+      className={`panel-screen results ${result === 'win' ? 'results--win' : result === 'loss' ? 'results--loss' : ''}`}
+      data-testid="results-screen"
+    >
+      {/* Outcome — win/loss, ±ELO, level progress, duration */}
+      <section aria-label="Outcome" className="results-outcome">
         {result ? (
-          <div data-testid="result-outcome">{result === 'win' ? 'You win!' : 'You lose'}</div>
+          <div className="results-verdict" data-testid="result-outcome">
+            {result === 'win' ? 'Победа!' : 'Поражение'}
+          </div>
         ) : (
-          <div data-testid="result-outcome-placeholder">—</div>
+          <div className="results-verdict results-verdict--none" data-testid="result-outcome-placeholder">
+            —
+          </div>
         )}
 
-        <div data-testid="elo-delta">{eloDeltaStr}</div>
-
-        <div data-testid="match-duration">{durationSec != null ? `${durationSec}s` : '—'}</div>
+        <div className="results-chips">
+          <div
+            className={`results-chip ${eloDeltaStr.startsWith('+') ? 'results-chip--up' : eloDeltaStr.startsWith('-') ? 'results-chip--down' : ''}`}
+            data-testid="elo-delta"
+          >
+            {eloDeltaStr}
+          </div>
+          <div className="results-chip" data-testid="match-duration">
+            {durationSec != null ? `${durationSec}s` : '—'}
+          </div>
+        </div>
 
         {statsLoading || (!user && !rating) ? (
-          <div data-testid="stats-loading">Loading rating…</div>
+          <div className="results-note" data-testid="stats-loading">
+            Считаем рейтинг…
+          </div>
         ) : statsError ? (
-          <div data-testid="stats-error">Could not load rating</div>
+          <div className="results-note" data-testid="stats-error">
+            Не удалось загрузить рейтинг
+          </div>
         ) : rating ? (
-          <div
-            role="progressbar"
-            data-testid="level-progress"
-            aria-valuenow={levelPercent}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={`Level ${rating.level} progress`}
-            style={{ width: `${levelPercent}%`, background: '#4caf50', height: '8px' }}
-          />
+          <div className="results-levelbar">
+            <div
+              role="progressbar"
+              data-testid="level-progress"
+              aria-valuenow={levelPercent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={`Level ${rating.level} progress`}
+              style={{ width: `${levelPercent}%` }}
+            />
+          </div>
         ) : (
-          <div data-testid="stats-loading">Loading rating…</div>
+          <div className="results-note" data-testid="stats-loading">
+            Считаем рейтинг…
+          </div>
         )}
       </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Navigation — play again / rematch                                    */}
-      {/* ------------------------------------------------------------------ */}
-      <section aria-label="Navigation">
-        <button type="button" data-testid="play-again" onClick={handlePlayAgain}>
-          Play again
+      {/* Navigation — play again / rematch */}
+      <section aria-label="Navigation" className="panel-actions">
+        <button type="button" className="btn-mode" data-testid="play-again" onClick={handlePlayAgain}>
+          Играть ещё
         </button>
         <button
           type="button"
+          className="btn-mode btn-mode--unranked"
           data-testid="rematch"
           onClick={handleRematch}
           disabled={rematchRequested}
         >
-          {rematchRequested ? 'Rematch requested' : 'Rematch'}
+          {rematchRequested ? 'Реванш заказан' : 'Реванш'}
         </button>
       </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Share to TikTok                                                      */}
-      {/* ------------------------------------------------------------------ */}
-      <section aria-label="Share">
+      {/* Share to TikTok */}
+      <section aria-label="Share" className="results-share">
         {clipUrl ? (
-          <button type="button" data-testid="share-tiktok" onClick={handleShare}>
-            Share to TikTok
+          <button type="button" className="results-share-btn" data-testid="share-tiktok" onClick={handleShare}>
+            🎬 Шеринг в TikTok
           </button>
         ) : (
-          <div data-testid="share-unavailable">No clip to share yet</div>
+          <div className="results-note" data-testid="share-unavailable">
+            Клип ещё не готов
+          </div>
         )}
       </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Reports — cheat / bug                                               */}
-      {/* ------------------------------------------------------------------ */}
-      <section aria-label="Reports">
+      {/* Reports — cheat / bug */}
+      <section aria-label="Reports" className="results-reports">
         <button
           type="button"
+          className="results-report-btn"
           data-testid="report-cheat"
           onClick={handleReportCheat}
           disabled={!canReportCheat || cheatStatus === 'pending'}
         >
-          Report cheating
+          Читер!
         </button>
         {cheatStatus === 'success' && (
-          <div data-testid="cheat-report-success">Report submitted</div>
+          <div className="results-note" data-testid="cheat-report-success">
+            Жалоба отправлена
+          </div>
         )}
         {cheatStatus === 'error' && (
-          <div data-testid="cheat-report-error">Could not submit report</div>
+          <div className="results-note" data-testid="cheat-report-error">
+            Не удалось отправить
+          </div>
         )}
 
         <button
           type="button"
+          className="results-report-btn"
           data-testid="report-bug"
           onClick={handleReportBug}
           disabled={bugStatus === 'pending'}
         >
-          Report a bug
+          Сломалось?
         </button>
-        {bugStatus === 'success' && <div data-testid="bug-report-success">Report submitted</div>}
-        {bugStatus === 'error' && <div data-testid="bug-report-error">Could not submit report</div>}
+        {bugStatus === 'success' && (
+          <div className="results-note" data-testid="bug-report-success">
+            Жалоба отправлена
+          </div>
+        )}
+        {bugStatus === 'error' && (
+          <div className="results-note" data-testid="bug-report-error">
+            Не удалось отправить
+          </div>
+        )}
       </section>
     </div>
   );
