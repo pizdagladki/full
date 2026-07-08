@@ -26,10 +26,15 @@ interface KothBattleLocationState {
 const SANITY_MS_DEFAULT = 2000;
 const COUNTDOWN_SECONDS_DEFAULT = 5;
 
-// TODO: wire the real recording engine once #52 lands. Honest scaffold: produces a real
-// (empty) WebM-typed Blob rather than pretending to have captured anything.
+// Placeholder attempt clip. The real per-attempt recording is a separate task (the recording
+// engine's captureWin records a ~10s post-outcome edit slot, not the attempt itself, so it is the
+// wrong tool here — recording the live attempt needs its own wiring). Until then this produces a
+// NON-EMPTY WebM-typed Blob: media stores the king-clip bytes as-is (no decode) but rejects a
+// zero-length upload (its size>0 guard, which made every daily/monthly attempt hard-fail with
+// "Не получилось записать попытку"). A tiny non-empty blob lets the attempt record; the stored
+// clip is a stub, so the next challenger's opponent video may not play — the known KotH-clip gap.
 const PLACEHOLDER_CAPTURE: () => Promise<Blob> = () =>
-  Promise.resolve(new Blob([], { type: 'video/webm' }));
+  Promise.resolve(new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], { type: 'video/webm' }));
 
 type Phase = 'sanity' | 'countdown' | 'battle' | 'done';
 
