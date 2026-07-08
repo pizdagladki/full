@@ -466,7 +466,7 @@ export function Battle({
   }, [roomId, maybeStartRingBuffer]);
 
   return (
-    <div data-testid="battle-screen">
+    <div className="arena" data-testid="battle-screen">
       <Cv ref={cvRef} runner={cvRunner} callbacks={cvCallbacks} />
       <RtcComponent
         ref={rtcRef}
@@ -476,9 +476,18 @@ export function Battle({
         pcFactory={rtcPcFactory}
       />
       <Recording ref={recordingRef} />
-      <div data-testid="battle-split">
-        <video ref={localVideoRef} autoPlay muted playsInline data-testid="local-video" />
-        <video ref={remoteVideoRef} autoPlay playsInline data-testid="remote-video" />
+      <div className="arena-split" data-testid="battle-split">
+        <div className="arena-side arena-side--you">
+          <video ref={localVideoRef} autoPlay muted playsInline data-testid="local-video" />
+          <div className="arena-tag">ты</div>
+        </div>
+        <div className="arena-zap" aria-hidden="true">
+          ⚡
+        </div>
+        <div className="arena-side arena-side--foe">
+          <video ref={remoteVideoRef} autoPlay playsInline data-testid="remote-video" />
+          <div className="arena-tag">соперник</div>
+        </div>
         {/* Criterion 1/3 (#160): the Distraction control is gated on `phase === 'battle'` alone —
             it mounts exactly at battle-start (never during sanity/countdown/win-edit/loss-edit/
             done), so its internal 30s unlock timer aligns with `startTimeRef.current`, and it
@@ -487,21 +496,36 @@ export function Battle({
           <DistractionCmp battleStartMs={battleStartMs} battleMetaRef={battleMetaRef} />
         )}
       </div>
-      {phase === 'sanity' && <div data-testid="sanity-check">Checking for your face…</div>}
-      {phase === 'countdown' && <div data-testid="countdown">{countdown}</div>}
-      {phase === 'battle' && <div data-testid="battle-live">Battle!</div>}
+      {phase === 'sanity' && (
+        <div className="arena-status" data-testid="sanity-check">
+          Ищем твоё лицо…
+        </div>
+      )}
+      {phase === 'countdown' && (
+        <div className="arena-countdown" data-testid="countdown" key={countdown}>
+          {countdown}
+        </div>
+      )}
+      {phase === 'battle' && (
+        <div className="arena-live" data-testid="battle-live">
+          НЕ МОРГАЙ!
+        </div>
+      )}
       {phase === 'win-edit' && (
-        <div data-testid="win-edit">Preparing your win clip…</div>
+        <div className="arena-overlay" data-testid="win-edit">
+          🎬 Пишем твой победный клип…
+        </div>
       )}
       {phase === 'loss-edit' && (
-        <div data-testid="loss-edit">
-          <p>Watch the winner&apos;s clip.</p>
+        <div className="arena-overlay" data-testid="loss-edit">
+          <p>Смотри клип победителя.</p>
           <button
             type="button"
+            className="btn-mode btn-mode--unranked arena-skip"
             data-testid="skip-edit"
             onClick={() => skipEditRef.current()}
           >
-            Skip
+            Пропустить
           </button>
         </div>
       )}
