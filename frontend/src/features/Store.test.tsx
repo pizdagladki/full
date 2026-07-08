@@ -178,7 +178,7 @@ describe('criterion 3 — product row pricing', () => {
     await waitFor(() => {
       expect(screen.getByTestId('price-free-11')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('price-free-11')).toHaveTextContent('Free');
+    expect(screen.getByTestId('price-free-11')).toHaveTextContent('Бесплатно');
     expect(screen.queryByTestId('price-money-11')).not.toBeInTheDocument();
   });
 

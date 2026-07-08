@@ -157,8 +157,8 @@ describe('criterion 1 — stats section', () => {
     });
 
     expect(screen.getByText('ELO: 1350')).toBeInTheDocument();
-    expect(screen.getByText('Level: 4')).toBeInTheDocument();
-    expect(screen.getByText('Games played: 42')).toBeInTheDocument();
+    expect(screen.getByText('Уровень: 4')).toBeInTheDocument();
+    expect(screen.getByText('Матчей: 42')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('40');
   });

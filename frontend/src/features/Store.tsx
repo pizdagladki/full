@@ -141,54 +141,54 @@ export function Store({
   // ---------------------------------------------------------------------------
 
   return (
-    <div data-testid="store-screen">
-      <h1>Store</h1>
+    <div className="panel-screen" data-testid="store-screen">
+      <h1 className="panel-title">Магазин</h1>
 
       {/* AdSense banner slot */}
       <div data-testid="ad-slot" aria-hidden="true" />
 
       {catalogLoading ? (
-        <div data-testid="store-loading">Loading store…</div>
+        <div className="results-note" data-testid="store-loading">Открываем магазин…</div>
       ) : catalogError ? (
-        <div data-testid="store-error">Could not load store</div>
+        <div className="results-note" data-testid="store-error">Не удалось загрузить магазин</div>
       ) : catalog && catalog.length === 0 ? (
-        <div data-testid="store-empty">No products available</div>
+        <div className="results-note" data-testid="store-empty">Товаров пока нет</div>
       ) : (
         GROUP_KINDS.map((kind) => {
           const items = (catalog ?? []).filter((product) => product.kind === kind);
           if (items.length === 0) return null;
           return (
-            <section key={kind} aria-label={`${kind} products`}>
-              <h2 data-testid={`group-${kind}`}>
-                {kind === 'distraction' ? 'Distractions' : 'Edits'}
+            <section key={kind} className="sheet" aria-label={`${kind} products`}>
+              <h2 className="sheet-title" data-testid={`group-${kind}`}>
+                {kind === 'distraction' ? 'Отвлекалки' : 'Эдиты'}
               </h2>
-              <ul>
+              <ul className="sheet-list">
                 {items.map((product) => {
                   const owned = inventory.has(product.id);
                   const quantity = inventory.get(product.id);
                   const buyError = buyErrors.get(product.id);
                   const isInsufficient = insufficient.has(product.id);
                   return (
-                    <li key={product.id} data-testid={`product-${product.id}`}>
-                      <span data-testid={`name-${product.id}`}>{product.name}</span>
+                    <li key={product.id} className="store-item" data-testid={`product-${product.id}`}>
+                      <span className="store-name" data-testid={`name-${product.id}`}>{product.name}</span>
 
                       {product.is_free ? (
-                        <span data-testid={`price-free-${product.id}`}>Free</span>
+                        <span className="store-chip store-chip--free" data-testid={`price-free-${product.id}`}>Бесплатно</span>
                       ) : (
-                        <span data-testid={`price-money-${product.id}`}>
+                        <span className="store-chip" data-testid={`price-money-${product.id}`}>
                           ${(product.price_cents / 100).toFixed(2)}
                         </span>
                       )}
 
                       {product.points_price != null && (
-                        <span data-testid={`price-points-${product.id}`}>
+                        <span className="store-chip store-chip--pts" data-testid={`price-points-${product.id}`}>
                           {product.points_price} pts
                         </span>
                       )}
 
                       {owned && (
-                        <span data-testid={`owned-${product.id}`}>
-                          Owned
+                        <span className="store-chip store-chip--owned" data-testid={`owned-${product.id}`}>
+                          Куплено
                           {product.kind === 'distraction' && (
                             <span data-testid={`qty-${product.id}`}> x{quantity}</span>
                           )}
@@ -198,23 +198,25 @@ export function Store({
                       <button
                         type="button"
                         data-testid={`buy-money-${product.id}`}
+                        className="btn-mini"
                         onClick={() => void handleBuyWithMoney(product.id)}
                       >
-                        Buy with money
+                        Купить за деньги
                       </button>
 
                       {product.points_price != null && (
                         <button
                           type="button"
                           data-testid={`buy-points-${product.id}`}
+                          className="btn-mini btn-mini--pts"
                           onClick={() => void handleBuyWithPoints(product.id, product.kind)}
                         >
-                          Buy with points
+                          Купить за поинты
                         </button>
                       )}
 
                       {isInsufficient && (
-                        <div data-testid={`insufficient-${product.id}`}>Not enough points</div>
+                        <div className="results-note" data-testid={`insufficient-${product.id}`}>Не хватает поинтов</div>
                       )}
                       {buyError && <div data-testid={`buy-error-${product.id}`}>{buyError}</div>}
                     </li>
