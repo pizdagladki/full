@@ -107,7 +107,7 @@ describe('App routes', () => {
 
   it('renders Results placeholder at /results when authenticated', () => {
     renderWithAuth(routes, '/results');
-    expect(screen.getByText('Results')).toBeInTheDocument();
+    expect(screen.getByTestId('results-screen')).toBeInTheDocument();
   });
 
   it('renders Profile placeholder at /profile when authenticated', () => {

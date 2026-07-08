@@ -108,7 +108,7 @@ describe('criterion 1 — outcome, elo delta, progress bar, duration', () => {
       state: { result: 'win', durationMs: 125_000, eloDelta: 18, ranked: true },
     });
 
-    expect(screen.getByTestId('result-outcome')).toHaveTextContent('You win!');
+    expect(screen.getByTestId('result-outcome')).toHaveTextContent('Победа!');
     expect(screen.getByTestId('elo-delta')).toHaveTextContent('+18');
     expect(screen.getByTestId('match-duration')).toHaveTextContent('125s');
 
@@ -126,7 +126,7 @@ describe('criterion 1 — outcome, elo delta, progress bar, duration', () => {
       state: { result: 'loss', durationMs: 60_000, eloDelta: -12, ranked: true },
     });
 
-    expect(screen.getByTestId('result-outcome')).toHaveTextContent('You lose');
+    expect(screen.getByTestId('result-outcome')).toHaveTextContent('Поражение');
     expect(screen.getByTestId('elo-delta')).toHaveTextContent('-12');
   });
 
@@ -135,7 +135,7 @@ describe('criterion 1 — outcome, elo delta, progress bar, duration', () => {
     const ratingsApi = makeRatingsApi({ elo: 1000, level: 2, games_played: 5 });
     renderResults({ ratingsApi, state: { result: 'win', durationMs: 1000 } });
 
-    expect(screen.getByTestId('result-outcome')).not.toHaveTextContent('You lose');
+    expect(screen.getByTestId('result-outcome')).not.toHaveTextContent('Поражение');
   });
 
   it('criterion-1: shows a neutral placeholder for ELO delta and duration when absent', () => {
