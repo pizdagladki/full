@@ -80,13 +80,13 @@ describe('App routes', () => {
   it('renders Login at root /', () => {
     // criterion: 1 — Login screen renders at the root route for unauthenticated users
     renderWithAuth(routes, '/', unauthenticatedState);
-    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.getByText('Войти через Google')).toBeInTheDocument();
   });
 
   it('renders Login at /auth/callback', () => {
     // criterion: 2 — callback path also renders Login for code exchange (unauthenticated)
     renderWithAuth(routes, '/auth/callback', unauthenticatedState);
-    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.getByText('Войти через Google')).toBeInTheDocument();
   });
 
   it('renders Home screen at /home when authenticated', () => {
@@ -146,7 +146,7 @@ describe('App routes', () => {
         <RouterProvider router={router} />
       </AuthContext.Provider>,
     );
-    expect(screen.queryByText('Sign in with Google')).not.toBeInTheDocument();
+    expect(screen.queryByText('Войти через Google')).not.toBeInTheDocument();
   });
 
   it('redirects unauthenticated user from /home to / — criterion 3 guard', () => {
@@ -159,6 +159,6 @@ describe('App routes', () => {
     };
     renderWithAuth(routes, '/home', unauthState);
     expect(screen.queryByTestId('home-screen')).not.toBeInTheDocument();
-    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.getByText('Войти через Google')).toBeInTheDocument();
   });
 });

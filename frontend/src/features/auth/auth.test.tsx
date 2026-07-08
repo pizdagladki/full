@@ -94,7 +94,7 @@ describe('Login — code exchange success', () => {
     renderLogin({ search: '?code=test_code&state=test-state', authApi: api });
 
     // Initially shows loading
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText('Секунду…')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText('Home')).toBeInTheDocument();
@@ -110,7 +110,7 @@ describe('Login — code exchange success', () => {
     renderLogin({ authApi: api });
 
     await waitFor(() => {
-      expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+      expect(screen.getByText('Войти через Google')).toBeInTheDocument();
     });
 
     expect(api.googleLogin).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ describe('Login — 401 handling', () => {
 
     renderLogin({ search: '?code=bad_code&state=test-state', authApi: api });
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText('Секунду…')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -279,7 +279,7 @@ describe('Login — network failure', () => {
 
     renderLogin({ search: '?code=any_code&state=test-state', authApi: api });
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText('Секунду…')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -472,7 +472,7 @@ describe('Login — redirect authenticated user', () => {
     await waitFor(() => {
       expect(screen.getByText('Home')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Sign in with Google')).not.toBeInTheDocument();
+    expect(screen.queryByText('Войти через Google')).not.toBeInTheDocument();
   });
 
   it('criterion-3 guard: unauthenticated user visiting Login (/) sees the login screen', () => {
@@ -486,7 +486,7 @@ describe('Login — redirect authenticated user', () => {
       { initialEntries: ['/'] },
     );
     render(<RouterProvider router={router} />);
-    expect(screen.getByText('Sign in with Google')).toBeInTheDocument();
+    expect(screen.getByText('Войти через Google')).toBeInTheDocument();
     expect(screen.queryByText('Home')).not.toBeInTheDocument();
   });
 });
